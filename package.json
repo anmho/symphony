@@ -1,10 +1,24 @@
 {
   "name": "@anmho/symphony",
   "version": "0.1.0",
-  "description": "TypeScript implementation of a Symphony-style Codex orchestration service.",
+  "description": "Local TypeScript Symphony runner for Linear-driven Codex app-server work orchestration.",
   "type": "commonjs",
   "license": "UNLICENSED",
   "packageManager": "bun@1.3.14",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anmho/symphony.git"
+  },
+  "homepage": "https://www.npmjs.com/package/@anmho/symphony",
+  "bugs": {
+    "url": "https://github.com/anmho/symphony/issues"
+  },
+  "keywords": [
+    "codex",
+    "linear",
+    "symphony",
+    "worktrees"
+  ],
   "files": [
     "dist",
     "README.md",

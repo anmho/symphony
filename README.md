@@ -1,4 +1,8 @@
-# Symphony TypeScript v1
+# Symphony
+
+[GitHub: anmho/symphony](https://github.com/anmho/symphony) · [npm: @anmho/symphony](https://www.npmjs.com/package/@anmho/symphony)
+
+Local TypeScript Symphony runner for Linear-driven Codex app-server work orchestration.
 
 This repo is a runnable TypeScript implementation of a Symphony-style harness:
 
