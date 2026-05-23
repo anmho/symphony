@@ -14,6 +14,10 @@ This repo is a runnable TypeScript implementation of a Symphony-style harness:
 
 The default posture is high-trust local execution. Symphony is intended for repos and machines where unattended Codex work is acceptable.
 
+## Docs
+
+- [Symphony smoke](docs/symphony-smoke.md)
+
 ## Requirements
 
 - Node 22+
