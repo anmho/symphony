@@ -1,6 +1,6 @@
-import { loadWorkflowConfig } from "./config";
-import { fetchCandidateIssues, fetchIssueById, fetchTerminalIssues, writeRunnerComment } from "./linear";
-import { logger as defaultLogger } from "./logger";
+import { loadWorkflowConfig } from "./config.js";
+import { fetchCandidateIssues, fetchIssueById, fetchTerminalIssues, writeRunnerComment } from "./linear.js";
+import { logger as defaultLogger } from "./logger.js";
 import {
   continuationPrompt,
   isActiveState,
@@ -9,24 +9,26 @@ import {
   millisUntil,
   nextFailureBackoffMs,
   sortIssuesForDispatch
-} from "./policy";
-import { renderIssuePrompt } from "./prompt";
-import { isGateParked } from "./rateLimit";
-import { runCodexTurn } from "./codexRpc";
-import { runHook, type HookName } from "./hooks";
-import { ensureWorkspace, removeWorkspace, workspaceInfoForIssue, workspacePathExists } from "./workspace";
+} from "./policy.js";
+import { renderIssuePrompt } from "./prompt.js";
+import { isGateParked } from "./rateLimit.js";
+import { runCodexTurn } from "./codexRpc.js";
+import { AgentWorkEventStore, workEventFromCodexEvent } from "./events.js";
+import { runHook, type HookName } from "./hooks.js";
+import { ensureWorkspace, removeWorkspace, workspaceInfoForIssue, workspacePathExists } from "./workspace.js";
 import type {
   CodexRunEvent,
   CodexRunInput,
   CodexTurnResult,
   CodexUsageTotals,
   EffectiveWorkflowConfig,
+  AgentWorkEvent,
   LiveSession,
   NormalizedIssue,
   OrchestratorSnapshot,
   RunAttempt,
   WorkspaceInfo
-} from "./types";
+} from "./types.js";
 
 export interface OrchestratorDependencies {
   loadWorkflowConfig: (workflowPath: string) => Promise<EffectiveWorkflowConfig>;
@@ -53,6 +55,7 @@ export interface OrchestratorDependencies {
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   logger: Pick<typeof defaultLogger, "info" | "warn" | "error" | "debug">;
+  eventStore: AgentWorkEventStore;
 }
 
 export interface OrchestratorOptions {
@@ -66,10 +69,12 @@ interface RunningEntry {
   abortController: AbortController;
   promise: Promise<void>;
   cancelReason: string | null;
+  bypassRateLimitGate: boolean;
 }
 
 export class Orchestrator {
   private readonly deps: OrchestratorDependencies;
+  private readonly eventStore: AgentWorkEventStore;
   private readonly workflowPath: string;
   private readonly startedAtMs: number;
   private lastKnownGoodConfig: EffectiveWorkflowConfig | null = null;
@@ -99,6 +104,7 @@ export class Orchestrator {
   constructor(options: OrchestratorOptions, deps: Partial<OrchestratorDependencies> = {}) {
     this.workflowPath = options.workflowPath;
     this.startedAtMs = (deps.now ?? Date.now)();
+    const now = deps.now ?? Date.now;
     this.deps = {
       loadWorkflowConfig,
       fetchCandidateIssues,
@@ -112,11 +118,13 @@ export class Orchestrator {
       runHook,
       renderIssuePrompt,
       runCodexTurn,
-      now: Date.now,
+      now,
       sleep,
       logger: defaultLogger,
+      eventStore: deps.eventStore ?? new AgentWorkEventStore(this.workflowPath, now),
       ...deps
     };
+    this.eventStore = this.deps.eventStore;
   }
 
   async start(): Promise<void> {
@@ -164,6 +172,56 @@ export class Orchestrator {
       lastTickAtMs: this.lastTickAtMs,
       lastConfigError: this.lastConfigError
     };
+  }
+
+  events(issue: string | null, cursor: number | null, limit: number | null): AgentWorkEvent[] {
+    return this.eventStore.query({ issue, cursor, limit });
+  }
+
+  queueSteer(issue: string, text: string): { queued: boolean; issue: string } {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error("empty_steer_instruction");
+    }
+    this.eventStore.queueSteer(issue, trimmed);
+    const runningEntry = [...this.running.values()].find((entry) =>
+      entry.issue.identifier === issue || entry.issue.id === issue
+    );
+    if (runningEntry) {
+      runningEntry.session.queuedSteerCount = this.eventStore.queuedSteerCount(runningEntry.issue.identifier);
+      this.appendRunnerEvent(runningEntry, "operator guidance queued");
+    }
+    return { queued: true, issue };
+  }
+
+  resumeIssue(issue: string): { resumed: boolean; issue: string } {
+    const now = this.deps.now();
+    for (const attempt of this.retryAttempts.values()) {
+      if (attempt.identifier === issue || attempt.issueId === issue) {
+        attempt.dueAtMs = now;
+        return { resumed: true, issue: attempt.identifier };
+      }
+    }
+    return { resumed: false, issue };
+  }
+
+  resumeParkedRateLimitedRuns(): number {
+    const now = this.deps.now();
+    let resumed = 0;
+    this.codexRateLimit = {
+      resumeAfterMs: null,
+      reason: null,
+      updatedAtMs: null
+    };
+
+    for (const attempt of this.retryAttempts.values()) {
+      if (attempt.error === "codex_rate_limited") {
+        attempt.dueAtMs = now;
+        resumed += 1;
+      }
+    }
+
+    return resumed;
   }
 
   private async runTick(): Promise<void> {
@@ -267,17 +325,26 @@ export class Orchestrator {
       }
 
       this.retryAttempts.delete(attempt.issueId);
-      this.dispatchIssue(config, issue, attempt.attempt);
+      this.dispatchIssue(config, issue, attempt.attempt, attempt.error === "codex_rate_limited");
     }
   }
 
-  private dispatchIssue(config: EffectiveWorkflowConfig, issue: NormalizedIssue, attempt: number): void {
+  private dispatchIssue(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    attempt: number,
+    bypassRateLimitGate = false
+  ): void {
     this.claimed.add(issue.id);
     const abortController = new AbortController();
     const session: LiveSession = {
       issueId: issue.id,
       identifier: issue.identifier,
+      repoKey: null,
       workspacePath: null,
+      eventLogPath: this.eventStore.logPathForIssue(issue.identifier),
+      latestEventCursor: this.eventStore.latestCursorForIssue(issue.identifier),
+      queuedSteerCount: this.eventStore.queuedSteerCount(issue.identifier),
       threadId: null,
       turnId: null,
       codexAppServerPid: null,
@@ -296,7 +363,8 @@ export class Orchestrator {
       session,
       abortController,
       promise: Promise.resolve(),
-      cancelReason: null
+      cancelReason: null,
+      bypassRateLimitGate
     };
 
     entry.promise = this.runIssue(config, issue, attempt, entry).catch(async (error: unknown) => {
@@ -306,6 +374,7 @@ export class Orchestrator {
       }
       const message = error instanceof Error ? error.message : String(error);
       this.deps.logger.error({ issue: issue.identifier, error: message }, "issue run failed");
+      this.appendRunnerEvent(entry, message, null, "error");
       this.scheduleRetry(config, issue, attempt + 1, message);
     }).finally(() => {
       this.codexTotals.runtimeMs += Math.max(this.deps.now() - session.startedAtMs, 0);
@@ -316,6 +385,7 @@ export class Orchestrator {
     });
 
     this.running.set(issue.id, entry);
+    this.appendRunnerEvent(entry, "issue claimed by Symphony");
   }
 
   private async runIssue(
@@ -335,10 +405,11 @@ export class Orchestrator {
 
       config = await this.reloadConfig(false);
       const gateDelay = millisUntil(this.codexRateLimit.resumeAfterMs ?? 0, this.deps.now());
-      if (gateDelay > 0) {
-        this.scheduleRetry(config, issue, attempt + 1, this.codexRateLimit.reason ?? "codex_rate_limited", this.codexRateLimit.resumeAfterMs ?? undefined);
+      if (gateDelay > 0 && !entry.bypassRateLimitGate) {
+        this.scheduleRateLimitProbe(config, issue, attempt + 1, this.codexRateLimit.reason ?? "codex_rate_limited", this.codexRateLimit.resumeAfterMs);
         return;
       }
+      entry.bypassRateLimitGate = false;
 
       const latestIssue = await this.deps.fetchIssueById(config, issue.id);
       if (!latestIssue) {
@@ -358,7 +429,9 @@ export class Orchestrator {
       }
 
       const workspace = await this.deps.prepareWorkspace(config, issue);
+      entry.session.repoKey = workspace.repoKey;
       entry.session.workspacePath = workspace.path;
+      entry.session.eventLogPath = this.eventStore.logPathForIssue(issue.identifier);
       if (workspace.createdNow) {
         await this.deps.runHook(config, "afterCreate", issue, workspace);
       }
@@ -372,7 +445,15 @@ export class Orchestrator {
           : `Symphony continuing work, turn ${turnIndex + 1}.`
       );
 
-      const prompt = turnIndex === 0 ? await this.deps.renderIssuePrompt(config, issue, attempt || null) : continuationPrompt(issue);
+      const queuedSteer = this.eventStore.consumeSteer(issue.identifier);
+      entry.session.queuedSteerCount = this.eventStore.queuedSteerCount(issue.identifier);
+      if (queuedSteer) {
+        this.appendRunnerEvent(entry, "operator guidance attached to next turn", {
+          queuedAtMs: queuedSteer.queuedAtMs
+        });
+      }
+      const basePrompt = turnIndex === 0 ? await this.deps.renderIssuePrompt(config, issue, attempt || null) : continuationPrompt(issue);
+      const prompt = queuedSteer ? `${basePrompt}\n\n## Operator Guidance\n\n${queuedSteer.text}` : basePrompt;
       const result = await this.deps.runCodexTurn(
         {
           config,
@@ -412,11 +493,12 @@ export class Orchestrator {
           issue.id,
           `Symphony parked Codex work until ${new Date(resumeAfterMs).toISOString()} because Codex reported a rate limit.`
         );
-        this.scheduleRetry(config, issue, attempt + 1, this.codexRateLimit.reason, resumeAfterMs);
+        this.scheduleRateLimitProbe(config, issue, attempt + 1, this.codexRateLimit.reason, resumeAfterMs);
         return;
       }
 
       if (result.status === "failed") {
+        this.appendRunnerEvent(entry, result.error ?? "codex_failed", null, "error");
         throw new Error(result.error ?? "codex_failed");
       }
     }
@@ -447,6 +529,19 @@ export class Orchestrator {
     this.claimed.add(issue.id);
   }
 
+  private scheduleRateLimitProbe(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    attempt: number,
+    error: string | null,
+    resumeAfterMs: number | null
+  ): void {
+    const now = this.deps.now();
+    const probeDueAtMs = now + rateLimitProbeDelayMs(config.agent.rateLimitProbeIntervalMs, issue.id);
+    const dueAtMs = resumeAfterMs ? Math.min(resumeAfterMs, probeDueAtMs) : probeDueAtMs;
+    this.scheduleRetry(config, issue, attempt, error, dueAtMs);
+  }
+
   private releaseIssue(issueId: string): void {
     this.retryAttempts.delete(issueId);
     this.claimed.delete(issueId);
@@ -475,8 +570,9 @@ export class Orchestrator {
   }
 
   private recordCodexEvent(entry: RunningEntry, event: CodexRunEvent): void {
+    const timestampMs = this.deps.now();
     entry.session.lastCodexEvent = event.type;
-    entry.session.lastCodexTimestamp = this.deps.now();
+    entry.session.lastCodexTimestamp = timestampMs;
     entry.session.lastCodexMessage = JSON.stringify(event).slice(0, 1000);
     if (event.type === "process_started") {
       entry.session.codexAppServerPid = event.pid;
@@ -491,6 +587,52 @@ export class Orchestrator {
         updatedAtMs: this.deps.now()
       };
     }
+    const normalized = workEventFromCodexEvent(
+      {
+        issueId: entry.issue.id,
+        identifier: entry.issue.identifier,
+        repoKey: entry.session.repoKey,
+        workspacePath: entry.session.workspacePath,
+        threadId: entry.session.threadId,
+        turnId: entry.session.turnId
+      },
+      event
+    );
+    const workEvent = this.eventStore.append({
+      issueId: entry.issue.id,
+      identifier: entry.issue.identifier,
+      repoKey: entry.session.repoKey,
+      workspacePath: entry.session.workspacePath,
+      threadId: entry.session.threadId,
+      turnId: entry.session.turnId,
+      ...normalized,
+      timestampMs
+    });
+    entry.session.latestEventCursor = workEvent.cursor;
+  }
+
+  private appendRunnerEvent(
+    entry: RunningEntry,
+    summary: string,
+    payload: Record<string, unknown> | null = null,
+    level: AgentWorkEvent["level"] = "info"
+  ): void {
+    const event = this.eventStore.append({
+      issueId: entry.issue.id,
+      identifier: entry.issue.identifier,
+      repoKey: entry.session.repoKey,
+      workspacePath: entry.session.workspacePath,
+      threadId: entry.session.threadId,
+      turnId: entry.session.turnId,
+      type: level === "error" ? "error" : "runner",
+      level,
+      summary,
+      payload
+    });
+    entry.session.lastCodexEvent = event.type;
+    entry.session.lastCodexTimestamp = event.timestampMs;
+    entry.session.lastCodexMessage = event.summary;
+    entry.session.latestEventCursor = event.cursor;
   }
 
   private scheduleNextTick(intervalMs: number): void {
@@ -516,4 +658,17 @@ export function createDefaultOrchestrator(workflowPath: string): Orchestrator {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function rateLimitProbeDelayMs(intervalMs: number, seed: string): number {
+  const jitterWindowMs = Math.max(Math.floor(intervalMs * 0.2), 1);
+  return intervalMs + (hashString(seed) % jitterWindowMs);
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
 }

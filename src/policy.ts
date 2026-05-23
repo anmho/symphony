@@ -1,4 +1,4 @@
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types";
+import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
 
 export function normalizeState(value: string): string {
   return value.trim().toLowerCase();

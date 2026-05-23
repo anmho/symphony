@@ -1,4 +1,4 @@
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types";
+import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
 
 interface GraphQLResponse<T> {
   data?: T;

@@ -3,12 +3,23 @@ import { Command } from "commander";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { loadWorkflowConfig, renderConfigSummary, resolveWorkflowPath } from "./config";
-import { logger } from "./logger";
-import { createDefaultOrchestrator } from "./orchestrator";
-import { runCommand } from "./process";
-import { DEFAULT_STATUS_PORT, fetchDaemonStatus, startStatusServer } from "./status";
+import { fileURLToPath } from "node:url";
+import { spawn, spawnSync } from "node:child_process";
+import { loadWorkflowConfig, renderConfigSummary, resolveWorkflowPath } from "./config.js";
+import { logger } from "./logger.js";
+import { createDefaultOrchestrator } from "./orchestrator.js";
+import { runCommand } from "./process.js";
+import {
+  DEFAULT_STATUS_PORT,
+  fetchDaemonEvents,
+  fetchDaemonStatus,
+  queueSteer,
+  resumeIssue,
+  resumeRateLimitedRuns,
+  startStatusServer
+} from "./status.js";
+import { runStatusWatch } from "./watch.js";
+import type { AgentWorkEvent } from "./types.js";
 
 interface CliOptions {
   workflow?: string;
@@ -61,6 +72,57 @@ program.command("status").description("Read the local runner status endpoint.").
   console.log(JSON.stringify(status, null, 2));
 });
 
+program.command("logs")
+  .description("Show the public work stream for an agent.")
+  .argument("[issue]", "issue identifier or id, for example ANM-123")
+  .option("-a, --all", "show all issue streams")
+  .option("-f, --follow", "follow new events")
+  .option("--json", "print JSON events")
+  .option("--limit <count>", "events to read per poll", "100")
+  .option("-i, --interval <ms>", "follow poll interval in milliseconds", "1000")
+  .action(async (issue: string | undefined, options: { all?: boolean; follow?: boolean; json?: boolean; limit: string; interval: string }) => {
+    await runLogsCommand(issue ?? null, options, program.opts<CliOptions>());
+  });
+
+program.command("steer")
+  .description("Queue operator guidance for the next Codex turn on an issue.")
+  .argument("<issue>", "issue identifier or id, for example ANM-123")
+  .argument("<instruction...>", "guidance text")
+  .action(async (issue: string, instruction: string[]) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await queueSteer(port, issue, instruction.join(" "));
+    if (!result) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}, or this runner does not support steering.`);
+      return;
+    }
+    console.log(`Queued steering for ${result.issue}.`);
+  });
+
+program.command("watch")
+  .description("Open a k9s-style terminal monitor for Symphony agents.")
+  .option("-i, --interval <ms>", "refresh interval in milliseconds", "2000")
+  .action(async (options: { interval: string }) => {
+    if (reexecInteractiveWatchWithBun()) {
+      return;
+    }
+    await runStatusWatch({
+      port: readStatusPort(program.opts<CliOptions>()),
+      intervalMs: readIntervalMs(options.interval)
+    });
+  });
+
+program.command("resume")
+  .description("Clear the in-memory Codex rate-limit gate and retry parked runs now.")
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await resumeRateLimitedRuns(port);
+    if (!result) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}, or this runner does not support resume.`);
+      return;
+    }
+    console.log(`Resumed ${result.resumed} rate-limited run${result.resumed === 1 ? "" : "s"}.`);
+  });
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   logger.error({ error }, "symphony command failed");
   process.exitCode = 1;
@@ -112,7 +174,16 @@ async function runForeground(options: CliOptions): Promise<void> {
   const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
   const orchestrator = createDefaultOrchestrator(workflowPath);
-  const statusServer = await startStatusServer(() => orchestrator.snapshot(), statusPort);
+  const statusServer = await startStatusServer(() => orchestrator.snapshot(), statusPort, {
+    getEvents: (query) => orchestrator.events(query.issue, query.cursor, query.limit),
+    queueSteer: (issue, text) => orchestrator.queueSteer(issue, text),
+    resumeIssue: (issue) => orchestrator.resumeIssue(issue),
+    resumeRateLimitedRuns: async () => {
+      const resumed = orchestrator.resumeParkedRateLimitedRuns();
+      await orchestrator.tick();
+      return { resumed };
+    }
+  });
 
   const stop = async () => {
     logger.info("stopping symphony");
@@ -127,6 +198,40 @@ async function runForeground(options: CliOptions): Promise<void> {
 
   logger.info({ workflowPath, statusPort }, "starting symphony");
   await orchestrator.start();
+}
+
+async function runLogsCommand(
+  issue: string | null,
+  options: { all?: boolean; follow?: boolean; json?: boolean; limit: string; interval: string },
+  cliOptions: CliOptions
+): Promise<void> {
+  if (!issue && !options.all) {
+    throw new Error("logs_requires_issue_or_all");
+  }
+  const port = readStatusPort(cliOptions);
+  const limit = readPositiveInteger(options.limit, "limit");
+  const intervalMs = readIntervalMs(options.interval);
+  let cursor: number | null = null;
+
+  while (true) {
+    const events = await fetchDaemonEvents(port, {
+      issue: options.all ? null : issue,
+      cursor,
+      limit
+    });
+    if (!events) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}, or this runner does not support logs.`);
+      return;
+    }
+    for (const event of events) {
+      process.stdout.write(options.json ? `${JSON.stringify(event)}\n` : `${formatAgentWorkEvent(event, Boolean(options.all))}\n`);
+      cursor = Math.max(cursor ?? 0, event.cursor);
+    }
+    if (!options.follow) {
+      return;
+    }
+    await wait(intervalMs);
+  }
 }
 
 async function stopBackground(options: CliOptions): Promise<void> {
@@ -173,6 +278,22 @@ function readStatusPort(options: CliOptions): number {
   return port;
 }
 
+function readIntervalMs(value: string): number {
+  const intervalMs = Number(value);
+  if (!Number.isInteger(intervalMs) || intervalMs < 250) {
+    throw new Error(`invalid_watch_interval: ${value}`);
+  }
+  return intervalMs;
+}
+
+function readPositiveInteger(value: string, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`invalid_${name}: ${value}`);
+  }
+  return parsed;
+}
+
 async function checkedRun(command: string, args: string[], cwd: string): Promise<void> {
   const result = await runCommand(command, args, { cwd, timeoutMs: 120000 });
   if (result.exitCode !== 0) {
@@ -187,11 +308,29 @@ async function checkedRun(command: string, args: string[], cwd: string): Promise
 }
 
 function entrypointPath(): string {
-  return __filename;
+  return fileURLToPath(import.meta.url);
+}
+
+function reexecInteractiveWatchWithBun(): boolean {
+  if (process.versions.bun || process.env.SYMPHONY_BUN_REEXEC === "1" || !process.stdin.isTTY || !process.stdout.isTTY) {
+    return false;
+  }
+  const result = spawnSync("bun", [entrypointPath(), ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      SYMPHONY_BUN_REEXEC: "1"
+    }
+  });
+  if (result.error) {
+    return false;
+  }
+  process.exitCode = result.status ?? 0;
+  return true;
 }
 
 function packageRoot(): string {
-  let current = __dirname;
+  let current = path.dirname(fileURLToPath(import.meta.url));
   while (current !== path.dirname(current)) {
     if (existsSync(path.join(current, "package.json"))) {
       return current;
@@ -199,6 +338,13 @@ function packageRoot(): string {
     current = path.dirname(current);
   }
   throw new Error("package_root_not_found");
+}
+
+function formatAgentWorkEvent(event: AgentWorkEvent, includeIssue: boolean): string {
+  const time = new Date(event.timestampMs).toISOString();
+  const prefix = includeIssue ? `${event.identifier} ` : "";
+  const thread = event.turnId ? ` turn=${event.turnId}` : event.threadId ? ` thread=${event.threadId}` : "";
+  return `${time} ${prefix}${event.level.toUpperCase()} ${event.type}${thread} ${event.summary}`;
 }
 
 function stateDir(): string {

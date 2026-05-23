@@ -1,5 +1,5 @@
-import type { EffectiveWorkflowConfig, NormalizedIssue, WorkspaceInfo } from "./types";
-import { runShellCommand } from "./process";
+import type { EffectiveWorkflowConfig, NormalizedIssue, WorkspaceInfo } from "./types.js";
+import { runShellCommand } from "./process.js";
 
 export type HookName = "afterCreate" | "beforeRun" | "afterRun" | "beforeRemove";
 

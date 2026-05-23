@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchCandidateIssues } from "../src/linear";
-import type { EffectiveWorkflowConfig } from "../src/types";
+import { fetchCandidateIssues } from "../src/linear.js";
+import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {
   afterEach(() => {

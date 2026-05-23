@@ -1,8 +1,8 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import type { EffectiveWorkflowConfig, NormalizedIssue, WorkspaceInfo } from "./types";
-import { branchNameForIssue, resolveIssueRepoRoute, sanitizeWorkspaceKey } from "./policy";
-import { runCommand } from "./process";
+import type { EffectiveWorkflowConfig, NormalizedIssue, WorkspaceInfo } from "./types.js";
+import { branchNameForIssue, resolveIssueRepoRoute, sanitizeWorkspaceKey } from "./policy.js";
+import { runCommand } from "./process.js";
 
 export async function ensureWorkspace(
   config: EffectiveWorkflowConfig,

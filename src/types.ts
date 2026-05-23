@@ -64,6 +64,7 @@ export interface AgentConfig {
   maxConcurrentAgents: number;
   maxTurns: number;
   maxRetryBackoffMs: number;
+  rateLimitProbeIntervalMs: number;
   maxConcurrentAgentsByState: Record<string, number>;
 }
 
@@ -141,7 +142,11 @@ export interface RunAttempt {
 export interface LiveSession {
   issueId: string;
   identifier: string;
+  repoKey: string | null;
   workspacePath: string | null;
+  eventLogPath: string | null;
+  latestEventCursor: number | null;
+  queuedSteerCount: number;
   threadId: string | null;
   turnId: string | null;
   codexAppServerPid: number | null;
@@ -166,6 +171,43 @@ export interface OrchestratorSnapshot {
   codexRateLimit: CodexRateLimitSnapshot;
   lastTickAtMs: number | null;
   lastConfigError: string | null;
+}
+
+export type AgentWorkEventType =
+  | "runner"
+  | "process"
+  | "stderr"
+  | "thread"
+  | "turn"
+  | "assistant_delta"
+  | "assistant_message"
+  | "command"
+  | "tool"
+  | "diff"
+  | "reasoning_summary"
+  | "rate_limited"
+  | "error"
+  | "notification";
+
+export interface AgentWorkEvent {
+  cursor: number;
+  timestampMs: number;
+  issueId: string;
+  identifier: string;
+  repoKey: string | null;
+  workspacePath: string | null;
+  threadId: string | null;
+  turnId: string | null;
+  type: AgentWorkEventType;
+  level: "info" | "warn" | "error";
+  summary: string;
+  payload: JsonObject | null;
+}
+
+export interface QueuedSteer {
+  issue: string;
+  text: string;
+  queuedAtMs: number;
 }
 
 export interface CodexRunInput {

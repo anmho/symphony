@@ -1,8 +1,8 @@
 {
   "name": "@anmho/symphony",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local TypeScript Symphony runner for Linear-driven Codex app-server work orchestration.",
-  "type": "commonjs",
+  "type": "module",
   "license": "UNLICENSED",
   "packageManager": "bun@1.3.14",
   "repository": {
@@ -38,12 +38,15 @@
     "start": "tsx src/index.ts start",
     "stop": "tsx src/index.ts stop",
     "status": "tsx src/index.ts status",
+    "resume": "tsx src/index.ts resume",
+    "watch": "tsx src/index.ts watch",
     "validate-config": "tsx src/index.ts validate-config",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "validate": "bun run typecheck && bun run test"
   },
   "dependencies": {
+    "@opentui/core": "0.2.15",
     "commander": "^14.0.2",
     "liquidjs": "^10.27.0",
     "pino": "^10.1.0",

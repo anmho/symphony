@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isGateParked, mergeGateState, rateLimitUntilFromSnapshot } from "../src/rateLimit";
+import { isGateParked, mergeGateState, rateLimitUntilFromSnapshot } from "../src/rateLimit.js";
 
 describe("rate limits", () => {
   it("extracts the farthest reset from exhausted windows", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { workspaceInfoForIssue } from "../src/workspace";
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types";
+import { workspaceInfoForIssue } from "../src/workspace.js";
+import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
 
 describe("workspace routing", () => {
   it("uses repo-key nested workspaces for routed issues", () => {

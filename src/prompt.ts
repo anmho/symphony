@@ -1,5 +1,5 @@
 import { Liquid } from "liquidjs";
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types";
+import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
 
 export async function renderIssuePrompt(
   config: EffectiveWorkflowConfig,

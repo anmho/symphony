@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
-import type { EffectiveWorkflowConfig, JsonObject, WorkflowDefinition } from "./types";
+import type { EffectiveWorkflowConfig, JsonObject, WorkflowDefinition } from "./types.js";
 
 const DEFAULT_ACTIVE_STATES = ["Todo", "In Progress"];
 const DEFAULT_TERMINAL_STATES = ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"];
@@ -73,6 +73,7 @@ const RawWorkflowConfigSchema = z
         max_concurrent_agents: z.number().int().positive().optional(),
         max_turns: z.number().int().positive().optional(),
         max_retry_backoff_ms: z.number().int().positive().optional(),
+        rate_limit_probe_interval_ms: z.number().int().positive().optional(),
         max_concurrent_agents_by_state: z.record(z.string(), z.number().int().positive()).optional()
       })
       .optional(),
@@ -240,6 +241,7 @@ export function resolveWorkflowConfig(
       maxConcurrentAgents: agent.max_concurrent_agents ?? 5,
       maxTurns: agent.max_turns ?? 20,
       maxRetryBackoffMs: agent.max_retry_backoff_ms ?? 300000,
+      rateLimitProbeIntervalMs: agent.rate_limit_probe_interval_ms ?? 300000,
       maxConcurrentAgentsByState: normalizeConcurrencyMap(agent.max_concurrent_agents_by_state ?? {})
     },
     codex: {

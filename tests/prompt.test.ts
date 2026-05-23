@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderIssuePrompt } from "../src/prompt";
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types";
+import { renderIssuePrompt } from "../src/prompt.js";
+import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
 
 describe("prompt rendering", () => {
   it("renders Liquid issue fields", async () => {

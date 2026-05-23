@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { rateLimitUntilFromSnapshot } from "./rateLimit";
-import type { CodexRunEvent, CodexRunInput, CodexTurnResult } from "./types";
+import { rateLimitUntilFromSnapshot } from "./rateLimit.js";
+import type { CodexRunEvent, CodexRunInput, CodexTurnResult } from "./types.js";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -105,7 +105,9 @@ class CodexJsonRpcClient {
         name: "symphony",
         version: "0.1.0"
       },
-      capabilities: null
+      capabilities: {
+        experimentalApi: true
+      }
     });
   }
 
@@ -207,9 +209,7 @@ class CodexJsonRpcClient {
         }
       }
 
-      if (notification.method === "item/agentMessage/delta") {
-        this.onEvent?.({ type: "notification", method: notification.method, params: notification.params });
-      }
+      this.onEvent?.({ type: "notification", method: notification.method, params: notification.params });
 
       if (Date.now() - startedAt > 24 * 60 * 60 * 1000) {
         throw new Error("codex_turn_timeout");

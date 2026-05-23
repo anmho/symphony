@@ -86,6 +86,35 @@ Check workflow status:
 symphony status
 ```
 
+Monitor agents in a k9s-style terminal UI:
+
+```sh
+symphony watch
+```
+
+`symphony watch` reads the same local status endpoint as `symphony status`, but presents agents as a continuously refreshed resource table. It supports `j/k` or arrow navigation, `:` command mode, `/` filtering, `?` help, `d` describe, `l` logs, `s` steer, `r` retry/resume selected, `ctrl-r` refresh, and `q` quit.
+
+Follow an agent's public work stream from the CLI:
+
+```sh
+symphony logs ANM-123 --follow
+symphony logs --all --follow
+```
+
+The work stream includes public assistant message deltas, command/tool lifecycle events, runner events, errors, and rate-limit notices. It does not expose hidden chain-of-thought; reasoning appears only when Codex emits an explicit public summary.
+
+Queue guidance for the next turn on an issue:
+
+```sh
+symphony steer ANM-123 "focus on the keyboard regression before touching tests"
+```
+
+If Codex becomes available before a reported reset time, force a probe immediately:
+
+```sh
+symphony resume
+```
+
 Stop it:
 
 ```sh
@@ -102,7 +131,11 @@ Runtime state is intentionally in-memory to match the OpenAI Symphony spec. Rest
 
 `symphony start` launches a normal detached user process and writes pid/log files under `~/.symphony`. It does not install a LaunchAgent or auto-start on login.
 
-The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
+`symphony status`, `symphony watch`, and `symphony logs` expose the runner's observability surface: active issue runs, retry queue, Codex thread and turn IDs, app-server PIDs, event cursors, per-issue work-log paths, rate-limit parking, and config reload errors. Daemon process logs remain available under `~/.symphony/symphony-<port>.log`.
+
+Rate-limit handling is intentionally different from ordinary failure retry. Symphony parks new launches until Codex's reported reset time, but also probes parked runs every `agent.rate_limit_probe_interval_ms` with per-issue jitter so work can resume if access returns earlier than the reported reset. The default probe interval is five minutes.
+
+The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. Per-issue public work streams are stored as JSONL under `.symphony/events/`, and queued steering state is stored under `.symphony/state/`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
 
 ## Safety Notes
 

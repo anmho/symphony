@@ -1,19 +1,26 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { runCommand } from "../src/process";
+import { runCommand } from "../src/process.js";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("cli", () => {
   it("prints help", async () => {
     const result = await runCommand("bun", ["run", "tsx", "src/index.ts", "--help"], {
-      cwd: path.resolve(__dirname, ".."),
+      cwd: repoRoot,
       timeoutMs: 30000
     });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("start");
     expect(result.stdout).toContain("stop");
+    expect(result.stdout).toContain("watch");
+    expect(result.stdout).toContain("logs");
+    expect(result.stdout).toContain("steer");
+    expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("validate-config");
   });
 
@@ -34,7 +41,7 @@ Prompt
     );
 
     const result = await runCommand("bun", ["run", "tsx", "src/index.ts", "validate-config", "--workflow", workflowPath], {
-      cwd: path.resolve(__dirname, ".."),
+      cwd: repoRoot,
       timeoutMs: 30000
     });
 

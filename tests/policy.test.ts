@@ -5,8 +5,8 @@ import {
   resolveIssueRepoRoute,
   sanitizeWorkspaceKey,
   sortIssuesForDispatch
-} from "../src/policy";
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types";
+} from "../src/policy.js";
+import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
 
 const config = {
   tracker: {

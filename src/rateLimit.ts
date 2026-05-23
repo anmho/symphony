@@ -1,4 +1,4 @@
-import type { RateLimitGateState } from "./types";
+import type { RateLimitGateState } from "./types.js";
 
 export interface RateLimitWindow {
   usedPercent?: number;

@@ -2,7 +2,7 @@ import path from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadUserConfig, parseWorkflowMarkdown, resolveWorkflowConfig, resolveWorkflowPath } from "../src/config";
+import { loadUserConfig, parseWorkflowMarkdown, resolveWorkflowConfig, resolveWorkflowPath } from "../src/config.js";
 
 describe("workflow config", () => {
   afterEach(() => {

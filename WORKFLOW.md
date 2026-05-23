@@ -46,6 +46,7 @@ agent:
   max_concurrent_agents: 5
   max_turns: 20
   max_retry_backoff_ms: 300000
+  rate_limit_probe_interval_ms: 300000
 
 codex:
   command: codex app-server --listen stdio://

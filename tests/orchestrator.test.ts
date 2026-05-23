@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { Orchestrator, type OrchestratorDependencies } from "../src/orchestrator";
+import { mkdtemp } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { AgentWorkEventStore } from "../src/events.js";
+import { Orchestrator, type OrchestratorDependencies } from "../src/orchestrator.js";
 import type {
   CodexRunInput,
   CodexRunEvent,
@@ -7,7 +11,7 @@ import type {
   EffectiveWorkflowConfig,
   NormalizedIssue,
   WorkspaceInfo
-} from "../src/types";
+} from "../src/types.js";
 
 describe("orchestrator", () => {
   it("dispatches up to configured concurrency", async () => {
@@ -120,6 +124,38 @@ describe("orchestrator", () => {
     expect(orchestrator.snapshot().codexRateLimit.resumeAfterMs).toBe(100000);
   });
 
+  it("probes rate limits at a fixed jittered interval before the reported reset", async () => {
+    const issue = makeIssue("APP-1");
+    const config = makeConfig();
+    config.agent.rateLimitProbeIntervalMs = 1000;
+    let now = 1000;
+    let codexCalls = 0;
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      now: () => now,
+      fetchCandidateIssues: async () => [issue],
+      runCodexTurn: async () => {
+        codexCalls += 1;
+        return {
+          ...completedTurn("thread", "turn"),
+          status: "rate_limited",
+          rateLimitUntilMs: 100000,
+          error: "codex_rate_limited"
+        };
+      }
+    });
+    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+
+    await orchestrator.tick();
+    await flushPromises();
+    now = 2500;
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(codexCalls).toBe(2);
+    expect(orchestrator.snapshot().retryAttempts[0]?.dueAtMs).toBeGreaterThan(now);
+  });
+
   it("keeps last known good config on invalid reload", async () => {
     const config = makeConfig();
     let loads = 0;
@@ -139,6 +175,64 @@ describe("orchestrator", () => {
     await orchestrator.tick();
 
     expect(orchestrator.snapshot().lastConfigError).toBe("bad config");
+  });
+
+  it("captures Codex work events for status and logs", async () => {
+    const issue = makeIssue("APP-1");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-orchestrator-events-"));
+    const eventStore = new AgentWorkEventStore(path.join(dir, "WORKFLOW.md"), () => 2000);
+    let fetches = 0;
+    const deps = makeDeps({
+      eventStore,
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => {
+        fetches += 1;
+        return fetches === 1 ? issue : { ...issue, state: "Human Review" };
+      },
+      runCodexTurn: async (_input, options) => {
+        options.onEvent({ type: "thread_started", threadId: "thread-1" });
+        options.onEvent({
+          type: "notification",
+          method: "item/agentMessage/delta",
+          params: { delta: "Working on it" }
+        });
+        return completedTurn("thread-1", "turn-1");
+      }
+    });
+    const orchestrator = new Orchestrator({ workflowPath: path.join(dir, "WORKFLOW.md") }, deps);
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(orchestrator.events("APP-1", 0, 20).map((event) => event.type)).toContain("assistant_delta");
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+  });
+
+  it("attaches queued steering to the next prompt", async () => {
+    const issue = makeIssue("APP-1");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-orchestrator-steer-"));
+    let prompt = "";
+    let fetches = 0;
+    const deps = makeDeps({
+      eventStore: new AgentWorkEventStore(path.join(dir, "WORKFLOW.md"), () => 2000),
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => {
+        fetches += 1;
+        return fetches === 1 ? issue : { ...issue, state: "Human Review" };
+      },
+      runCodexTurn: async (input) => {
+        prompt = input.prompt;
+        return completedTurn("thread-1", "turn-1");
+      }
+    });
+    const orchestrator = new Orchestrator({ workflowPath: path.join(dir, "WORKFLOW.md") }, deps);
+
+    orchestrator.queueSteer("APP-1", "prioritize the keyboard regression");
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(prompt).toContain("## Operator Guidance");
+    expect(prompt).toContain("prioritize the keyboard regression");
   });
 });
 
@@ -212,6 +306,7 @@ function makeConfig(
       maxConcurrentAgents: 5,
       maxTurns: 20,
       maxRetryBackoffMs: 300000,
+      rateLimitProbeIntervalMs: 300000,
       maxConcurrentAgentsByState: {}
     },
     codex: {
