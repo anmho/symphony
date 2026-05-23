@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchCandidateIssues } from "../src/linear.js";
+import { fetchCandidateIssues, fetchIssueLabelNames } from "../src/linear.js";
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {
@@ -33,6 +33,25 @@ describe("linear client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchCandidateIssues(makeConfig({ projectSlug: "project", teamKey: null }));
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("fetches configured Linear issue label names", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({
+        issueLabels: {
+          nodes: [{ name: "symphony" }, { name: "repo:symphony" }, { name: null }],
+          pageInfo: { hasNextPage: false, endCursor: null }
+        }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchIssueLabelNames(makeConfig({ projectSlug: null, teamKey: "ANM" }))).resolves.toEqual([
+      "symphony",
+      "repo:symphony"
+    ]);
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });

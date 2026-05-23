@@ -20,6 +20,7 @@ import {
 } from "./status.js";
 import { StreamingEventDisplay, formatDisplayEvent } from "./eventDisplay.js";
 import { runStatusWatch } from "./watch.js";
+import { validateConfiguredRepoRouteLabels } from "./validation.js";
 
 interface CliOptions {
   workflow?: string;
@@ -58,6 +59,10 @@ program.command("validate-config").description("Load and validate WORKFLOW.md.")
   const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
   const config = await loadWorkflowConfig(workflowPath);
   console.log(renderConfigSummary(config));
+  const warnings = await validateConfiguredRepoRouteLabels(config);
+  for (const warning of warnings) {
+    console.warn(`Warning: ${warning.message}`);
+  }
 });
 
 program.command("status").description("Read the local runner status endpoint.").action(async () => {

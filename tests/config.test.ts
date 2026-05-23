@@ -113,6 +113,8 @@ Prompt
   });
 
   it("does not run secret commands when env config already resolves a placeholder", () => {
+    vi.stubEnv("LINEAR_API_KEY", "");
+    vi.stubEnv("PROJECTS_ROOT", "");
     const definition = parseWorkflowMarkdown(`---
 tracker:
   team_key: ANM
