@@ -1,0 +1,47 @@
+{
+  "name": "@anmho/symphony",
+  "version": "0.1.0",
+  "description": "TypeScript implementation of a Symphony-style Codex orchestration service.",
+  "type": "commonjs",
+  "license": "UNLICENSED",
+  "files": [
+    "dist",
+    "README.md",
+    "WORKFLOW.example.md"
+  ],
+  "bin": {
+    "symphony": "dist/src/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts run",
+    "install:global": "bun install && bun run build && bun link",
+    "run": "tsx src/index.ts run",
+    "start": "tsx src/index.ts start",
+    "stop": "tsx src/index.ts stop",
+    "status": "tsx src/index.ts status",
+    "validate-config": "tsx src/index.ts validate-config",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "validate": "bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "commander": "^14.0.2",
+    "liquidjs": "^10.27.0",
+    "pino": "^10.1.0",
+    "yaml": "^2.8.2",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

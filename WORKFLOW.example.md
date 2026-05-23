@@ -1,0 +1,54 @@
+---
+tracker:
+  kind: linear
+  api_key: $LINEAR_API_KEY
+  project_slug: replace-with-linear-project-slug
+  active_states:
+    - Todo
+    - In Progress
+  terminal_states:
+    - Done
+    - Closed
+    - Canceled
+    - Cancelled
+    - Duplicate
+
+polling:
+  interval_ms: 30000
+
+workspace:
+  root: ./symphony_workspaces
+  repo_path: .
+  base_branch: main
+
+hooks:
+  after_create:
+  before_run:
+  after_run:
+  before_remove:
+  timeout_ms: 60000
+
+agent:
+  max_concurrent_agents: 5
+  max_turns: 20
+  max_retry_backoff_ms: 300000
+
+codex:
+  command: codex app-server --listen stdio://
+  approval_policy: never
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 5000
+  stall_timeout_ms: 300000
+  model:
+---
+You are implementing Linear issue {{ issue.identifier }}: {{ issue.title }}.
+
+Issue URL: {{ issue.url }}
+State: {{ issue.state }}
+
+Description:
+{{ issue.description }}
+
+Work in the current Git worktree. Make the smallest correct implementation, run relevant verification, and leave a clear handoff in Linear.
