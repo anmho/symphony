@@ -1,8 +1,14 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { parseWorkflowMarkdown, resolveWorkflowConfig } from "../src/config";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadUserConfig, parseWorkflowMarkdown, resolveWorkflowConfig, resolveWorkflowPath } from "../src/config";
 
 describe("workflow config", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("parses front matter and applies defaults", () => {
     vi.stubEnv("LINEAR_API_KEY", "lin_test");
     const definition = parseWorkflowMarkdown(`---
@@ -74,5 +80,88 @@ Prompt
       symphony: "/Users/test/repos/symphony",
       auth: "/Users/test/repos/auth"
     });
+  });
+
+  it("resolves env placeholders from user config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "");
+    vi.stubEnv("PROJECTS_ROOT", "");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  team_key: ANM
+workspace:
+  root: ./.symphony/workspaces
+  repo_path: .
+  projects_root: $PROJECTS_ROOT
+  repo_routes:
+    symphony: symphony
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition, {
+      workflow: null,
+      env: {
+        LINEAR_API_KEY: "lin_from_user_config",
+        PROJECTS_ROOT: "/Users/test/repos"
+      },
+      secrets: {}
+    });
+
+    expect(config.tracker.apiKey).toBe("lin_from_user_config");
+    expect(config.workspace.projectsRoot).toBe("/Users/test/repos");
+    expect(config.workspace.repoRoutes.symphony).toBe("/Users/test/repos/symphony");
+  });
+
+  it("does not run secret commands when env config already resolves a placeholder", () => {
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  team_key: ANM
+workspace:
+  projects_root: $PROJECTS_ROOT
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition, {
+      workflow: null,
+      env: {
+        LINEAR_API_KEY: "lin_from_user_config",
+        PROJECTS_ROOT: "/Users/test/repos"
+      },
+      secrets: {
+        LINEAR_API_KEY: {
+          command: "exit 42"
+        },
+        PROJECTS_ROOT: {
+          command: "exit 42"
+        }
+      }
+    });
+
+    expect(config.tracker.apiKey).toBe("lin_from_user_config");
+    expect(config.workspace.projectsRoot).toBe("/Users/test/repos");
+  });
+
+  it("loads default workflow path from user config", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-user-config-"));
+    const configPath = path.join(dir, "config.json");
+    vi.stubEnv("SYMPHONY_CONFIG", configPath);
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        workflow: "/tmp/custom/WORKFLOW.md",
+        env: {
+          PROJECTS_ROOT: "/tmp/repos"
+        }
+      })
+    );
+
+    await expect(loadUserConfig()).resolves.toMatchObject({
+      workflow: "/tmp/custom/WORKFLOW.md",
+      env: {
+        PROJECTS_ROOT: "/tmp/repos"
+      }
+    });
+    await expect(resolveWorkflowPath()).resolves.toBe("/tmp/custom/WORKFLOW.md");
   });
 });

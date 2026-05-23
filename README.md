@@ -37,12 +37,30 @@ cp WORKFLOW.example.md WORKFLOW.md
 
 This repo also includes a real root `WORKFLOW.md` for ANM team execution. It polls ANM tickets, but only dispatches issues explicitly labeled with both `symphony` and a configured `repo:<key>` route label.
 
-Set your local environment:
+Set your local environment, or put these values in `~/.config/symphony/config.json`:
 
 ```sh
 export LINEAR_API_KEY=lin_api_...
 export PROJECTS_ROOT=/Users/andrewho/repos/projects
 ```
+
+Example user config:
+
+```json
+{
+  "workflow": "/Users/andrewho/repos/projects/symphony/WORKFLOW.md",
+  "env": {
+    "PROJECTS_ROOT": "/Users/andrewho/repos/projects"
+  },
+  "secrets": {
+    "LINEAR_API_KEY": {
+      "command": "vault kv get -mount=secret -field=api_key prod/providers/linear"
+    }
+  }
+}
+```
+
+User config lives under `~/.config/symphony` because it is machine-local configuration. The repo `.symphony/` directory is reserved for runtime workspaces and state.
 
 Validate the workflow config:
 

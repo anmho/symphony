@@ -4,14 +4,14 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { loadWorkflowConfig, renderConfigSummary } from "./config";
+import { loadWorkflowConfig, renderConfigSummary, resolveWorkflowPath } from "./config";
 import { logger } from "./logger";
 import { createDefaultOrchestrator } from "./orchestrator";
 import { runCommand } from "./process";
 import { DEFAULT_STATUS_PORT, fetchDaemonStatus, startStatusServer } from "./status";
 
 interface CliOptions {
-  workflow: string;
+  workflow?: string;
   statusPort: string;
 }
 
@@ -20,7 +20,7 @@ const program = new Command();
 program
   .name("symphony")
   .description("TypeScript Symphony v1: Linear-driven local runner for Codex app-server agents.")
-  .option("-w, --workflow <path>", "path to WORKFLOW.md", "WORKFLOW.md")
+  .option("-w, --workflow <path>", "path to WORKFLOW.md")
   .option("--status-port <port>", "local status server port", String(DEFAULT_STATUS_PORT));
 
 program.command("install").description("Build and globally link the symphony command with Bun.").action(async () => {
@@ -44,7 +44,7 @@ program.command("stop").description("Stop the background Symphony process.").act
 });
 
 program.command("validate-config").description("Load and validate WORKFLOW.md.").action(async () => {
-  const workflowPath = path.resolve(program.opts<CliOptions>().workflow);
+  const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
   const config = await loadWorkflowConfig(workflowPath);
   console.log(renderConfigSummary(config));
 });
@@ -67,7 +67,7 @@ program.parseAsync(process.argv).catch((error: unknown) => {
 });
 
 async function startBackground(options: CliOptions): Promise<void> {
-  const workflowPath = path.resolve(options.workflow);
+  const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
 
   if (await fetchDaemonStatus(statusPort)) {
@@ -109,7 +109,7 @@ function backgroundCommand(workflowPath: string, statusPort: number): { command:
 }
 
 async function runForeground(options: CliOptions): Promise<void> {
-  const workflowPath = path.resolve(options.workflow);
+  const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
   const orchestrator = createDefaultOrchestrator(workflowPath);
   const statusServer = await startStatusServer(() => orchestrator.snapshot(), statusPort);
