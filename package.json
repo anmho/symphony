@@ -4,6 +4,7 @@
   "description": "TypeScript implementation of a Symphony-style Codex orchestration service.",
   "type": "commonjs",
   "license": "UNLICENSED",
+  "packageManager": "bun@1.3.14",
   "files": [
     "dist",
     "README.md",
