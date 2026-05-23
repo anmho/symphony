@@ -1,5 +1,16 @@
+import {
+  DEFAULT_LOG_VIEWPORT,
+  applyLogViewportKey,
+  buildLogLines,
+  visibleLogWindow,
+  type LogViewportKey,
+  type LogViewportState
+} from "./eventDisplay.js";
 import type { AgentWorkEvent, OrchestratorSnapshot } from "./types.js";
 import { fetchDaemonEvents, fetchDaemonStatus, queueSteer, resumeIssue } from "./status.js";
+
+const LOG_FETCH_LIMIT = 400;
+const LOG_VIEWPORT_HEIGHT = 16;
 
 export interface WatchOptions {
   port: number;
@@ -31,6 +42,10 @@ interface RenderOptions {
   commandBuffer?: string;
   filterText?: string;
   events?: AgentWorkEvent[];
+  logViewport?: LogViewportState;
+  logViewportHeight?: number;
+  terminalWidth?: number;
+  logLines?: string[];
   color?: boolean;
 }
 
@@ -73,6 +88,9 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
   let inputMode: InputMode = "normal";
   let commandBuffer = "";
   let filterText = "";
+  let logViewport: LogViewportState = { ...DEFAULT_LOG_VIEWPORT };
+  let logEvents: AgentWorkEvent[] = [];
+  let logEventsIssue: string | null = null;
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
   const opentui = await import("@opentui/core");
@@ -109,10 +127,29 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     const rowCount = snapshot ? filteredRows(snapshot, Date.now(), filterText).length : 0;
     selectedIndex = clamp(selectedIndex, 0, Math.max(rowCount - 1, 0));
     const selected = snapshot ? filteredRows(snapshot, Date.now(), filterText)[selectedIndex] ?? null : null;
-    const events = snapshot && selected && (view === "events" || view === "describe")
+    if (selected && view === "events") {
+      if (logEventsIssue !== selected.issue) {
+        logEventsIssue = selected.issue;
+        logEvents = [];
+        logViewport = { ...DEFAULT_LOG_VIEWPORT };
+      }
+      logEvents = await fetchDaemonEvents(options.port, { issue: selected.issue, limit: LOG_FETCH_LIMIT }) ?? [];
+    } else if (view !== "events") {
+      logEventsIssue = null;
+    }
+
+    const describeEvents = snapshot && selected && view === "describe"
       ? await fetchDaemonEvents(options.port, { issue: selected.issue, limit: 40 })
       : [];
-    screen.content = ansiToStyledText(renderStatusScreen(snapshot, {
+    const terminalWidth = output.columns ?? 120;
+    const logSection = view === "events" && selected
+      ? renderLogSection(logEvents, logViewport, LOG_VIEWPORT_HEIGHT, terminalWidth, createTheme(true))
+      : null;
+    if (logSection) {
+      logViewport = logSection.viewport;
+    }
+
+    const renderOptions: RenderOptions = {
       nowMs: Date.now(),
       port: options.port,
       selectedIndex,
@@ -120,9 +157,16 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
       inputMode,
       commandBuffer,
       filterText,
-      events: events ?? [],
+      events: view === "describe" ? describeEvents ?? [] : logEvents,
+      logViewport,
+      logViewportHeight: LOG_VIEWPORT_HEIGHT,
+      terminalWidth,
       color: true
-    }), opentui) as string;
+    };
+    if (logSection) {
+      renderOptions.logLines = logSection.lines;
+    }
+    screen.content = ansiToStyledText(renderStatusScreen(snapshot, renderOptions), opentui) as string;
   };
 
   renderer.keyInput.on("keypress", (key: { name: string; ctrl?: boolean; raw?: string; sequence?: string; preventDefault?: () => void }) => {
@@ -223,6 +267,7 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     }
     if (key.name === "l" || key.name === "e") {
       view = "events";
+      logViewport = { ...DEFAULT_LOG_VIEWPORT };
       void render();
       return;
     }
@@ -239,12 +284,31 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     if (key.name === "escape") {
       if (view !== "agents") {
         view = "agents";
+        logViewport = { ...DEFAULT_LOG_VIEWPORT };
       } else {
         filterText = "";
       }
       void render();
       return;
     }
+
+    if (view === "events") {
+      const viewportHeight = LOG_VIEWPORT_HEIGHT;
+      const terminalWidth = output.columns ?? 120;
+      const lineCount = buildLogLines(logEvents, Math.max(terminalWidth - 4, 40), logViewport.wrap).length;
+      const logKey = watchLogKey(key);
+      if (logKey) {
+        logViewport = applyLogViewportKey(logViewport, logKey, lineCount, viewportHeight);
+        void render();
+        return;
+      }
+      if (key.name === "w") {
+        logViewport = { ...logViewport, wrap: !logViewport.wrap };
+        void render();
+        return;
+      }
+    }
+
     if (key.name === "up" || key.name === "k") {
       selectedIndex = Math.max(selectedIndex - 1, 0);
       void render();
@@ -299,8 +363,61 @@ export function renderStatusScreen(
     "",
     renderMenu(inputMode, commandBuffer, theme),
     "",
-    renderView(view, rows, selectedIndex, selected, theme, options.events ?? [])
+    renderView(view, rows, selectedIndex, selected, theme, options)
   ].join("\n");
+}
+
+export function renderLogSection(
+  events: AgentWorkEvent[],
+  viewport: LogViewportState,
+  viewportHeight: number,
+  terminalWidth: number,
+  theme: Theme
+): { lines: string[]; viewport: LogViewportState } {
+  const wrapWidth = Math.max(terminalWidth - 4, 40);
+  const lines = buildLogLines(events, wrapWidth, viewport.wrap);
+  const window = visibleLogWindow(lines, viewport, viewportHeight);
+  const rendered = window.lines.map((line, index) => {
+    const absoluteLine = window.scrollTop + index;
+    const marker = absoluteLine === window.selectedLine ? ">" : " ";
+    return colorLogLine(`${marker} ${line}`, theme);
+  });
+  return {
+    lines: rendered,
+    viewport: {
+      ...viewport,
+      scrollTop: window.scrollTop,
+      selectedLine: window.selectedLine
+    }
+  };
+}
+
+export function watchLogKey(key: { name: string; shift?: boolean }): LogViewportKey | null {
+  if (key.name === "up" || key.name === "k") {
+    return "up";
+  }
+  if (key.name === "down" || key.name === "j") {
+    return "down";
+  }
+  if (key.name === "pageup") {
+    return "pageup";
+  }
+  if (key.name === "pagedown") {
+    return "pagedown";
+  }
+  if (key.name === "g" && !key.shift) {
+    return "top";
+  }
+  if (key.name === "G" || (key.name === "g" && key.shift) || key.name === "end") {
+    return "bottom";
+  }
+  if (key.name === "home") {
+    return "top";
+  }
+  if (key.name === "f") {
+    return "toggle-follow";
+  }
+  return null;
 }
 
 function filteredRows(snapshot: OrchestratorSnapshot, nowMs: number, filterText: string): WatchRow[] {
@@ -404,8 +521,9 @@ function renderView(
   selectedIndex: number,
   selected: WatchRow | null,
   theme: Theme,
-  events: AgentWorkEvent[]
+  options: RenderOptions
 ): string {
+  const events = options.events ?? [];
   if (view === "help") {
     return [
       theme.header("HELP"),
@@ -418,7 +536,12 @@ function renderView(
       `  ${theme.accent("/text")}          filter rows`,
       `  ${theme.accent("Up/Down j/k")}    move selection`,
       `  ${theme.accent("d")}              describe selected agent`,
-      `  ${theme.accent("l or e")}         show selected agent event`,
+      `  ${theme.accent("l")}              open logs for selected agent`,
+      `  ${theme.accent("j/k Up/Down")}    scroll logs (in logs view)`,
+      `  ${theme.accent("PgUp/PgDn")}      page logs (in logs view)`,
+      `  ${theme.accent("g/G")}            jump to top/bottom of logs`,
+      `  ${theme.accent("f")}              toggle log follow mode`,
+      `  ${theme.accent("w")}              toggle log wrap`,
       `  ${theme.accent("s")}              open steer command for selected agent`,
       `  ${theme.accent("r")}              retry/resume selected queued agent now`,
       `  ${theme.accent("a or esc")}       return to agents table`,
@@ -437,11 +560,19 @@ function renderView(
   }
 
   if (view === "events") {
+    const viewport = options.logViewport ?? DEFAULT_LOG_VIEWPORT;
+    const followLabel = viewport.follow ? theme.ok("follow") : theme.dim("paused");
+    const wrapLabel = viewport.wrap ? theme.ok("wrap") : theme.dim("nowrap");
+    const logBody = options.logLines
+      ? options.logLines.join("\n")
+      : selected
+        ? renderEvents(selected, events, theme)
+        : theme.warn("No selected agent.");
     return [
       renderTable(rows, selectedIndex, theme),
       "",
-      theme.header("LOGS"),
-      selected ? renderEvents(selected, events, theme) : theme.warn("No selected agent.")
+      `${theme.header("LOGS")}  ${theme.dim("follow=")}${followLabel}  ${theme.dim("wrap=")}${wrapLabel}  ${theme.dim("esc")} agents`,
+      logBody
     ].join("\n");
   }
 
@@ -471,19 +602,23 @@ function renderMenu(inputMode: InputMode, commandBuffer: string, theme: Theme): 
 
 function renderEvents(selected: WatchRow, events: AgentWorkEvent[], theme: Theme): string {
   if (events.length === 0) {
-    return colorDetail([selected.detail.at(-1) ?? "No event."], theme);
+    return colorDetail([selected.detail.at(-1) ?? "No events loaded."], theme);
   }
-  return events.map((event) => {
-    const time = new Date(event.timestampMs).toISOString().slice(11, 19);
-    const line = `${time} ${pad(event.type, 18)} ${event.summary}`;
-    if (event.level === "error") {
-      return theme.error(line);
-    }
-    if (event.level === "warn") {
-      return theme.warn(line);
-    }
-    return event.type === "assistant_delta" || event.type === "assistant_message" ? theme.ok(line) : line;
-  }).join("\n");
+  const lines = buildLogLines(events, 120, false);
+  return lines.map((line) => colorLogLine(`  ${line}`, theme)).join("\n");
+}
+
+function colorLogLine(line: string, theme: Theme): string {
+  if (/\berror\b/.test(line)) {
+    return theme.error(line);
+  }
+  if (/\bwarn\b/.test(line) || /\brate-limit\b/.test(line)) {
+    return theme.warn(line);
+  }
+  if (/\bassistant\b/.test(line)) {
+    return theme.ok(line);
+  }
+  return line;
 }
 
 function menuKey(key: string, label: string, theme: Theme): string {

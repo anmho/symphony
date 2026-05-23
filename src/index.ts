@@ -18,8 +18,8 @@ import {
   resumeRateLimitedRuns,
   startStatusServer
 } from "./status.js";
+import { StreamingEventDisplay, formatDisplayEvent } from "./eventDisplay.js";
 import { runStatusWatch } from "./watch.js";
-import type { AgentWorkEvent } from "./types.js";
 
 interface CliOptions {
   workflow?: string;
@@ -212,6 +212,7 @@ async function runLogsCommand(
   const limit = readPositiveInteger(options.limit, "limit");
   const intervalMs = readIntervalMs(options.interval);
   let cursor: number | null = null;
+  const display = new StreamingEventDisplay();
 
   while (true) {
     const events = await fetchDaemonEvents(port, {
@@ -224,7 +225,16 @@ async function runLogsCommand(
       return;
     }
     for (const event of events) {
-      process.stdout.write(options.json ? `${JSON.stringify(event)}\n` : `${formatAgentWorkEvent(event, Boolean(options.all))}\n`);
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify(event)}\n`);
+      } else {
+        for (const compacted of display.push(event)) {
+          const formatted = options.all
+            ? formatDisplayEvent(compacted, { includeIssue: event.identifier })
+            : formatDisplayEvent(compacted);
+          process.stdout.write(`${formatted}\n`);
+        }
+      }
       cursor = Math.max(cursor ?? 0, event.cursor);
     }
     if (!options.follow) {
@@ -338,13 +348,6 @@ function packageRoot(): string {
     current = path.dirname(current);
   }
   throw new Error("package_root_not_found");
-}
-
-function formatAgentWorkEvent(event: AgentWorkEvent, includeIssue: boolean): string {
-  const time = new Date(event.timestampMs).toISOString();
-  const prefix = includeIssue ? `${event.identifier} ` : "";
-  const thread = event.turnId ? ` turn=${event.turnId}` : event.threadId ? ` thread=${event.threadId}` : "";
-  return `${time} ${prefix}${event.level.toUpperCase()} ${event.type}${thread} ${event.summary}`;
 }
 
 function stateDir(): string {
