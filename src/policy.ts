@@ -43,7 +43,52 @@ export function isIssueEligible(issue: NormalizedIssue, config: EffectiveWorkflo
   if (!isActiveState(issue.state, config) || isTerminalState(issue.state, config)) {
     return false;
   }
+  if (!hasRequiredLabels(issue, config)) {
+    return false;
+  }
+  if (!resolveIssueRepoRoute(issue, config)) {
+    return false;
+  }
   return !hasOpenTodoBlocker(issue, config);
+}
+
+export interface IssueRepoRoute {
+  repoKey: string | null;
+  repoPath: string;
+}
+
+export function hasRequiredLabels(issue: NormalizedIssue, config: EffectiveWorkflowConfig): boolean {
+  const issueLabels = new Set(issue.labels.map(normalizeState));
+  return config.tracker.requiredLabels.every((label) => issueLabels.has(normalizeState(label)));
+}
+
+export function resolveIssueRepoRoute(issue: NormalizedIssue, config: EffectiveWorkflowConfig): IssueRepoRoute | null {
+  const routeKeys = Object.keys(config.workspace.repoRoutes);
+  if (routeKeys.length === 0) {
+    return {
+      repoKey: null,
+      repoPath: config.workspace.repoPath
+    };
+  }
+
+  const prefix = normalizeState(config.tracker.repoLabelPrefix);
+  const configuredRoutes = new Set(routeKeys.map(normalizeState));
+  const labels = issue.labels.map(normalizeState);
+  const matchingKeys = labels
+    .filter((label) => label.startsWith(prefix))
+    .map((label) => label.slice(prefix.length).trim())
+    .filter((key) => configuredRoutes.has(key));
+
+  const uniqueKeys = [...new Set(matchingKeys)];
+  if (uniqueKeys.length !== 1) {
+    return null;
+  }
+
+  const repoKey = uniqueKeys[0]!;
+  return {
+    repoKey,
+    repoPath: config.workspace.repoRoutes[repoKey]!
+  };
 }
 
 export function sortIssuesForDispatch(issues: NormalizedIssue[]): NormalizedIssue[] {

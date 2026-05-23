@@ -32,7 +32,10 @@ export interface TrackerConfig {
   kind: "linear";
   endpoint: string;
   apiKey: string;
-  projectSlug: string;
+  projectSlug: string | null;
+  teamKey: string | null;
+  requiredLabels: string[];
+  repoLabelPrefix: string;
   activeStates: string[];
   terminalStates: string[];
 }
@@ -44,6 +47,8 @@ export interface PollingConfig {
 export interface WorkspaceConfig {
   root: string;
   repoPath: string;
+  projectsRoot: string | null;
+  repoRoutes: Record<string, string>;
   baseBranch: string;
 }
 
@@ -89,6 +94,8 @@ export interface WorkspaceInfo {
   path: string;
   workspaceKey: string;
   branchName: string;
+  repoKey: string | null;
+  repoPath: string;
   createdNow: boolean;
 }
 

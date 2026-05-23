@@ -64,25 +64,20 @@ const ISSUE_FIELDS = `
 `;
 
 export async function fetchCandidateIssues(config: EffectiveWorkflowConfig): Promise<NormalizedIssue[]> {
+  const { filter, variableDefinitions, variables } = issueScopeFilter(config, config.tracker.activeStates);
   const data = await linearGraphql<IssuesQueryData>(
     config,
     `
-      query SymphonyCandidateIssues($projectSlug: String!, $states: [String!]) {
+      query SymphonyCandidateIssues(${variableDefinitions}) {
         issues(
           first: 100,
-          filter: {
-            project: { slugId: { eq: $projectSlug } },
-            state: { name: { in: $states } }
-          }
+          filter: ${filter}
         ) {
           nodes { ${ISSUE_FIELDS} }
         }
       }
     `,
-    {
-      projectSlug: config.tracker.projectSlug,
-      states: config.tracker.activeStates
-    }
+    variables
   );
 
   return (data.issues?.nodes ?? []).map(normalizeLinearIssue).filter(Boolean);
@@ -103,25 +98,20 @@ export async function fetchIssueById(config: EffectiveWorkflowConfig, issueId: s
 }
 
 export async function fetchTerminalIssues(config: EffectiveWorkflowConfig): Promise<NormalizedIssue[]> {
+  const { filter, variableDefinitions, variables } = issueScopeFilter(config, config.tracker.terminalStates);
   const data = await linearGraphql<IssuesQueryData>(
     config,
     `
-      query SymphonyTerminalIssues($projectSlug: String!, $states: [String!]) {
+      query SymphonyTerminalIssues(${variableDefinitions}) {
         issues(
           first: 100,
-          filter: {
-            project: { slugId: { eq: $projectSlug } },
-            state: { name: { in: $states } }
-          }
+          filter: ${filter}
         ) {
           nodes { ${ISSUE_FIELDS} }
         }
       }
     `,
-    {
-      projectSlug: config.tracker.projectSlug,
-      states: config.tracker.terminalStates
-    }
+    variables
   );
 
   return (data.issues?.nodes ?? []).map(normalizeLinearIssue).filter(Boolean);
@@ -205,5 +195,32 @@ function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {
       })),
     createdAt: node.createdAt ?? null,
     updatedAt: node.updatedAt ?? null
+  };
+}
+
+function issueScopeFilter(
+  config: EffectiveWorkflowConfig,
+  states: string[]
+): { filter: string; variableDefinitions: string; variables: Record<string, unknown> } {
+  const filters = ["state: { name: { in: $states } }"];
+  const variableDefinitions = ["$states: [String!]"];
+  const variables: Record<string, unknown> = { states };
+
+  if (config.tracker.projectSlug) {
+    filters.push("project: { slugId: { eq: $projectSlug } }");
+    variableDefinitions.push("$projectSlug: String!");
+    variables.projectSlug = config.tracker.projectSlug;
+  }
+
+  if (config.tracker.teamKey) {
+    filters.push("team: { key: { eq: $teamKey } }");
+    variableDefinitions.push("$teamKey: String!");
+    variables.teamKey = config.tracker.teamKey;
+  }
+
+  return {
+    filter: `{ ${filters.join(", ")} }`,
+    variableDefinitions: variableDefinitions.join(", "),
+    variables
   };
 }

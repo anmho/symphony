@@ -35,10 +35,13 @@ Create a workflow file:
 cp WORKFLOW.example.md WORKFLOW.md
 ```
 
-Set your Linear API key:
+This repo also includes a real root `WORKFLOW.md` for ANM team execution. It polls ANM tickets, but only dispatches issues explicitly labeled with both `symphony` and a configured `repo:<key>` route label.
+
+Set your local environment:
 
 ```sh
 export LINEAR_API_KEY=lin_api_...
+export PROJECTS_ROOT=/Users/andrewho/repos/projects
 ```
 
 Validate the workflow config:
@@ -80,6 +83,8 @@ Each issue worker prepares a Git worktree, runs hooks, starts or resumes a Codex
 Runtime state is intentionally in-memory to match the OpenAI Symphony spec. Restart recovery is tracker/filesystem-driven: active Linear issues and existing worktrees determine what gets picked back up.
 
 `symphony start` launches a normal detached user process and writes pid/log files under `~/.symphony`. It does not install a LaunchAgent or auto-start on login.
+
+The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
 
 ## Safety Notes
 

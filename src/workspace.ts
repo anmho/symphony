@@ -1,7 +1,7 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { EffectiveWorkflowConfig, NormalizedIssue, WorkspaceInfo } from "./types";
-import { branchNameForIssue, sanitizeWorkspaceKey } from "./policy";
+import { branchNameForIssue, resolveIssueRepoRoute, sanitizeWorkspaceKey } from "./policy";
 import { runCommand } from "./process";
 
 export async function ensureWorkspace(
@@ -19,20 +19,22 @@ export async function ensureWorkspace(
       path: workspacePath,
       workspaceKey,
       branchName,
+      repoKey: info.repoKey,
+      repoPath: info.repoPath,
       createdNow: false
     };
   }
 
   const addResult = await runCommand(
     "git",
-    ["-C", config.workspace.repoPath, "worktree", "add", "-b", branchName, workspacePath, config.workspace.baseBranch],
+    ["-C", info.repoPath, "worktree", "add", "-b", branchName, workspacePath, config.workspace.baseBranch],
     { timeoutMs: 120000 }
   );
 
   if (addResult.exitCode !== 0 && /already exists|a branch named/.test(addResult.stderr)) {
     const retry = await runCommand(
       "git",
-      ["-C", config.workspace.repoPath, "worktree", "add", workspacePath, branchName],
+      ["-C", info.repoPath, "worktree", "add", workspacePath, branchName],
       { timeoutMs: 120000 }
     );
     if (retry.exitCode !== 0) {
@@ -46,16 +48,26 @@ export async function ensureWorkspace(
     path: workspacePath,
     workspaceKey,
     branchName,
+    repoKey: info.repoKey,
+    repoPath: info.repoPath,
     createdNow: true
   };
 }
 
 export function workspaceInfoForIssue(config: EffectiveWorkflowConfig, issue: NormalizedIssue): WorkspaceInfo {
+  const route = resolveIssueRepoRoute(issue, config);
+  if (!route) {
+    throw new Error(`issue_repo_route_unresolved: ${issue.identifier}`);
+  }
+
   const workspaceKey = sanitizeWorkspaceKey(issue.identifier);
+  const workspaceRoot = route.repoKey ? path.join(config.workspace.root, route.repoKey) : config.workspace.root;
   return {
-    path: path.join(config.workspace.root, workspaceKey),
+    path: path.join(workspaceRoot, workspaceKey),
     workspaceKey,
     branchName: branchNameForIssue(issue.identifier),
+    repoKey: route.repoKey,
+    repoPath: route.repoPath,
     createdNow: false
   };
 }
@@ -69,7 +81,7 @@ export async function removeWorkspace(config: EffectiveWorkflowConfig, workspace
 
   const removeResult = await runCommand(
     "git",
-    ["-C", config.workspace.repoPath, "worktree", "remove", "--force", workspace.path],
+    ["-C", workspace.repoPath, "worktree", "remove", "--force", workspace.path],
     { timeoutMs: 120000 }
   );
 

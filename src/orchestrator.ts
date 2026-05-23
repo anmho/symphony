@@ -218,7 +218,13 @@ export class Orchestrator {
     this.startupCleanupDone = true;
     const terminalIssues = await this.deps.fetchTerminalIssues(config);
     for (const issue of terminalIssues) {
-      const workspace = this.deps.workspaceInfoForIssue(config, issue);
+      let workspace: WorkspaceInfo;
+      try {
+        workspace = this.deps.workspaceInfoForIssue(config, issue);
+      } catch (error) {
+        this.deps.logger.debug({ error, issue: issue.identifier }, "terminal issue has no configured workspace route");
+        continue;
+      }
       if (!(await this.deps.workspacePathExists(workspace.path))) {
         continue;
       }

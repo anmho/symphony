@@ -1,13 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { branchNameForIssue, isIssueEligible, sanitizeWorkspaceKey, sortIssuesForDispatch } from "../src/policy";
+import {
+  branchNameForIssue,
+  isIssueEligible,
+  resolveIssueRepoRoute,
+  sanitizeWorkspaceKey,
+  sortIssuesForDispatch
+} from "../src/policy";
 import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types";
 
 const config = {
   tracker: {
     activeStates: ["Todo", "In Progress"],
-    terminalStates: ["Done", "Canceled"]
+    terminalStates: ["Done", "Canceled"],
+    requiredLabels: [],
+    repoLabelPrefix: "repo:"
+  },
+  workspace: {
+    repoPath: "/tmp/repo",
+    repoRoutes: {}
   }
-} as EffectiveWorkflowConfig;
+} as unknown as EffectiveWorkflowConfig;
 
 describe("policy", () => {
   it("sanitizes worktree and branch names", () => {
@@ -26,6 +38,44 @@ describe("policy", () => {
 
   it("dispatches active unblocked issues", () => {
     expect(isIssueEligible(makeIssue({ state: "In Progress" }), config)).toBe(true);
+  });
+
+  it("requires configured opt-in labels", () => {
+    const gatedConfig = {
+      ...config,
+      tracker: {
+        ...config.tracker,
+        requiredLabels: ["symphony"]
+      }
+    } as unknown as EffectiveWorkflowConfig;
+
+    expect(isIssueEligible(makeIssue({ labels: [] }), gatedConfig)).toBe(false);
+    expect(isIssueEligible(makeIssue({ labels: ["Symphony"] }), gatedConfig)).toBe(true);
+  });
+
+  it("requires exactly one configured repo route label when routes are configured", () => {
+    const routedConfig = {
+      ...config,
+      tracker: {
+        ...config.tracker,
+        repoLabelPrefix: "repo:"
+      },
+      workspace: {
+        repoPath: "/tmp/fallback",
+        repoRoutes: {
+          symphony: "/tmp/symphony",
+          auth: "/tmp/auth"
+        }
+      }
+    } as unknown as EffectiveWorkflowConfig;
+
+    expect(resolveIssueRepoRoute(makeIssue({ labels: ["repo:symphony"] }), routedConfig)).toEqual({
+      repoKey: "symphony",
+      repoPath: "/tmp/symphony"
+    });
+    expect(isIssueEligible(makeIssue({ labels: [] }), routedConfig)).toBe(false);
+    expect(isIssueEligible(makeIssue({ labels: ["repo:missing"] }), routedConfig)).toBe(false);
+    expect(isIssueEligible(makeIssue({ labels: ["repo:symphony", "repo:auth"] }), routedConfig)).toBe(false);
   });
 
   it("sorts by priority then creation time", () => {

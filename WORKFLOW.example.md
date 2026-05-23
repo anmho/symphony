@@ -3,6 +3,9 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: replace-with-linear-project-slug
+  team_key:
+  required_labels: []
+  repo_label_prefix: "repo:"
   active_states:
     - Todo
     - In Progress
@@ -19,6 +22,8 @@ polling:
 workspace:
   root: ./symphony_workspaces
   repo_path: .
+  projects_root:
+  repo_routes: {}
   base_branch: main
 
 hooks:

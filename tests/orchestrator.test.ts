@@ -24,6 +24,34 @@ describe("orchestrator", () => {
     expect(orchestrator.snapshot().claimed).toHaveLength(5);
   });
 
+  it("skips issues without required label and repo route", async () => {
+    const config = makeConfig({
+      tracker: {
+        requiredLabels: ["symphony"],
+        repoLabelPrefix: "repo:"
+      },
+      workspace: {
+        repoRoutes: {
+          symphony: "/tmp/repo"
+        }
+      }
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [
+        makeIssue("APP-1", { labels: ["symphony"] }),
+        makeIssue("APP-2", { labels: ["repo:symphony"] }),
+        makeIssue("APP-3", { labels: ["symphony", "repo:symphony"] })
+      ],
+      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined)
+    });
+    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot().running.map((session) => session.identifier)).toEqual(["APP-3"]);
+  });
+
   it("continues active issues on the same worker loop", async () => {
     const issue = makeIssue("APP-1");
     let fetches = 0;
@@ -144,8 +172,13 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
   };
 }
 
-function makeConfig(): EffectiveWorkflowConfig {
-  return {
+function makeConfig(
+  overrides: {
+    tracker?: Partial<EffectiveWorkflowConfig["tracker"]>;
+    workspace?: Partial<EffectiveWorkflowConfig["workspace"]>;
+  } = {}
+): EffectiveWorkflowConfig {
+  const config: EffectiveWorkflowConfig = {
     workflowPath: "/tmp/WORKFLOW.md",
     workflowDir: "/tmp",
     promptTemplate: "Prompt {{ issue.identifier }}",
@@ -154,6 +187,9 @@ function makeConfig(): EffectiveWorkflowConfig {
       endpoint: "https://linear.example/graphql",
       apiKey: "lin_test",
       projectSlug: "project",
+      teamKey: null,
+      requiredLabels: [],
+      repoLabelPrefix: "repo:",
       activeStates: ["Todo", "In Progress"],
       terminalStates: ["Done", "Closed", "Canceled"]
     },
@@ -161,6 +197,8 @@ function makeConfig(): EffectiveWorkflowConfig {
     workspace: {
       root: "/tmp/workspaces",
       repoPath: "/tmp/repo",
+      projectsRoot: null,
+      repoRoutes: {},
       baseBranch: "main"
     },
     hooks: {
@@ -187,22 +225,33 @@ function makeConfig(): EffectiveWorkflowConfig {
       model: null
     }
   };
+  return {
+    ...config,
+    tracker: {
+      ...config.tracker,
+      ...overrides.tracker
+    },
+    workspace: {
+      ...config.workspace,
+      ...overrides.workspace
+    }
+  };
 }
 
-function makeIssue(identifier: string): NormalizedIssue {
+function makeIssue(identifier: string, overrides: Partial<NormalizedIssue> = {}): NormalizedIssue {
   return {
-    id: identifier,
-    identifier,
-    title: `Issue ${identifier}`,
-    description: null,
-    priority: null,
-    state: "Todo",
-    branchName: null,
-    url: null,
-    labels: [],
-    blockedBy: [],
-    createdAt: null,
-    updatedAt: null
+    id: overrides.id ?? identifier,
+    identifier: overrides.identifier ?? identifier,
+    title: overrides.title ?? `Issue ${identifier}`,
+    description: overrides.description ?? null,
+    priority: overrides.priority ?? null,
+    state: overrides.state ?? "Todo",
+    branchName: overrides.branchName ?? null,
+    url: overrides.url ?? null,
+    labels: overrides.labels ?? [],
+    blockedBy: overrides.blockedBy ?? [],
+    createdAt: overrides.createdAt ?? null,
+    updatedAt: overrides.updatedAt ?? null
   };
 }
 
@@ -211,6 +260,8 @@ function makeWorkspace(issue: NormalizedIssue): WorkspaceInfo {
     path: `/tmp/workspaces/${issue.identifier}`,
     workspaceKey: issue.identifier,
     branchName: `symphony/${issue.identifier}`,
+    repoKey: null,
+    repoPath: "/tmp/repo",
     createdNow: false
   };
 }
