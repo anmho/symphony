@@ -91,11 +91,11 @@ final class StatusService: ObservableObject {
     }
 
     func openWatch() {
-        runDetached(["watch"])
+        openInTerminal(["watch"])
     }
 
     func openLogs(for identifier: String) {
-        runDetached(["logs", identifier, "-f"])
+        openInTerminal(["logs", identifier, "-f"])
     }
 
     func openDaemonLog() {
@@ -184,10 +184,10 @@ final class StatusService: ObservableObject {
         }
     }
 
-    private func runDetached(_ arguments: [String]) {
+    private func openInTerminal(_ arguments: [String]) {
         actionError = nil
         do {
-            _ = try SymphonyCLI.runDetached(arguments, statusPort: settings.statusPort)
+            try TerminalLauncher.openSymphonyCommand(arguments, statusPort: settings.statusPort)
         } catch {
             actionError = error.localizedDescription
         }
