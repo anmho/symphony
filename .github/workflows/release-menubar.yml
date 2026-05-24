@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Menu bar app version (e.g. 0.1.0)
+        description: Menu bar app version (e.g. 0.1.2)
         required: true
-        default: "0.1.0"
+        default: "0.1.2"
   push:
     tags:
       - "menubar-v*"
@@ -15,16 +15,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            arch_label: aarch64
-          - runner: macos-13
-            arch_label: x64
-    runs-on: ${{ matrix.runner }}
+  build-aarch64:
+    runs-on: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,16 +40,20 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: symphony-menubar-${{ matrix.arch_label }}
+          name: symphony-menubar-aarch64
           path: |
-            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_${{ matrix.arch_label }}.app.tar.gz
-            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_${{ matrix.arch_label }}.dmg
+            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_aarch64.app.tar.gz
+            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_aarch64.dmg
+            macos/SymphonyMenuBar/dist/checksums-${{ steps.version.outputs.value }}.txt
             macos/SymphonyMenuBar/dist/*.sha256
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
+  build-x64:
+    runs-on: macos-13
+    continue-on-error: true
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Resolve version
         id: version
         run: |
@@ -67,11 +63,39 @@ jobs:
             version="${{ inputs.version }}"
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package app
+        working-directory: macos/SymphonyMenuBar
+        run: |
+          chmod +x build.sh package.sh
+          ./package.sh "${{ steps.version.outputs.value }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: symphony-menubar-x64
+          path: |
+            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_x64.app.tar.gz
+            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_x64.dmg
+            macos/SymphonyMenuBar/dist/*.sha256
+
+  release:
+    needs: [build-aarch64, build-x64]
+    if: always() && needs.build-aarch64.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: version
+        run: |
           if [[ "${GITHUB_REF}" == refs/tags/menubar-v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            version="${GITHUB_REF_NAME#menubar-v}"
+            tag="${GITHUB_REF_NAME}"
           else
-            echo "tag=menubar-v${version}" >> "$GITHUB_OUTPUT"
+            version="${{ inputs.version }}"
+            tag="menubar-v${version}"
           fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -79,12 +103,31 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Write latest manifest
+        run: |
+          version="${{ steps.version.outputs.value }}"
+          cat > artifacts/latest-menubar.json <<EOF
+          {
+            "version": "${version}",
+            "tag": "${{ steps.version.outputs.tag }}",
+            "platforms": {
+              "aarch64": {
+                "dmg": "SymphonyMenuBar_${version}_aarch64.dmg",
+                "tarball": "SymphonyMenuBar_${version}_aarch64.app.tar.gz"
+              },
+              "x64": {
+                "dmg": "SymphonyMenuBar_${version}_x64.dmg",
+                "tarball": "SymphonyMenuBar_${version}_x64.app.tar.gz"
+              }
+            }
+          }
+          EOF
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Symphony Menu Bar v${{ steps.version.outputs.value }}
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: true
           files: |
             artifacts/**/*
