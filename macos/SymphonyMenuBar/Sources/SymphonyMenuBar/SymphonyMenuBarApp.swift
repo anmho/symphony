@@ -33,15 +33,15 @@ struct SymphonyMenuBarApp: App {
         guard statusService.isOnline, let snapshot = statusService.snapshot else {
             return nil
         }
-        let running = snapshot.running.count
-        let retries = snapshot.retryAttempts.count
-        if retries > 0 {
-            return "\(running)/\(retries)"
+        let inventory = snapshot.agentInventory()
+        guard inventory.active > 0 else { return nil }
+        if inventory.queued > 0, inventory.running > 0 {
+            return "\(inventory.active)"
         }
-        if running > 0 {
-            return "\(running)"
+        if inventory.queued > 0 {
+            return "\(inventory.queued)"
         }
-        return nil
+        return "\(inventory.running)"
     }
 
     private var menuBarSymbol: String {
@@ -72,11 +72,13 @@ struct SymphonyMenuBarApp: App {
         guard statusService.isOnline, let snapshot = statusService.snapshot else {
             return "Symphony offline"
         }
-        let running = snapshot.running.count
-        let retries = snapshot.retryAttempts.count
-        if retries > 0 {
-            return "Symphony: \(running) running, \(retries) retrying"
+        let inventory = snapshot.agentInventory()
+        if inventory.active == 0 {
+            return "Symphony: idle"
         }
-        return "Symphony: \(running) running"
+        if inventory.queued > 0 {
+            return "Symphony: \(inventory.running) running, \(inventory.queued) queued (\(inventory.active) active)"
+        }
+        return "Symphony: \(inventory.running) running"
     }
 }
