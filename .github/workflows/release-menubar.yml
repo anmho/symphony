@@ -1,0 +1,92 @@
+name: Release Menu Bar
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Menu bar app version (e.g. 0.1.0)
+        required: true
+        default: "0.1.0"
+  push:
+    tags:
+      - "menubar-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch_label: aarch64
+          - runner: macos-13
+            arch_label: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/menubar-v* ]]; then
+            version="${GITHUB_REF_NAME#menubar-v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package app
+        working-directory: macos/SymphonyMenuBar
+        run: |
+          chmod +x build.sh package.sh
+          ./package.sh "${{ steps.version.outputs.value }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: symphony-menubar-${{ matrix.arch_label }}
+          path: |
+            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_${{ matrix.arch_label }}.app.tar.gz
+            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_${{ matrix.arch_label }}.dmg
+            macos/SymphonyMenuBar/dist/*.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/menubar-v* ]]; then
+            version="${GITHUB_REF_NAME#menubar-v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF}" == refs/tags/menubar-v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=menubar-v${version}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Symphony Menu Bar v${{ steps.version.outputs.value }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

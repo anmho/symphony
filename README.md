@@ -96,15 +96,17 @@ symphony watch
 
 ### macOS menu bar monitor
 
-For a Codex-style menu bar popover with clickable Linear ticket links, build the native app in `macos/SymphonyMenuBar`:
+Native **Swift/SwiftUI** app (not Electron) — lightweight menu bar popover with clickable Linear ticket links.
+
+**Install:**
 
 ```sh
-cd macos/SymphonyMenuBar
-./build.sh
-open SymphonyMenuBar.app
+curl -fsSL https://raw.githubusercontent.com/anmho/symphony/main/macos/SymphonyMenuBar/install.sh | bash
 ```
 
-See [macos/SymphonyMenuBar/README.md](macos/SymphonyMenuBar/README.md) for settings and install notes.
+Or download a `.dmg` from [GitHub Releases](https://github.com/anmho/symphony/releases) (`menubar-v*` tags).
+
+See [macos/SymphonyMenuBar/README.md](macos/SymphonyMenuBar/README.md) for build, Homebrew cask, and settings.
 
 Follow an agent's public work stream from the CLI:
 
