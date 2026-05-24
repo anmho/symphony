@@ -13,6 +13,7 @@ import {
   queueSteer,
   resumeIssue,
 } from './status.js';
+import { isRateLimitError } from './rateLimit.js';
 import {
   computeWatchLayout,
   fillTerminalScreen,
@@ -695,25 +696,28 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
   );
 
   const retries = snapshot.retryAttempts.map(
-    (attempt): WatchRow => ({
-      kind: attempt.error === 'codex_rate_limited' ? 'parked' : 'retry',
-      issue: attempt.title
-        ? `${attempt.identifier} · ${attempt.title}`
-        : attempt.identifier,
-      issueKey: attempt.identifier,
-      age: `in ${formatDuration(attempt.dueAtMs - nowMs)}`,
-      turn: String(attempt.attempt),
-      event: 'retry',
-      updated: '-',
-      workspace: '-',
-      detail: [
-        `Issue: ${attempt.identifier}`,
-        `State: ${attempt.error === 'codex_rate_limited' ? 'parked' : 'retry'}`,
-        `Attempt: ${attempt.attempt}`,
-        `Due: ${formatTime(attempt.dueAtMs)}`,
-        `Error: ${attempt.error ?? '-'}`,
-      ],
-    }),
+    (attempt): WatchRow => {
+      const parked = isRateLimitError(attempt.error);
+      return {
+        kind: parked ? 'parked' : 'retry',
+        issue: attempt.title
+          ? `${attempt.identifier} · ${attempt.title}`
+          : attempt.identifier,
+        issueKey: attempt.identifier,
+        age: `in ${formatDuration(attempt.dueAtMs - nowMs)}`,
+        turn: String(attempt.attempt),
+        event: 'retry',
+        updated: '-',
+        workspace: '-',
+        detail: [
+          `Issue: ${attempt.identifier}`,
+          `State: ${parked ? 'parked' : 'retry'}`,
+          `Attempt: ${attempt.attempt}`,
+          `Due: ${formatTime(attempt.dueAtMs)}`,
+          `Error: ${attempt.error ?? '-'}`,
+        ],
+      };
+    },
   );
 
   const completed = snapshot.completed.map(

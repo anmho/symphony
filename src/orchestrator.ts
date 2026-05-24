@@ -17,7 +17,7 @@ import {
   sortIssuesForDispatch,
 } from './policy.js';
 import { renderIssuePrompt } from './prompt.js';
-import { isGateParked } from './rateLimit.js';
+import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { latestVisibleWorkEvents } from './status.js';
@@ -311,7 +311,7 @@ export class Orchestrator {
     };
 
     for (const attempt of this.retryAttempts.values()) {
-      if (attempt.error === 'codex_rate_limited') {
+      if (isRateLimitError(attempt.error)) {
         attempt.dueAtMs = now;
         resumed += 1;
       }
@@ -486,7 +486,7 @@ export class Orchestrator {
         config,
         issue,
         attempt.attempt,
-        attempt.error === 'codex_rate_limited',
+        isRateLimitError(attempt.error),
       );
     }
   }

@@ -254,7 +254,7 @@ export function resolveWorkflowConfig(
       maxConcurrentAgents: agent.max_concurrent_agents ?? 5,
       maxTurns: agent.max_turns ?? 20,
       maxRetryBackoffMs: agent.max_retry_backoff_ms ?? 300000,
-      rateLimitProbeIntervalMs: agent.rate_limit_probe_interval_ms ?? 300000,
+      rateLimitProbeIntervalMs: agent.rate_limit_probe_interval_ms ?? 15000,
       maxConcurrentAgentsByState: normalizeConcurrencyMap(agent.max_concurrent_agents_by_state ?? {})
     },
     codex: {
