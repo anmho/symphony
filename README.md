@@ -92,7 +92,19 @@ Monitor agents in a k9s-style terminal UI:
 symphony watch
 ```
 
-`symphony watch` reads the same local status endpoint as `symphony status`, but presents agents as a continuously refreshed resource table. It supports `j/k` or arrow navigation, `:` command mode, `/` filtering, `?` help, `d` describe, `l` logs, `s` steer, `r` retry/resume selected, `ctrl-r` refresh, and `q` quit.
+`symphony watch` reads the same local status endpoint as `symphony status`, but presents agents as a continuously refreshed resource table. It supports `j/k` or arrow navigation, `:` command mode, `/` filtering, `?` help, `d` describe, `l` logs, `s` steer, `r` retry/resume selected, `ctrl-r` refresh, and `q` quit. The watch UI expands to fill the terminal width and height (k9s-style flex columns and dynamic log viewport).
+
+### macOS menu bar monitor
+
+For a Codex-style menu bar popover with clickable Linear ticket links, build the native app in `macos/SymphonyMenuBar`:
+
+```sh
+cd macos/SymphonyMenuBar
+./build.sh
+open SymphonyMenuBar.app
+```
+
+See [macos/SymphonyMenuBar/README.md](macos/SymphonyMenuBar/README.md) for settings and install notes.
 
 Follow an agent's public work stream from the CLI:
 
