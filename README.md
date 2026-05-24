@@ -19,7 +19,7 @@ The default posture is high-trust local execution. Symphony is intended for repo
 - [Symphony smoke](docs/symphony-smoke.md)
 - [Release process](docs/release.md)
 - [Linear issue templates for Symphony dispatch](templates/README.md)
-- [Cursor agent skill](skills/symphony/SKILL.md) — install with `npx skills add anmho/skills --skill symphony --global -y`
+- [Cursor agent skill](https://github.com/anmho/skills/tree/main/skills/symphony) — install with `npx skills add anmho/skills --skill symphony --global -y`
 
 ## Requirements
 
