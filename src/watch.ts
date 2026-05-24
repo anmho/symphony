@@ -511,7 +511,7 @@ async function selectedIssue(port: number, filterText: string, selectedIndex: nu
 function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
   const running = snapshot.running.map((session): WatchRow => ({
     kind: "running",
-    issue: session.identifier,
+    issue: session.title ? `${session.identifier} · ${session.title}` : session.identifier,
     age: formatDuration(nowMs - session.startedAtMs),
     turn: String(session.turnCount),
     event: session.lastCodexEvent ?? "-",
@@ -535,7 +535,7 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
 
   const retries = snapshot.retryAttempts.map((attempt): WatchRow => ({
     kind: attempt.error === "codex_rate_limited" ? "parked" : "retry",
-    issue: attempt.identifier,
+    issue: attempt.title ? `${attempt.identifier} · ${attempt.title}` : attempt.identifier,
     age: `in ${formatDuration(attempt.dueAtMs - nowMs)}`,
     turn: String(attempt.attempt),
     event: "retry",

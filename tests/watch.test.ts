@@ -166,6 +166,7 @@ function makeSnapshot(): OrchestratorSnapshot {
       {
         issueId: "issue-1",
         identifier: "ANM-1",
+        title: "Example Symphony issue",
         repoKey: null,
         workspacePath: "/tmp/workspaces/ANM-1",
         eventLogPath: "/tmp/.symphony/events/ANM-1.jsonl",
