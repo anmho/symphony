@@ -19,9 +19,9 @@ final class StatusPanelController {
             return
         }
 
-        let content = NSHostingView(rootView: MenuContentView(service: statusService))
+        let content = NSHostingView(rootView: SymphonyPanelView(service: statusService))
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 388, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 500),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false

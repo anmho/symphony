@@ -10,8 +10,8 @@ Source lives here in the symphony repo; **users install the packaged release**, 
 
 ## Features
 
-- Native menu bar dropdown with agent ticket links, Start/Stop, Watch, and Refresh
-- Status panel with running/retry/parked rows and Linear links
+- **OpenUsage-style panel** — click the menu bar icon for a sidebar + detail layout (Overview, Running, Waiting, Done, Settings)
+- Metric cards with progress bars, rate-limit countdown, and agent rows with Linear links
 - Live status from Symphony `GET /status`
 - CLI controls via `symphony start`, `stop`, `watch`, and HTTP resume/steer endpoints
 - **macOS notifications** when status changes (rate limit, agent started/finished/parked, offline)
