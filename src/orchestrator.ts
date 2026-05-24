@@ -179,6 +179,7 @@ export class Orchestrator {
   async start(): Promise<void> {
     this.stopped = false;
     const config = await this.reloadConfig(true);
+    await this.cleanupTerminalWorkspaces(config);
     await this.tick();
     this.scheduleNextTick(config.polling.intervalMs);
   }
@@ -323,10 +324,9 @@ export class Orchestrator {
   private async runTick(): Promise<void> {
     const config = await this.reloadConfig(false);
     this.lastTickAtMs = this.deps.now();
-    const terminalIssues = await this.refreshCompletedFromLinear(config);
 
     if (!this.startupCleanupDone) {
-      await this.cleanupTerminalWorkspaces(config, terminalIssues);
+      await this.cleanupTerminalWorkspaces(config);
     }
 
     await this.reconcileRunning(config);
@@ -385,11 +385,10 @@ export class Orchestrator {
 
   private async cleanupTerminalWorkspaces(
     config: EffectiveWorkflowConfig,
-    terminalIssues: NormalizedIssue[] | null = null,
   ): Promise<void> {
     this.startupCleanupDone = true;
-    const issues = terminalIssues ?? (await this.deps.fetchTerminalIssues(config));
-    for (const issue of issues) {
+    const terminalIssues = await this.deps.fetchTerminalIssues(config);
+    for (const issue of terminalIssues) {
       let workspace: WorkspaceInfo;
       try {
         workspace = this.deps.workspaceInfoForIssue(config, issue);
@@ -417,18 +416,6 @@ export class Orchestrator {
     }
   }
 
-  private async refreshCompletedFromLinear(
-    config: EffectiveWorkflowConfig,
-  ): Promise<NormalizedIssue[]> {
-    const terminalIssues = await this.deps.fetchTerminalIssues(config);
-    for (const issue of terminalIssues) {
-      this.completed.add(issue.identifier);
-      this.retryAttempts.delete(issue.id);
-      this.claimed.delete(issue.id);
-    }
-    return terminalIssues;
-  }
-
   private async reconcileRunning(
     config: EffectiveWorkflowConfig,
   ): Promise<void> {
@@ -443,14 +430,11 @@ export class Orchestrator {
           return null;
         });
 
-      if (latestIssue && isTerminalState(latestIssue.state, config)) {
-        this.completed.add(latestIssue.identifier);
-        entry.cancelReason = `state_${latestIssue.state}`;
-        entry.abortController.abort();
-        continue;
-      }
-
-      if (!latestIssue || !isActiveState(latestIssue.state, config)) {
+      if (
+        !latestIssue ||
+        isTerminalState(latestIssue.state, config) ||
+        !isActiveState(latestIssue.state, config)
+      ) {
         entry.cancelReason = latestIssue
           ? `state_${latestIssue.state}`
           : 'issue_not_found';
@@ -606,7 +590,7 @@ export class Orchestrator {
       entry.session.title = issue.title;
       if (isTerminalState(issue.state, config)) {
         await this.cleanupIssueWorkspace(config, issue);
-        this.completed.add(issue.identifier);
+        this.completed.add(issue.id);
         this.releaseIssue(issue.id);
         return;
       }
