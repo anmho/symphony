@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchCandidateIssues, fetchIssueLabelNames, moveIssueToState } from "../src/linear.js";
+import { fetchCandidateIssues, fetchIssueLabelNames, fetchTerminalIssues, moveIssueToState } from "../src/linear.js";
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {
@@ -56,6 +56,41 @@ describe("linear client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("filters terminal issue queries by configured required labels", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
+      expect(body.query).toContain("$teamKey: String!");
+      expect(body.query).toContain("$requiredLabels: [String!]");
+      expect(body.query).toContain("labels: { some: { name: { in: $requiredLabels } } }");
+      expect(body.variables).toEqual({
+        states: ["Done"],
+        teamKey: "ANM",
+        requiredLabels: ["symphony"]
+      });
+      return response({
+        issues: {
+          nodes: [
+            terminalIssueNode("issue-1", "ANM-1", ["symphony"]),
+            terminalIssueNode("issue-2", "ANM-2", ["other"])
+          ]
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchTerminalIssues(
+        makeConfig({
+          projectSlug: null,
+          teamKey: "ANM",
+          requiredLabels: ["symphony"]
+        })
+      )
+    ).resolves.toMatchObject([{ identifier: "ANM-1" }]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("moves an issue to a named workflow state", async () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
@@ -88,7 +123,11 @@ describe("linear client", () => {
   });
 });
 
-function makeConfig(tracker: { projectSlug: string | null; teamKey: string | null }): EffectiveWorkflowConfig {
+function makeConfig(tracker: {
+  projectSlug: string | null;
+  teamKey: string | null;
+  requiredLabels?: string[];
+}): EffectiveWorkflowConfig {
   return {
     tracker: {
       kind: "linear",
@@ -96,7 +135,7 @@ function makeConfig(tracker: { projectSlug: string | null; teamKey: string | nul
       apiKey: "lin_test",
       projectSlug: tracker.projectSlug,
       teamKey: tracker.teamKey,
-      requiredLabels: [],
+      requiredLabels: tracker.requiredLabels ?? [],
       repoLabelPrefix: "repo:",
       activeStates: ["Todo"],
       terminalStates: ["Done"],
@@ -110,4 +149,15 @@ function response(data: unknown): Response {
     ok: true,
     json: async () => ({ data })
   } as Response;
+}
+
+function terminalIssueNode(id: string, identifier: string, labels: string[]) {
+  return {
+    id,
+    identifier,
+    title: `Issue ${identifier}`,
+    state: { name: "Done" },
+    labels: { nodes: labels.map((name) => ({ name })) },
+    relations: { nodes: [] }
+  };
 }

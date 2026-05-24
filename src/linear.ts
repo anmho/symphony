@@ -111,7 +111,9 @@ export async function fetchIssueById(config: EffectiveWorkflowConfig, issueId: s
 }
 
 export async function fetchTerminalIssues(config: EffectiveWorkflowConfig): Promise<NormalizedIssue[]> {
-  const { filter, variableDefinitions, variables } = issueScopeFilter(config, config.tracker.terminalStates);
+  const { filter, variableDefinitions, variables } = issueScopeFilter(config, config.tracker.terminalStates, {
+    includeRequiredLabels: true
+  });
   const data = await linearGraphql<IssuesQueryData>(
     config,
     `
@@ -127,7 +129,9 @@ export async function fetchTerminalIssues(config: EffectiveWorkflowConfig): Prom
     variables
   );
 
-  return (data.issues?.nodes ?? []).map(normalizeLinearIssue).filter(Boolean);
+  return (data.issues?.nodes ?? [])
+    .map(normalizeLinearIssue)
+    .filter((issue) => hasRequiredLabels(issue, config.tracker.requiredLabels));
 }
 
 export async function writeRunnerComment(
@@ -507,7 +511,8 @@ function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {
 
 function issueScopeFilter(
   config: EffectiveWorkflowConfig,
-  states: string[]
+  states: string[],
+  options: { includeRequiredLabels?: boolean } = {}
 ): { filter: string; variableDefinitions: string; variables: Record<string, unknown> } {
   const filters = ["state: { name: { in: $states } }"];
   const variableDefinitions = ["$states: [String!]"];
@@ -525,9 +530,23 @@ function issueScopeFilter(
     variables.teamKey = config.tracker.teamKey;
   }
 
+  if (options.includeRequiredLabels && config.tracker.requiredLabels.length > 0) {
+    filters.push("labels: { some: { name: { in: $requiredLabels } } }");
+    variableDefinitions.push("$requiredLabels: [String!]");
+    variables.requiredLabels = config.tracker.requiredLabels;
+  }
+
   return {
     filter: `{ ${filters.join(", ")} }`,
     variableDefinitions: variableDefinitions.join(", "),
     variables
   };
+}
+
+function hasRequiredLabels(issue: NormalizedIssue, requiredLabels: string[]): boolean {
+  if (requiredLabels.length === 0) {
+    return true;
+  }
+  const labels = new Set(issue.labels.map((label) => label.toLowerCase()));
+  return requiredLabels.every((label) => labels.has(label.toLowerCase()));
 }
