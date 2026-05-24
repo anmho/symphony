@@ -1,0 +1,26 @@
+{
+  "startedAtMs": 10000,
+  "running": [],
+  "retryAttempts": [
+    {
+      "issueId": "82404ae9-712c-4271-bc28-9b0a6f305536",
+      "identifier": "ANM-279",
+      "attempt": 30,
+      "dueAtMs": 1779586607168,
+      "error": "{\"message\":\"You've hit your usage limit.\",\"codexErrorInfo\":\"usageLimitExceeded\"}"
+    },
+    {
+      "issueId": "8b55a5e9-a2f7-4c1a-9079-502fda918068",
+      "identifier": "ANM-276",
+      "attempt": 28,
+      "dueAtMs": 1779586686989,
+      "error": "codex_rate_limited"
+    }
+  ],
+  "completed": [],
+  "codexRateLimit": {
+    "resumeAfterMs": 1779595170136,
+    "reason": "codex_rate_limited"
+  },
+  "lastConfigError": null
+}

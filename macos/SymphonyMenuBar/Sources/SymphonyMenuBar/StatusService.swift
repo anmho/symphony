@@ -9,6 +9,8 @@ final class StatusService: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var lastUpdated = Date()
     @Published var actionError: String?
+    @Published var actionMessage: String?
+    @Published private(set) var isBusy = false
 
     var settings = AppSettings.load()
 
@@ -64,25 +66,125 @@ final class StatusService: ObservableObject {
     }
 
     func openIssue(_ identifier: String) {
-        guard let url = linearIssueURL(for: identifier, orgSlug: settings.linearOrgSlug) else { return }
+        guard let url = linearIssueURL(for: identifier, orgSlug: settings.linearOrgSlug) else {
+            actionError = "No Linear link for \(identifier). Check the org slug in Settings."
+            return
+        }
         NSWorkspace.shared.open(url)
     }
 
     func openWatch() {
-        runCLI(["watch"])
+        runDetached(["watch"])
     }
 
     func openLogs(for identifier: String) {
-        runCLI(["logs", identifier, "-f"])
+        runDetached(["logs", identifier, "-f"])
     }
 
-    private func runCLI(_ arguments: [String]) {
+    func openDaemonLog() {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".symphony/symphony-\(settings.statusPort).log")
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            actionError = "No log file at \(path.path)."
+            return
+        }
+        NSWorkspace.shared.open(path)
+    }
+
+    func startSymphony() {
+        performCLI(["start"], success: "Symphony started.") {
+            try await self.waitForOnline()
+        }
+    }
+
+    func stopSymphony() {
+        performCLI(["stop"], success: "Symphony stopped.") {
+            self.snapshot = nil
+            self.isOnline = false
+        }
+    }
+
+    func resumeRateLimited() {
+        performControl(success: "Resumed rate-limited runs.") {
+            let result = try await StatusControl.resumeRateLimited(port: self.settings.statusPort)
+            return "Resumed \(result.resumed) run\(result.resumed == 1 ? "" : "s")."
+        }
+    }
+
+    func resumeIssue(_ identifier: String) {
+        performControl(success: "Queued \(identifier) for retry.") {
+            let result = try await StatusControl.resumeIssue(identifier, port: self.settings.statusPort)
+            if result.resumed {
+                return "Resumed \(result.issue)."
+            }
+            return "\(result.issue) was not queued for retry."
+        }
+    }
+
+    private func performCLI(
+        _ arguments: [String],
+        success: String,
+        afterSuccess: (() async throws -> Void)? = nil
+    ) {
+        guard !isBusy else { return }
+        actionError = nil
+        actionMessage = nil
+        isBusy = true
+
+        Task {
+            defer { isBusy = false }
+            do {
+                _ = try SymphonyCLI.runSync(arguments, statusPort: settings.statusPort)
+                if let afterSuccess {
+                    try await afterSuccess()
+                }
+                actionMessage = success
+                refresh()
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func performControl(
+        success: String,
+        operation: @escaping () async throws -> String
+    ) {
+        guard !isBusy else { return }
+        actionError = nil
+        actionMessage = nil
+        isBusy = true
+
+        Task {
+            defer { isBusy = false }
+            do {
+                let message = try await operation()
+                actionMessage = message.isEmpty ? success : message
+                refresh()
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func runDetached(_ arguments: [String]) {
         actionError = nil
         do {
-            _ = try SymphonyCLI.run(arguments, statusPort: settings.statusPort)
+            _ = try SymphonyCLI.runDetached(arguments, statusPort: settings.statusPort)
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    private func waitForOnline() async throws {
+        for _ in 0 ..< 50 {
+            refresh()
+            try await Task.sleep(nanoseconds: 200_000_000)
+            if isOnline {
+                return
+            }
+        }
+        throw SymphonyCLIError.failed(exitCode: 1, output: "Symphony did not become reachable on port \(settings.statusPort).")
     }
 }
 

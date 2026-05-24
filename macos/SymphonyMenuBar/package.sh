@@ -17,20 +17,20 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-APP_TAR="$DIST/SymphonyMenuBar_${VERSION}_${ARCH_LABEL}.app.tar.gz"
-DMG="$DIST/SymphonyMenuBar_${VERSION}_${ARCH_LABEL}.dmg"
+APP_TAR="$DIST/Symphony_${VERSION}_${ARCH_LABEL}.app.tar.gz"
+DMG="$DIST/Symphony_${VERSION}_${ARCH_LABEL}.dmg"
 CHECKSUMS="$DIST/checksums-${VERSION}.txt"
 
-tar -czf "$APP_TAR" -C "$ROOT" SymphonyMenuBar.app
+tar -czf "$APP_TAR" -C "$DIST" Symphony.app
 shasum -a 256 "$APP_TAR" > "$APP_TAR.sha256"
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-cp -R "$ROOT/SymphonyMenuBar.app" "$staging/"
+cp -R "$DIST/Symphony.app" "$staging/"
 ln -s /Applications "$staging/Applications"
 
 hdiutil create \
-  -volname "Symphony Menu Bar" \
+  -volname "Symphony" \
   -srcfolder "$staging" \
   -ov \
   -format UDZO \

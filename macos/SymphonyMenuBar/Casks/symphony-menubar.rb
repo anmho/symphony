@@ -1,18 +1,18 @@
 cask "symphony-menubar" do
-  version "0.1.4"
+  version "0.1.6"
   sha256 :no_check
 
   arch arm: "aarch64", intel: "x64"
 
-  url "https://github.com/anmho/symphony/releases/download/menubar-v#{version}/SymphonyMenuBar_#{version}_#{arch}.dmg"
+  url "https://github.com/anmho/symphony/releases/download/menubar-v#{version}/Symphony_#{version}_#{arch}.dmg"
 
-  name "Symphony Menu Bar"
+  name "Symphony"
   desc "Monitor local Symphony agents and open Linear tickets from the menu bar"
   homepage "https://github.com/anmho/symphony/tree/main/macos/SymphonyMenuBar"
 
   depends_on macos: ">= :ventura"
 
-  app "SymphonyMenuBar.app"
+  app "Symphony.app"
 
   zap trash: [
     "~/Library/Preferences/com.anmho.symphony.menubar.plist"

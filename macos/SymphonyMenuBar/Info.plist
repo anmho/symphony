@@ -4,8 +4,10 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Symphony</string>
     <key>CFBundleExecutable</key>
-    <string>SymphonyMenuBar</string>
+    <string>Symphony</string>
     <key>CFBundleIdentifier</key>
     <string>com.anmho.symphony.menubar</string>
     <key>CFBundleName</key>
