@@ -46,6 +46,16 @@ describe("codex app-server RPC", () => {
       objective: goalObjectiveForIssue({ issue })
     });
   });
+
+  it("accepts turn completion notifications that only match the thread id", async () => {
+    const { command, workspacePath } = await createFakeAppServer({ completedTurnId: "turn-notification" });
+    const issue = makeIssue("ANM-125", "Stop stale running sessions");
+
+    const result = await runCodexTurn(makeInput({ command, issue, threadId: null, workspacePath }));
+
+    expect(result.status).toBe("completed");
+    expect(result.turnId).toBe("turn-1");
+  });
 });
 
 interface RecordedRequest {
@@ -53,13 +63,15 @@ interface RecordedRequest {
   params: Record<string, unknown>;
 }
 
-async function createFakeAppServer(): Promise<{ command: string; requestLogPath: string; workspacePath: string }> {
+async function createFakeAppServer(
+  options: { completedTurnId?: string } = {}
+): Promise<{ command: string; requestLogPath: string; workspacePath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-fake-app-server-"));
   const serverPath = path.join(dir, "server.mjs");
   const requestLogPath = path.join(dir, "requests.json");
   const workspacePath = path.join(dir, "workspace");
   await mkdir(workspacePath);
-  await writeFile(serverPath, fakeAppServerSource());
+  await writeFile(serverPath, fakeAppServerSource(options));
   return {
     command: `SYMPHONY_FAKE_REQUEST_LOG=${shellQuote(requestLogPath)} node ${shellQuote(serverPath)}`,
     requestLogPath,
@@ -71,7 +83,8 @@ async function readRequests(requestLogPath: string): Promise<RecordedRequest[]> 
   return JSON.parse(await readFile(requestLogPath, "utf8")) as RecordedRequest[];
 }
 
-function fakeAppServerSource(): string {
+function fakeAppServerSource(options: { completedTurnId?: string }): string {
+  const completedTurnId = JSON.stringify(options.completedTurnId ?? "turn-1");
   return `
 import { writeFileSync } from "node:fs";
 import readline from "node:readline";
@@ -131,7 +144,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     setTimeout(() => send({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: message.params.threadId, turn: { id: "turn-1", status: "completed" } }
+      params: { threadId: message.params.threadId, turn: { id: ${completedTurnId}, status: "completed" } }
     }), 5);
     return;
   }

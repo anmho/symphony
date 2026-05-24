@@ -203,7 +203,7 @@ class CodexJsonRpcClient {
 
       if (notification.method === "turn/completed") {
         const params = notification.params as { threadId?: string; turn?: { id?: string; status?: string; error?: unknown } };
-        if (params.threadId === threadId && (!turnId || params.turn?.id === turnId)) {
+        if (params.threadId === threadId) {
           const status = params.turn?.status === "failed" ? "failed" : "completed";
           const turnError = params.turn?.error ? JSON.stringify(params.turn.error) : null;
           const errorRateLimit = turnError && /usageLimitExceeded|rate[_ ]?limit/i.test(turnError);
