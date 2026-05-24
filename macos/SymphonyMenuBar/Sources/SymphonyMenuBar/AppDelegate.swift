@@ -96,8 +96,8 @@ struct OnboardingView: View {
                 )
                 onboardingStep(
                     number: 3,
-                    title: "Click to monitor agents",
-                    detail: "The popover shows running Symphony agents and links to Linear tickets."
+                    title: "Click to open the panel",
+                    detail: "The panel shows running agents, waiting retries, and Codex rate limit status — like OpenUsage."
                 )
             }
 

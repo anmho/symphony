@@ -7,67 +7,13 @@ struct SymphonyMenuBarApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            menuContent
+            SymphonyPanelView(service: statusService)
                 .onAppear { statusService.start() }
                 .onDisappear { statusService.stop() }
         } label: {
             menuBarLabel
         }
-        .menuBarExtraStyle(.menu)
-    }
-
-    @ViewBuilder
-    private var menuContent: some View {
-        if let snapshot = statusService.snapshot, statusService.isOnline {
-            let rows = snapshot.agentRows()
-            if rows.isEmpty {
-                Text("No agents yet.")
-            } else {
-                ForEach(rows.prefix(12)) { row in
-                    Button {
-                        statusService.openIssue(row.identifier)
-                    } label: {
-                        Text("\(row.identifier) — \(row.status)")
-                    }
-                }
-                if rows.count > 12 {
-                    Text("+\(rows.count - 12) more…")
-                }
-            }
-            Divider()
-        }
-
-        if statusService.isOnline {
-            Button("Stop Symphony") {
-                statusService.stopSymphony()
-            }
-            .disabled(statusService.isBusy)
-            if statusService.snapshot?.codexRateLimit.resumeAfterMs != nil {
-                Button("Resume Rate-Limited Runs") {
-                    statusService.resumeRateLimited()
-                }
-                .disabled(statusService.isBusy)
-            }
-        } else {
-            Button("Start Symphony") {
-                statusService.startSymphony()
-            }
-            .disabled(statusService.isBusy)
-        }
-
-        Button("Watch") {
-            statusService.openWatch()
-        }
-        Button("Refresh Status") {
-            statusService.refresh()
-        }
-        Button("Open Status Panel…") {
-            StatusPanelController.shared.show(statusService: statusService)
-        }
-        Divider()
-        Button("Quit Symphony") {
-            NSApplication.shared.terminate(nil)
-        }
+        .menuBarExtraStyle(.window)
     }
 
     private var menuBarLabel: some View {
