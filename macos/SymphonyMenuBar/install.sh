@@ -70,6 +70,19 @@ verify_checksum() {
   [[ "$expected" == "$actual" ]] || die "checksum mismatch for $(basename "$file")"
 }
 
+clear_quarantine() {
+  local target="$1"
+  while IFS= read -r -d '' path; do
+    xattr -d com.apple.quarantine "$path" 2>/dev/null || true
+  done < <(find "$target" -print0)
+}
+
+WORKDIR=""
+
+cleanup() {
+  [[ -n "$WORKDIR" ]] && rm -rf "$WORKDIR"
+}
+
 main() {
   require_cmd curl
   require_cmd tar
@@ -79,7 +92,7 @@ main() {
     die "Symphony Menu Bar requires macOS"
   fi
 
-  local version arch asset checksum_asset url tmpdir app_path
+  local version arch asset checksum_asset url app_path
   version="$(resolve_version)"
   arch="$(detect_arch)"
   asset="SymphonyMenuBar_${version}_${arch}.app.tar.gz"
@@ -87,21 +100,21 @@ main() {
   url="https://github.com/${REPO}/releases/download/menubar-v${version}/${asset}"
 
   log "Installing Symphony Menu Bar ${version} (${arch})"
-  tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
+  WORKDIR="$(mktemp -d)"
+  trap cleanup EXIT
 
-  curl -fsSL "$url" -o "$tmpdir/$asset"
-  curl -fsSL "${url}.sha256" -o "$tmpdir/$checksum_asset" 2>/dev/null || true
-  verify_checksum "$tmpdir/$asset"
-  tar -xzf "$tmpdir/$asset" -C "$tmpdir"
+  curl -fsSL "$url" -o "$WORKDIR/$asset"
+  curl -fsSL "${url}.sha256" -o "$WORKDIR/$checksum_asset" 2>/dev/null || true
+  verify_checksum "$WORKDIR/$asset"
+  tar -xzf "$WORKDIR/$asset" -C "$WORKDIR"
 
-  app_path="$tmpdir/$APP_NAME"
+  app_path="$WORKDIR/$APP_NAME"
   [[ -d "$app_path" ]] || die "archive did not contain $APP_NAME"
 
   mkdir -p "$INSTALL_DIR"
   rm -rf "$INSTALL_DIR/$APP_NAME"
   cp -R "$app_path" "$INSTALL_DIR/$APP_NAME"
-  xattr -dr com.apple.quarantine "$INSTALL_DIR/$APP_NAME" 2>/dev/null || true
+  clear_quarantine "$INSTALL_DIR/$APP_NAME"
 
   log "Installed to $INSTALL_DIR/$APP_NAME"
   log "Launch: open -a SymphonyMenuBar"
