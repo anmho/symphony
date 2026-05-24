@@ -73,6 +73,6 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to npm
+      - name: Publish to npm with trusted publishing
         if: steps.package-version.outputs.published == 'false'
-        run: npm publish --access public --tag "$NPM_DIST_TAG"
+        run: npm publish --provenance --access public --tag "$NPM_DIST_TAG"
