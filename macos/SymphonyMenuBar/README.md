@@ -13,7 +13,7 @@ Source lives here in the symphony repo; **users install the packaged release**, 
 ### One-line install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/anmho/symphony/main/macos/SymphonyMenuBar/install.sh | bash
+curl -fsSL https://github.com/anmho/symphony/releases/latest/download/install.sh | bash
 ```
 
 ### Download DMG
@@ -44,6 +44,7 @@ Each `menubar-v*` release includes:
 | `SymphonyMenuBar_<ver>_*.app.tar.gz` | CLI/install.sh payload |
 | `*.sha256` | Checksum sidecars |
 | `latest-menubar.json` | Version manifest for install script |
+| `install.sh` | One-line installer (served from release, not raw GitHub CDN) |
 
 CI builds on tag push via [`.github/workflows/release-menubar.yml`](../../.github/workflows/release-menubar.yml).
 
