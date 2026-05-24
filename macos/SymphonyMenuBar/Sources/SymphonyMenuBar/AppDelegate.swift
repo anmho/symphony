@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        NotificationService.shared.requestAuthorizationIfNeeded()
+
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             showOnboarding()
         }

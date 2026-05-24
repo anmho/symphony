@@ -22,6 +22,9 @@ struct MenuContentView: View {
             SettingsView(settings: service.settings) { updated in
                 service.settings = updated
                 updated.save()
+                if updated.notificationsEnabled {
+                    NotificationService.shared.requestAuthorizationIfNeeded()
+                }
                 service.start()
             }
         }
@@ -264,6 +267,7 @@ struct SettingsView: View {
             Stepper(value: $settings.pollIntervalSeconds, in: 2 ... 60) {
                 Text("Poll every \(Int(settings.pollIntervalSeconds))s")
             }
+            Toggle("Status change notifications", isOn: $settings.notificationsEnabled)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
