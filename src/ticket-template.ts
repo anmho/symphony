@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +28,13 @@ const SECTION_KEYS: Array<[keyof IssueTemplateSections, string]> = [
 ];
 
 export function defaultIssueTemplatePath(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../templates/symphony-issue.md");
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(moduleDir, "../templates/symphony-issue.md"),
+    path.resolve(moduleDir, "../../templates/symphony-issue.md"),
+  ];
+  const fallback = path.resolve(moduleDir, "../templates/symphony-issue.md");
+  return candidates.find((candidate) => existsSync(candidate)) ?? fallback;
 }
 
 export async function loadIssueTemplate(templatePath = defaultIssueTemplatePath()): Promise<string> {
