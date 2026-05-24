@@ -16,7 +16,7 @@ final class StatusService: ObservableObject {
         timer?.invalidate()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: settings.pollIntervalSeconds, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.refresh()
             }
         }
@@ -32,41 +32,33 @@ final class StatusService: ObservableObject {
         let url = URL(string: "http://127.0.0.1:\(settings.statusPort)/status")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 3
+        let statusPort = settings.statusPort
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.lastUpdated = Date()
-
-                if let error {
-                    self.snapshot = nil
-                    self.isOnline = false
-                    self.lastError = error.localizedDescription
-                    return
-                }
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                lastUpdated = Date()
 
                 guard
                     let http = response as? HTTPURLResponse,
-                    (200 ..< 300).contains(http.statusCode),
-                    let data
+                    (200 ..< 300).contains(http.statusCode)
                 else {
-                    self.snapshot = nil
-                    self.isOnline = false
-                    self.lastError = "Symphony is not running on port \(self.settings.statusPort)."
+                    snapshot = nil
+                    isOnline = false
+                    lastError = "Symphony is not running on port \(statusPort)."
                     return
                 }
 
-                do {
-                    self.snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
-                    self.isOnline = true
-                    self.lastError = nil
-                } catch {
-                    self.snapshot = nil
-                    self.isOnline = false
-                    self.lastError = "Invalid status payload."
-                }
+                snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
+                isOnline = true
+                lastError = nil
+            } catch {
+                lastUpdated = Date()
+                snapshot = nil
+                isOnline = false
+                lastError = error.localizedDescription
             }
-        }.resume()
+        }
     }
 
     func openIssue(_ identifier: String) {
