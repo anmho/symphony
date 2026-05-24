@@ -1,4 +1,5 @@
 import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
+import { symphonyIssueTemplateData, SYMPHONY_ISSUE_TEMPLATE_NAME } from "./ticket-template.js";
 
 interface GraphQLResponse<T> {
   data?: T;
@@ -39,7 +40,7 @@ interface IssuesQueryData {
 
 interface IssueLabelsQueryData {
   issueLabels?: {
-    nodes?: Array<{ name?: string | null }>;
+    nodes?: Array<{ id?: string; name?: string | null }>;
     pageInfo?: IssueLabelsPageInfo;
   };
 }
@@ -206,6 +207,208 @@ export async function moveIssueToState(
   if (!updateData.issueUpdate?.success) {
     throw new Error(`linear_issue_state_update_failed: ${issueId}`);
   }
+}
+
+export async function fetchTeamByKey(
+  config: EffectiveWorkflowConfig,
+  teamKey: string
+): Promise<{ id: string; key: string; name: string }> {
+  const data = await linearGraphql<{
+    teams?: { nodes?: Array<{ id?: string; key?: string; name?: string }> };
+  }>(
+    config,
+    `
+      query SymphonyTeam($teamKey: String!) {
+        teams(filter: { key: { eq: $teamKey } }, first: 1) {
+          nodes { id key name }
+        }
+      }
+    `,
+    { teamKey }
+  );
+
+  const team = data.teams?.nodes?.[0];
+  if (!team?.id || !team.key || !team.name) {
+    throw new Error(`linear_team_not_found: ${teamKey}`);
+  }
+
+  return { id: team.id, key: team.key, name: team.name };
+}
+
+export async function fetchIssueLabelIds(
+  config: EffectiveWorkflowConfig,
+  names: string[]
+): Promise<Map<string, string>> {
+  const wanted = new Set(names.map((name) => name.toLowerCase()));
+  const ids = new Map<string, string>();
+  let cursor: string | null = null;
+
+  do {
+    const data: IssueLabelsQueryData = await linearGraphql<IssueLabelsQueryData>(
+      config,
+      `
+        query SymphonyIssueLabelIds($after: String) {
+          issueLabels(first: 100, after: $after) {
+            nodes { id name }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `,
+      { after: cursor }
+    );
+
+    for (const label of data.issueLabels?.nodes ?? []) {
+      const name = label.name?.trim();
+      const id = label.id;
+      if (!name || !id) {
+        continue;
+      }
+      const normalized = name.toLowerCase();
+      if (wanted.has(normalized)) {
+        ids.set(normalized, id);
+      }
+    }
+
+    const pageInfo: IssueLabelsPageInfo | undefined = data.issueLabels?.pageInfo;
+    cursor = pageInfo?.hasNextPage ? (pageInfo.endCursor ?? null) : null;
+  } while (cursor && ids.size < wanted.size);
+
+  return ids;
+}
+
+export async function createLinearIssue(
+  config: EffectiveWorkflowConfig,
+  input: {
+    teamId: string;
+    title: string;
+    description: string;
+    labelIds: string[];
+    lastAppliedTemplateId?: string | null;
+    stateName?: string;
+  }
+): Promise<{ id: string; identifier: string; url: string | null }> {
+  let stateId: string | undefined;
+  if (input.stateName) {
+    const states = await linearGraphql<{
+      workflowStates?: { nodes?: Array<{ id?: string; name?: string }> };
+    }>(
+      config,
+      `
+        query SymphonyWorkflowStates($teamId: ID!) {
+          workflowStates(filter: { team: { id: { eq: $teamId } } }, first: 50) {
+            nodes { id name }
+          }
+        }
+      `,
+      { teamId: input.teamId }
+    );
+    stateId = states.workflowStates?.nodes?.find(
+      (state) => state.name?.toLowerCase() === input.stateName?.toLowerCase()
+    )?.id;
+  }
+
+  const data = await linearGraphql<{
+    issueCreate?: {
+      success?: boolean;
+      issue?: { id?: string; identifier?: string; url?: string | null };
+    };
+  }>(
+    config,
+    `
+      mutation SymphonyIssueCreate($input: IssueCreateInput!) {
+        issueCreate(input: $input) {
+          success
+          issue { id identifier url }
+        }
+      }
+    `,
+    {
+      input: {
+        teamId: input.teamId,
+        title: input.title,
+        description: input.description,
+        labelIds: input.labelIds,
+        lastAppliedTemplateId: input.lastAppliedTemplateId ?? undefined,
+        stateId,
+      },
+    }
+  );
+
+  const issue = data.issueCreate?.issue;
+  if (!data.issueCreate?.success || !issue?.id || !issue.identifier) {
+    throw new Error("linear_issue_create_failed");
+  }
+
+  return {
+    id: issue.id,
+    identifier: issue.identifier,
+    url: issue.url ?? null,
+  };
+}
+
+export async function ensureSymphonyIssueTemplate(
+  config: EffectiveWorkflowConfig,
+  teamId: string,
+  description: string,
+  options: { forceBody?: string } = {}
+): Promise<{ id: string; created: boolean } | null> {
+  const existing = await linearGraphql<{
+    team?: {
+      templates?: { nodes?: Array<{ id?: string; name?: string; templateData?: { description?: string } }> };
+    };
+  }>(
+    config,
+    `
+      query SymphonyTeamTemplates($teamId: String!) {
+        team(id: $teamId) {
+          templates(filter: { type: { eq: "issue" } }) {
+            nodes { id name templateData }
+          }
+        }
+      }
+    `,
+    { teamId }
+  );
+
+  const templates = existing.team?.templates?.nodes ?? [];
+  const match = templates.find((template) => template.name === SYMPHONY_ISSUE_TEMPLATE_NAME);
+  if (match?.id) {
+    return { id: match.id, created: false };
+  }
+
+  const templateBody = options.forceBody ?? description;
+  const created = await linearGraphql<{
+    templateCreate?: { success?: boolean; template?: { id?: string } };
+  }>(
+    config,
+    `
+      mutation SymphonyTemplateCreate($input: TemplateCreateInput!) {
+        templateCreate(input: $input) {
+          success
+          template { id name }
+        }
+      }
+    `,
+    {
+      input: {
+        name: SYMPHONY_ISSUE_TEMPLATE_NAME,
+        type: "issue",
+        teamId,
+        description: "Structured agent brief for Symphony dispatch (context, decisions, acceptance criteria).",
+        templateData: symphonyIssueTemplateData(templateBody),
+      },
+    }
+  );
+
+  const templateId = created.templateCreate?.template?.id;
+  if (!created.templateCreate?.success || !templateId) {
+    return null;
+  }
+
+  return { id: templateId, created: true };
 }
 
 export async function fetchIssueLabelNames(config: EffectiveWorkflowConfig): Promise<string[]> {
