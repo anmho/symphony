@@ -67,6 +67,7 @@ class CodexJsonRpcClient {
   private readonly pending = new Map<number, PendingRequest>();
   private readonly notifications: JsonRpcNotification[] = [];
   private readonly child: ChildProcessWithoutNullStreams;
+  private stderrTail = "";
   private closed = false;
 
   private readonly onEvent: ((event: CodexRunEvent) => void) | undefined;
@@ -77,6 +78,7 @@ class CodexJsonRpcClient {
     this.onEvent?.({ type: "process_started", pid: child.pid ?? null });
     child.stdout.on("data", (chunk: Buffer) => this.handleData(chunk));
     child.stderr.on("data", (chunk: Buffer) => {
+      this.stderrTail = `${this.stderrTail}${chunk.toString("utf8")}`.slice(-4000);
       this.onEvent?.({ type: "stderr", bytes: chunk.length });
     });
     options.signal?.addEventListener("abort", () => {
@@ -86,7 +88,8 @@ class CodexJsonRpcClient {
       this.closed = true;
       for (const [id, pending] of this.pending) {
         this.pending.delete(id);
-        pending.reject(new Error(`codex_app_server_closed: ${pending.method}`));
+        const stderr = this.stderrTail.trim();
+        pending.reject(new Error(`codex_app_server_closed: ${pending.method}${stderr ? `: ${stderr}` : ""}`));
       }
     });
   }
