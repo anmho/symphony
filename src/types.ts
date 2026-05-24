@@ -181,6 +181,7 @@ export interface OrchestratorSnapshot {
   running: LiveSession[];
   claimed: string[];
   retryAttempts: RunAttempt[];
+  handoff: string[];
   completed: string[];
   codexTotals: CodexUsageTotals;
   codexRateLimit: CodexRateLimitSnapshot;

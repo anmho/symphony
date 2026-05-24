@@ -1,6 +1,7 @@
 import { loadWorkflowConfig } from './config.js';
 import {
   fetchCandidateIssues,
+  fetchHandoffIssues,
   fetchIssueById,
   fetchTerminalIssues,
   moveIssueToState,
@@ -56,6 +57,9 @@ export interface OrchestratorDependencies {
   fetchTerminalIssues: (
     config: EffectiveWorkflowConfig,
   ) => Promise<NormalizedIssue[]>;
+  fetchHandoffIssues: (
+    config: EffectiveWorkflowConfig,
+  ) => Promise<NormalizedIssue[]>;
   writeRunnerComment: (
     config: EffectiveWorkflowConfig,
     issueId: string,
@@ -100,6 +104,16 @@ export interface OrchestratorDependencies {
   eventStore: AgentWorkEventStore;
 }
 
+function isHandoffState(
+  state: string,
+  config: EffectiveWorkflowConfig,
+): boolean {
+  return Boolean(
+    config.tracker.handoffState &&
+      state.toLowerCase() === config.tracker.handoffState.toLowerCase(),
+  );
+}
+
 export interface OrchestratorOptions {
   workflowPath: string;
   pollOnce?: boolean;
@@ -132,6 +146,7 @@ export class Orchestrator {
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RunAttempt>();
+  private readonly handoff = new Set<string>();
   private readonly completed = new Set<string>();
   private readonly codexTotals: CodexUsageTotals = {
     inputTokens: 0,
@@ -155,6 +170,7 @@ export class Orchestrator {
     this.deps = {
       loadWorkflowConfig,
       fetchCandidateIssues,
+      fetchHandoffIssues,
       fetchIssueById,
       fetchTerminalIssues,
       writeRunnerComment,
@@ -222,6 +238,7 @@ export class Orchestrator {
       retryAttempts: [...this.retryAttempts.values()].map((attempt) => ({
         ...attempt,
       })),
+      handoff: [...this.handoff],
       completed: [...this.completed],
       codexTotals: { ...this.codexTotals },
       codexRateLimit: { ...this.codexRateLimit },
@@ -324,6 +341,7 @@ export class Orchestrator {
     const config = await this.reloadConfig(false);
     this.lastTickAtMs = this.deps.now();
     const terminalIssues = await this.refreshCompletedFromLinear(config);
+    await this.refreshHandoffFromLinear(config);
 
     if (!this.startupCleanupDone) {
       await this.cleanupTerminalWorkspaces(config, terminalIssues);
@@ -423,10 +441,27 @@ export class Orchestrator {
     const terminalIssues = await this.deps.fetchTerminalIssues(config);
     for (const issue of terminalIssues) {
       this.completed.add(issue.identifier);
+      this.handoff.delete(issue.identifier);
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
     }
     return terminalIssues;
+  }
+
+  private async refreshHandoffFromLinear(
+    config: EffectiveWorkflowConfig,
+  ): Promise<NormalizedIssue[]> {
+    const handoffIssues = await this.deps.fetchHandoffIssues(config);
+    this.handoff.clear();
+    for (const issue of handoffIssues) {
+      if (this.completed.has(issue.identifier)) {
+        continue;
+      }
+      this.handoff.add(issue.identifier);
+      this.retryAttempts.delete(issue.id);
+      this.claimed.delete(issue.id);
+    }
+    return handoffIssues;
   }
 
   private async reconcileRunning(
@@ -451,6 +486,9 @@ export class Orchestrator {
       }
 
       if (!latestIssue || !isActiveState(latestIssue.state, config)) {
+        if (latestIssue && isHandoffState(latestIssue.state, config)) {
+          this.handoff.add(latestIssue.identifier);
+        }
         entry.cancelReason = latestIssue
           ? `state_${latestIssue.state}`
           : 'issue_not_found';
@@ -611,6 +649,9 @@ export class Orchestrator {
         return;
       }
       if (!isActiveState(issue.state, config)) {
+        if (isHandoffState(issue.state, config)) {
+          this.handoff.add(issue.identifier);
+        }
         this.releaseIssue(issue.id);
         return;
       }
@@ -724,6 +765,7 @@ export class Orchestrator {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
+        this.handoff.add(issue.identifier);
         this.releaseIssue(issue.id);
         return;
       }

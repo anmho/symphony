@@ -506,6 +506,67 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().completed).toEqual(['ANM-283']);
   });
 
+  it('hydrates handoff issues from configured Linear handoff state on tick', async () => {
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [
+        makeIssue('ANM-284', {
+          id: 'issue-284',
+          title: 'Ready for human review',
+          state: 'In Review',
+          labels: ['symphony'],
+        }),
+      ],
+      fetchCandidateIssues: async () => [],
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot().handoff).toEqual(['ANM-284']);
+    expect(orchestrator.snapshot().completed).toEqual([]);
+  });
+
+  it('moves externally handed-off running issues into the handoff snapshot', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    let handoff = false;
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () =>
+        handoff ? { ...issue, state: 'In Review' } : issue,
+      runCodexTurn: async (_input, options) => abortableTurn(options.signal),
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+    expect(orchestrator.snapshot().running).toHaveLength(1);
+
+    handoff = true;
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
+  });
+
   it('holds retries while paused and resumes dispatch after unpause', async () => {
     const issue = makeIssue('APP-1');
     let now = 1000;
@@ -554,6 +615,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     fetchCandidateIssues: async () => [],
     fetchIssueById: async (_config, issueId) => makeIssue(issueId),
     fetchTerminalIssues: async () => [],
+    fetchHandoffIssues: async () => [],
     writeRunnerComment: async () => undefined,
     moveIssueToState: async () => undefined,
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),

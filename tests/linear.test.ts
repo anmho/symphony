@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+<<<<<<< HEAD
 import {
   fetchCandidateIssues,
   fetchIssueLabelNames,
@@ -6,6 +7,9 @@ import {
   fetchTerminalIssues,
   moveIssueToState,
 } from "../src/linear.js";
+=======
+import { fetchCandidateIssues, fetchHandoffIssues, fetchIssueLabelNames, fetchTerminalIssues, moveIssueToState } from "../src/linear.js";
+>>>>>>> ae2f184 (fix: track handoff issues in status)
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {
@@ -114,6 +118,42 @@ describe("linear client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("filters handoff issue queries by configured handoff state and required labels", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
+      expect(body.query).toContain("query SymphonyHandoffIssues");
+      expect(body.query).toContain("$teamKey: String!");
+      expect(body.query).toContain("$requiredLabels: [String!]");
+      expect(body.variables).toEqual({
+        states: ["In Review"],
+        teamKey: "ANM",
+        requiredLabels: ["symphony"]
+      });
+      return response({
+        issues: {
+          nodes: [
+            terminalIssueNode("issue-1", "ANM-1", ["symphony"], "In Review"),
+            terminalIssueNode("issue-2", "ANM-2", ["other"], "In Review")
+          ]
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchHandoffIssues(
+        makeConfig({
+          projectSlug: null,
+          teamKey: "ANM",
+          requiredLabels: ["symphony"],
+          handoffState: "In Review"
+        })
+      )
+    ).resolves.toMatchObject([{ identifier: "ANM-1" }]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("moves an issue to a named workflow state", async () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
@@ -150,6 +190,7 @@ function makeConfig(tracker: {
   projectSlug: string | null;
   teamKey: string | null;
   requiredLabels?: string[];
+  handoffState?: string | null;
 }): EffectiveWorkflowConfig {
   return {
     tracker: {
@@ -162,7 +203,7 @@ function makeConfig(tracker: {
       repoLabelPrefix: "repo:",
       activeStates: ["Todo"],
       terminalStates: ["Done"],
-      handoffState: null
+      handoffState: tracker.handoffState ?? null
     }
   } as unknown as EffectiveWorkflowConfig;
 }
@@ -174,12 +215,12 @@ function response(data: unknown): Response {
   } as Response;
 }
 
-function terminalIssueNode(id: string, identifier: string, labels: string[]) {
+function terminalIssueNode(id: string, identifier: string, labels: string[], state = "Done") {
   return {
     id,
     identifier,
     title: `Issue ${identifier}`,
-    state: { name: "Done" },
+    state: { name: state },
     labels: { nodes: labels.map((name) => ({ name })) },
     relations: { nodes: [] }
   };

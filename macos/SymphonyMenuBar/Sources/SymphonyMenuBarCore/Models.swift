@@ -4,6 +4,7 @@ public struct OrchestratorSnapshot: Codable {
     public let startedAtMs: Int
     public let running: [LiveSession]
     public let retryAttempts: [RunAttempt]
+    public let handoff: [String]
     public let completed: [String]
     public let codexRateLimit: CodexRateLimitSnapshot
     public let lastConfigError: String?
@@ -14,6 +15,7 @@ public struct OrchestratorSnapshot: Codable {
         case startedAtMs
         case running
         case retryAttempts
+        case handoff
         case completed
         case codexRateLimit
         case lastConfigError
@@ -26,6 +28,7 @@ public struct OrchestratorSnapshot: Codable {
         startedAtMs = try container.decode(Int.self, forKey: .startedAtMs)
         running = try container.decode([LiveSession].self, forKey: .running)
         retryAttempts = try container.decode([RunAttempt].self, forKey: .retryAttempts)
+        handoff = try container.decodeIfPresent([String].self, forKey: .handoff) ?? []
         completed = try container.decode([String].self, forKey: .completed)
         codexRateLimit = try container.decode(CodexRateLimitSnapshot.self, forKey: .codexRateLimit)
         lastConfigError = try container.decodeIfPresent(String.self, forKey: .lastConfigError)
@@ -136,6 +139,17 @@ public extension OrchestratorSnapshot {
                 status: parked ? "parked" : "retry",
                 detail: retryDetail(attempt, parked: parked, nowMs: nowMs),
                 kind: parked ? .parked : .retry
+            )
+        }
+
+        rows += handoff.map { issueId in
+            AgentRow(
+                id: "handoff-\(issueId)",
+                identifier: issueId,
+                title: nil,
+                status: "review",
+                detail: "Ready for human review",
+                kind: .completed
             )
         }
 

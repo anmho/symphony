@@ -246,6 +246,7 @@ function makeSnapshot(): OrchestratorSnapshot {
     ],
     claimed: ['issue-1'],
     retryAttempts: [],
+    handoff: [],
     completed: [],
     codexTotals: {
       inputTokens: 0,

@@ -159,6 +159,33 @@ export async function fetchTerminalIssues(config: EffectiveWorkflowConfig): Prom
     .filter((issue) => hasRequiredLabels(issue, config.tracker.requiredLabels));
 }
 
+export async function fetchHandoffIssues(config: EffectiveWorkflowConfig): Promise<NormalizedIssue[]> {
+  if (!config.tracker.handoffState) {
+    return [];
+  }
+  const { filter, variableDefinitions, variables } = issueScopeFilter(config, [config.tracker.handoffState], {
+    includeRequiredLabels: true
+  });
+  const data = await linearGraphql<IssuesQueryData>(
+    config,
+    `
+      query SymphonyHandoffIssues(${variableDefinitions}) {
+        issues(
+          first: 100,
+          filter: ${filter}
+        ) {
+          nodes { ${ISSUE_FIELDS} }
+        }
+      }
+    `,
+    variables
+  );
+
+  return (data.issues?.nodes ?? [])
+    .map(normalizeLinearIssue)
+    .filter((issue) => hasRequiredLabels(issue, config.tracker.requiredLabels));
+}
+
 export async function writeRunnerComment(
   config: EffectiveWorkflowConfig,
   issueId: string,

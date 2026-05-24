@@ -13,6 +13,7 @@
     }
   ],
   "retryAttempts": [],
+  "handoff": ["ANM-98"],
   "completed": ["ANM-99"],
   "codexRateLimit": {
     "resumeAfterMs": null,

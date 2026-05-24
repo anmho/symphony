@@ -495,7 +495,7 @@ export function renderStatusScreen(
     });
 
   const headerLine = padLineToWidth(
-    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(String(snapshot.running.length))}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('completed=')}${snapshot.completed.length}`,
+    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(String(snapshot.running.length))}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('handoff=')}${snapshot.handoff.length}  ${theme.dim('completed=')}${snapshot.completed.length}`,
     terminalWidth,
   );
   const workflowLine = padLineToWidth(
@@ -734,7 +734,21 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
     }),
   );
 
-  return [...running, ...retries, ...completed];
+  const handoff = snapshot.handoff.map(
+    (issueId): WatchRow => ({
+      kind: 'completed',
+      issue: issueId,
+      issueKey: issueId,
+      age: '-',
+      turn: '-',
+      event: 'review',
+      updated: '-',
+      workspace: '-',
+      detail: [`Issue id: ${issueId}`, 'State: ready for human review'],
+    }),
+  );
+
+  return [...running, ...retries, ...handoff, ...completed];
 }
 
 function renderTable(
