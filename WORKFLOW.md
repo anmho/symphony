@@ -9,6 +9,7 @@ tracker:
   active_states:
     - Todo
     - In Progress
+  handoff_state: In Review
   terminal_states:
     - Done
     - Closed
@@ -76,5 +77,6 @@ Expected workflow:
 4. Commit the finished work on the Symphony-created branch.
 5. Push the branch and open or update a GitHub pull request.
 6. Leave a Linear handoff comment with the PR link, verification performed, and any remaining blocker.
+7. When the PR handoff is ready, move the Linear issue to In Review so Symphony stops dispatching it as active work.
 
-If the issue requires human-only console work, missing product decisions, unavailable secrets, or an unsafe repo boundary, stop early and comment the blocker in Linear instead of guessing.
+If the issue requires human-only console work, missing product decisions, unavailable secrets, unsafe repo boundaries, or an environment failure that blocks validation, stop early, comment the blocker in Linear, and move the issue to In Review instead of guessing or retrying the same failing step.

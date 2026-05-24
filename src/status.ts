@@ -1,5 +1,6 @@
 import http, { type Server } from 'node:http';
 import type { AgentWorkEvent, OrchestratorSnapshot } from './types.js';
+import { compactAgentWorkEvents } from './eventDisplay.js';
 
 export const DEFAULT_STATUS_PORT = 3979;
 
@@ -13,6 +14,7 @@ export interface StatusServerControls {
     issue: string | null;
     cursor: number | null;
     limit: number | null;
+    visible: boolean;
   }) => AgentWorkEvent[];
   queueSteer?: (
     issue: string,
@@ -44,6 +46,7 @@ export function startStatusServer(
         issue: url.searchParams.get('issue'),
         cursor: parseNullableNumber(url.searchParams.get('cursor')),
         limit: parseNullableNumber(url.searchParams.get('limit')),
+        visible: isTruthyQueryParam(url.searchParams.get('visible')),
       });
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ events }, null, 2));
@@ -207,6 +210,7 @@ export async function fetchDaemonEvents(
     issue?: string | null;
     cursor?: number | null;
     limit?: number | null;
+    visible?: boolean;
   } = {},
 ): Promise<AgentWorkEvent[] | null> {
   try {
@@ -220,6 +224,9 @@ export async function fetchDaemonEvents(
     if (query.limit !== undefined && query.limit !== null) {
       url.searchParams.set('limit', String(query.limit));
     }
+    if (query.visible) {
+      url.searchParams.set('visible', '1');
+    }
     const response = await fetch(url);
     if (!response.ok) {
       return null;
@@ -229,6 +236,33 @@ export async function fetchDaemonEvents(
   } catch {
     return null;
   }
+}
+
+export function latestVisibleWorkEvents(
+  events: AgentWorkEvent[],
+  limit: number | null,
+): AgentWorkEvent[] {
+  const requested = limit && Number.isInteger(limit) && limit > 0 ? limit : 100;
+  const visibleTarget = Math.min(requested, 1000);
+  const visible: AgentWorkEvent[] = [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event) {
+      continue;
+    }
+    if (compactAgentWorkEvents([event]).length === 0) {
+      continue;
+    }
+    visible.push(event);
+    if (visible.length >= visibleTarget) {
+      break;
+    }
+  }
+  return visible.reverse();
+}
+
+function isTruthyQueryParam(value: string | null): boolean {
+  return value === '1' || value === 'true' || value === 'yes';
 }
 
 export async function queueSteer(

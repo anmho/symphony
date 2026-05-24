@@ -42,7 +42,8 @@ const RawWorkflowConfigSchema = z
         required_labels: z.array(z.string()).optional(),
         repo_label_prefix: z.string().optional(),
         active_states: z.array(z.string()).optional(),
-        terminal_states: z.array(z.string()).optional()
+        terminal_states: z.array(z.string()).optional(),
+        handoff_state: z.string().optional()
       })
       .optional(),
     polling: z
@@ -218,7 +219,8 @@ export function resolveWorkflowConfig(
       requiredLabels: normalizeLabels(tracker.required_labels ?? []),
       repoLabelPrefix: tracker.repo_label_prefix ?? "repo:",
       activeStates: tracker.active_states ?? DEFAULT_ACTIVE_STATES,
-      terminalStates: tracker.terminal_states ?? DEFAULT_TERMINAL_STATES
+      terminalStates: tracker.terminal_states ?? DEFAULT_TERMINAL_STATES,
+      handoffState: normalizeOptionalString(tracker.handoff_state)
     },
     polling: {
       intervalMs: raw.polling?.interval_ms ?? 30000

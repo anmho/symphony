@@ -23,15 +23,29 @@ export interface DisplayEvent {
 }
 
 const HIDDEN_NOTIFICATIONS = [
+  "hook/completed",
+  "hook/started",
+  "item/completed",
+  "item/started",
+  "mcpserver/startupstatus/updated",
+  "serverrequest/resolved",
   "skills/changed"
 ];
 
+const HIDDEN_RUNNER_SUMMARIES = [
+  "codex app-server wrote "
+];
+
 export function isHiddenFromHumanView(event: AgentWorkEvent): boolean {
-  if (event.type !== "notification") {
-    return false;
+  if (event.type === "notification") {
+    const method = event.summary.toLowerCase();
+    return HIDDEN_NOTIFICATIONS.some((needle) => method.includes(needle));
   }
-  const method = event.summary.toLowerCase();
-  return HIDDEN_NOTIFICATIONS.some((needle) => method.includes(needle));
+  if (event.type === "stderr") {
+    const summary = event.summary.toLowerCase();
+    return HIDDEN_RUNNER_SUMMARIES.some((needle) => summary.includes(needle));
+  }
+  return false;
 }
 
 export function compactAgentWorkEvents(events: AgentWorkEvent[]): DisplayEvent[] {

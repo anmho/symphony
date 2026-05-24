@@ -326,7 +326,7 @@ function extractRateLimitUntil(notification: JsonRpcNotification): number | null
 }
 
 export function goalObjectiveForIssue(input: Pick<CodexRunInput, "issue">): string {
-  return `Complete Linear issue ${input.issue.identifier}: ${input.issue.title}. Satisfy the issue, commit, push, open or update a PR, and leave a Linear handoff.`;
+  return `Complete Linear issue ${input.issue.identifier}: ${input.issue.title}. Satisfy the issue, commit, push, open or update a PR, and prepare a Linear handoff.`;
 }
 
 function delay(ms: number): Promise<void> {

@@ -60,10 +60,18 @@ describe("event display compaction", () => {
   it("hides noisy notifications from human views", () => {
     const events = [
       makeEvent({ cursor: 1, type: "notification", summary: "skills/changed" }),
-      makeEvent({ cursor: 2, type: "command", summary: "completed: ls" })
+      makeEvent({ cursor: 2, type: "notification", summary: "mcpServer/startupStatus/updated" }),
+      makeEvent({ cursor: 3, type: "stderr", summary: "codex app-server wrote 208 stderr bytes" }),
+      makeEvent({ cursor: 4, type: "notification", summary: "hook/completed" }),
+      makeEvent({ cursor: 5, type: "notification", summary: "item/started" }),
+      makeEvent({ cursor: 6, type: "command", summary: "completed: ls" })
     ];
 
     expect(isHiddenFromHumanView(events[0]!)).toBe(true);
+    expect(isHiddenFromHumanView(events[1]!)).toBe(true);
+    expect(isHiddenFromHumanView(events[2]!)).toBe(true);
+    expect(isHiddenFromHumanView(events[3]!)).toBe(true);
+    expect(isHiddenFromHumanView(events[4]!)).toBe(true);
     expect(compactAgentWorkEvents(events)).toEqual([
       expect.objectContaining({ kind: "command", text: "completed: ls" })
     ]);

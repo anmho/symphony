@@ -38,6 +38,7 @@ export interface TrackerConfig {
   repoLabelPrefix: string;
   activeStates: string[];
   terminalStates: string[];
+  handoffState: string | null;
 }
 
 export interface PollingConfig {

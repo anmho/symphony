@@ -23,7 +23,7 @@ describe("codex app-server RPC", () => {
       threadId: "thread-started",
       status: "active",
       tokenBudget: null,
-      objective: "Complete Linear issue ANM-123: Validate configured repo routes. Satisfy the issue, commit, push, open or update a PR, and leave a Linear handoff."
+      objective: "Complete Linear issue ANM-123: Validate configured repo routes. Satisfy the issue, commit, push, open or update a PR, and prepare a Linear handoff."
     });
   });
 
@@ -165,7 +165,8 @@ function makeConfig(command: string): EffectiveWorkflowConfig {
       requiredLabels: [],
       repoLabelPrefix: "repo:",
       activeStates: ["Todo"],
-      terminalStates: ["Done"]
+      terminalStates: ["Done"],
+      handoffState: null
     },
     polling: { intervalMs: 30000 },
     workspace: {

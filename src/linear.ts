@@ -147,6 +147,67 @@ export async function writeRunnerComment(
   );
 }
 
+export async function moveIssueToState(
+  config: EffectiveWorkflowConfig,
+  issueId: string,
+  stateName: string
+): Promise<void> {
+  const issueData = await linearGraphql<{
+    issue?: { team?: { id?: string | null } | null } | null;
+  }>(
+    config,
+    `
+      query SymphonyIssueTeam($id: String!) {
+        issue(id: $id) {
+          team { id }
+        }
+      }
+    `,
+    { id: issueId }
+  );
+  const teamId = issueData.issue?.team?.id;
+  if (!teamId) {
+    throw new Error(`linear_issue_team_not_found: ${issueId}`);
+  }
+
+  const statesData = await linearGraphql<{
+    workflowStates?: { nodes?: Array<{ id?: string; name?: string | null }> };
+  }>(
+    config,
+    `
+      query SymphonyWorkflowStates($teamId: ID!) {
+        workflowStates(filter: { team: { id: { eq: $teamId } } }, first: 100) {
+          nodes { id name }
+        }
+      }
+    `,
+    { teamId }
+  );
+  const stateId = statesData.workflowStates?.nodes?.find(
+    (state) => state.name?.toLowerCase() === stateName.toLowerCase()
+  )?.id;
+  if (!stateId) {
+    throw new Error(`linear_state_not_found: ${stateName}`);
+  }
+
+  const updateData = await linearGraphql<{
+    issueUpdate?: { success?: boolean };
+  }>(
+    config,
+    `
+      mutation SymphonyIssueMoveState($id: String!, $stateId: String!) {
+        issueUpdate(id: $id, input: { stateId: $stateId }) {
+          success
+        }
+      }
+    `,
+    { id: issueId, stateId }
+  );
+  if (!updateData.issueUpdate?.success) {
+    throw new Error(`linear_issue_state_update_failed: ${issueId}`);
+  }
+}
+
 export async function fetchIssueLabelNames(config: EffectiveWorkflowConfig): Promise<string[]> {
   const names: string[] = [];
   let cursor: string | null = null;

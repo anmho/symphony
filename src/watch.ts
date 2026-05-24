@@ -24,7 +24,7 @@ import {
   type WatchTableRow,
 } from './watchLayout.js';
 
-const LOG_FETCH_LIMIT = 400;
+const LOG_FETCH_LIMIT = 1000;
 const WATCH_CHROME_LINES = 5;
 
 export interface WatchOptions {
@@ -37,6 +37,7 @@ export interface WatchOptions {
 interface WatchRow {
   kind: 'running' | 'parked' | 'retry' | 'completed';
   issue: string;
+  issueKey: string;
   age: string;
   turn: string;
   event: string;
@@ -172,15 +173,16 @@ async function runOpenTuiStatusWatch(
     currentLogViewportHeight = logViewportHeight;
 
     if (selected && view === 'events') {
-      if (logEventsIssue !== selected.issue) {
-        logEventsIssue = selected.issue;
+      if (logEventsIssue !== selected.issueKey) {
+        logEventsIssue = selected.issueKey;
         logEvents = [];
         logViewport = { ...DEFAULT_LOG_VIEWPORT };
       }
       logEvents =
         (await fetchDaemonEvents(options.port, {
-          issue: selected.issue,
+          issue: selected.issueKey,
           limit: LOG_FETCH_LIMIT,
+          visible: true,
         })) ?? [];
     } else if (view !== 'events') {
       logEventsIssue = null;
@@ -189,7 +191,7 @@ async function runOpenTuiStatusWatch(
     const describeEvents =
       snapshot && selected && view === 'describe'
         ? await fetchDaemonEvents(options.port, {
-            issue: selected.issue,
+            issue: selected.issueKey,
             limit: 40,
           })
         : [];
@@ -537,7 +539,11 @@ export function renderLogSection(
 ): { lines: string[]; viewport: LogViewportState } {
   const wrapWidth = Math.max(terminalWidth - 4, 40);
   const lines = buildLogLines(events, wrapWidth, viewport.wrap);
-  const window = visibleLogWindow(lines, viewport, viewportHeight);
+  const sourceLines =
+    lines.length > 0
+      ? lines
+      : emptyLogFallbackLines(events, terminalWidth, theme);
+  const window = visibleLogWindow(sourceLines, viewport, viewportHeight);
   const rendered = window.lines.map((line, index) => {
     const absoluteLine = window.scrollTop + index;
     const marker = absoluteLine === window.selectedLine ? '>' : ' ';
@@ -554,6 +560,36 @@ export function renderLogSection(
       selectedLine: window.selectedLine,
     },
   };
+}
+
+function emptyLogFallbackLines(
+  events: AgentWorkEvent[],
+  terminalWidth: number,
+  theme: Theme,
+): string[] {
+  if (events.length === 0) {
+    return [theme.dim('No log events loaded yet.')];
+  }
+  const latest = events.at(-1);
+  if (!latest) {
+    return [theme.dim('No log events loaded yet.')];
+  }
+  const summary = truncateForTerminal(latest.summary, terminalWidth - 36);
+  return [
+    theme.dim(
+      `No visible log lines in last ${events.length} raw events; latest ${latest.type}: ${summary}`,
+    ),
+  ];
+}
+
+function truncateForTerminal(value: string, width: number): string {
+  if (width <= 1) {
+    return '';
+  }
+  if (value.length <= width) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(width - 3, 0))}...`;
 }
 
 export function watchLogKey(key: {
@@ -618,7 +654,8 @@ async function selectedIssue(
     return null;
   }
   return (
-    filteredRows(snapshot, Date.now(), filterText)[selectedIndex]?.issue ?? null
+    filteredRows(snapshot, Date.now(), filterText)[selectedIndex]?.issueKey ??
+      null
   );
 }
 
@@ -629,6 +666,7 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       issue: session.title
         ? `${session.identifier} · ${session.title}`
         : session.identifier,
+      issueKey: session.identifier,
       age: formatDuration(nowMs - session.startedAtMs),
       turn: String(session.turnCount),
       event: session.lastCodexEvent ?? '-',
@@ -662,6 +700,7 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       issue: attempt.title
         ? `${attempt.identifier} · ${attempt.title}`
         : attempt.identifier,
+      issueKey: attempt.identifier,
       age: `in ${formatDuration(attempt.dueAtMs - nowMs)}`,
       turn: String(attempt.attempt),
       event: 'retry',
@@ -681,6 +720,7 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
     (issueId): WatchRow => ({
       kind: 'completed',
       issue: issueId,
+      issueKey: issueId,
       age: '-',
       turn: '-',
       event: 'completed',
