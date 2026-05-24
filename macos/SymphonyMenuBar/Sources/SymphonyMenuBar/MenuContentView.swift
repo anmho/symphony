@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SymphonyMenuBarCore
 
 struct MenuContentView: View {
     @ObservedObject var service: StatusService
@@ -23,6 +24,22 @@ struct MenuContentView: View {
                 service.start()
             }
         }
+        .alert("Symphony CLI", isPresented: actionErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(service.actionError ?? "")
+        }
+    }
+
+    private var actionErrorPresented: Binding<Bool> {
+        Binding(
+            get: { service.actionError != nil },
+            set: { isPresented in
+                if !isPresented {
+                    service.actionError = nil
+                }
+            }
+        )
     }
 
     private var header: some View {
@@ -87,6 +104,8 @@ struct MenuContentView: View {
                         ForEach(rows) { row in
                             AgentRowView(row: row) {
                                 service.openIssue(row.identifier)
+                            } onOpenLogs: {
+                                service.openLogs(for: row.identifier)
                             }
                         }
                     }
@@ -131,6 +150,7 @@ struct MenuContentView: View {
 struct AgentRowView: View {
     let row: AgentRow
     let openIssue: () -> Void
+    let onOpenLogs: () -> Void
 
     var body: some View {
         Button(action: openIssue) {
@@ -151,12 +171,18 @@ struct AgentRowView: View {
                     Text(row.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Open in Linear") { openIssue() }
+            if row.kind == .running || row.kind == .retry || row.kind == .parked {
+                Button("Follow Logs") { onOpenLogs() }
+            }
+        }
     }
 
     private var statusColor: Color {

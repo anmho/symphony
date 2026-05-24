@@ -1,0 +1,21 @@
+{
+  "startedAtMs": 10000,
+  "running": [
+    {
+      "identifier": "ANM-1",
+      "turnCount": 1,
+      "lastCodexEvent": "notification",
+      "lastCodexTimestamp": 19000,
+      "lastCodexMessage": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"text\":\"Working on the ticket\"}}}",
+      "startedAtMs": 12000,
+      "workspacePath": "/tmp/workspaces/ANM-1"
+    }
+  ],
+  "retryAttempts": [],
+  "completed": ["ANM-99"],
+  "codexRateLimit": {
+    "resumeAfterMs": null,
+    "reason": null
+  },
+  "lastConfigError": null
+}

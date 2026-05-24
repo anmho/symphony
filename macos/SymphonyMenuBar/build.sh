@@ -12,6 +12,10 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
+if [[ ! -f "$ROOT/Resources/AppIcon.icns" ]]; then
+  chmod +x "$ROOT/scripts/generate-icon.swift"
+  swift "$ROOT/scripts/generate-icon.swift"
+fi
 swift build -c release
 
 APP="$ROOT/SymphonyMenuBar.app"
