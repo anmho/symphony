@@ -68,6 +68,42 @@ describe("agent work events", () => {
     expect(JSON.stringify(normalized.payload)).not.toContain("private internal reasoning");
   });
 
+  it("normalizes thread goal updates as public work events", () => {
+    const normalized = workEventFromCodexEvent(
+      {
+        issueId: "issue-1",
+        identifier: "ANM-1",
+        repoKey: null,
+        workspacePath: null,
+        threadId: "thread-1",
+        turnId: "turn-1"
+      },
+      {
+        type: "notification",
+        method: "thread/goal/updated",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          goal: {
+            threadId: "thread-1",
+            objective: "Complete Linear issue ANM-1",
+            status: "complete",
+            tokenBudget: null,
+            tokensUsed: 123,
+            timeUsedSeconds: 45,
+            createdAt: 1,
+            updatedAt: 2
+          }
+        }
+      }
+    );
+
+    expect(normalized).toMatchObject({
+      type: "goal",
+      summary: "goal complete: Complete Linear issue ANM-1 (tokens=123 time=45s)"
+    });
+  });
+
   it("persists queued steering until consumed", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-steer-"));
     const workflowPath = path.join(dir, "WORKFLOW.md");

@@ -99,7 +99,7 @@ struct OnboardingView: View {
                 onboardingStep(
                     number: 3,
                     title: "Click to open the panel",
-                    detail: "The panel shows running agents, waiting retries, and Codex rate limit status — like OpenUsage."
+                    detail: "The panel shows running agents, waiting retries, Codex rate limits, and lets you pause or resume dispatch."
                 )
             }
 

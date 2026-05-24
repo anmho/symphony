@@ -33,6 +33,9 @@ struct SymphonyMenuBarApp: App {
         guard statusService.isOnline, let snapshot = statusService.snapshot else {
             return nil
         }
+        if snapshot.paused {
+            return "⏸"
+        }
         let inventory = snapshot.agentInventory()
         guard inventory.active > 0 else { return nil }
         if inventory.queued > 0, inventory.running > 0 {
@@ -48,6 +51,9 @@ struct SymphonyMenuBarApp: App {
         if !statusService.isOnline {
             return "waveform.circle"
         }
+        if statusService.snapshot?.paused == true {
+            return "pause.circle.fill"
+        }
         if (statusService.snapshot?.retryAttempts.count ?? 0) > 0 {
             return "waveform.circle.badge.exclamationmark"
         }
@@ -59,6 +65,9 @@ struct SymphonyMenuBarApp: App {
 
     private var menuBarTint: Color {
         guard statusService.isOnline else { return .primary.opacity(0.55) }
+        if statusService.snapshot?.paused == true {
+            return .orange
+        }
         if (statusService.snapshot?.retryAttempts.count ?? 0) > 0 {
             return .orange
         }
@@ -71,6 +80,9 @@ struct SymphonyMenuBarApp: App {
     private var menuBarHelp: String {
         guard statusService.isOnline, let snapshot = statusService.snapshot else {
             return "Symphony offline"
+        }
+        if snapshot.paused {
+            return "Symphony: dispatch paused"
         }
         let inventory = snapshot.agentInventory()
         if inventory.active == 0 {

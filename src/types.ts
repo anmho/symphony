@@ -29,7 +29,7 @@ export interface WorkflowDefinition {
 }
 
 export interface TrackerConfig {
-  kind: "linear";
+  kind: 'linear';
   endpoint: string;
   apiKey: string;
   projectSlug: string | null;
@@ -120,7 +120,7 @@ export interface CodexUsageTotals {
 }
 
 export interface CodexTurnResult {
-  status: "completed" | "failed" | "rate_limited";
+  status: 'completed' | 'failed' | 'rate_limited';
   threadId: string;
   turnId: string | null;
   rateLimitUntilMs: number | null;
@@ -158,6 +158,9 @@ export interface LiveSession {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  goalStatus: string | null;
+  goalObjective: string | null;
+  goalUpdatedAtMs: number | null;
   turnCount: number;
   startedAtMs: number;
 }
@@ -173,24 +176,26 @@ export interface OrchestratorSnapshot {
   codexRateLimit: CodexRateLimitSnapshot;
   lastTickAtMs: number | null;
   lastConfigError: string | null;
+  paused: boolean;
+  pausedAtMs: number | null;
 }
 
 export type AgentWorkEventType =
-  | "runner"
-  | "process"
-  | "stderr"
-  | "thread"
-  | "turn"
-  | "assistant_delta"
-  | "assistant_message"
-  | "command"
-  | "tool"
-  | "diff"
-  | "goal"
-  | "reasoning_summary"
-  | "rate_limited"
-  | "error"
-  | "notification";
+  | 'runner'
+  | 'process'
+  | 'stderr'
+  | 'thread'
+  | 'turn'
+  | 'assistant_delta'
+  | 'assistant_message'
+  | 'command'
+  | 'tool'
+  | 'diff'
+  | 'goal'
+  | 'reasoning_summary'
+  | 'rate_limited'
+  | 'error'
+  | 'notification';
 
 export interface AgentWorkEvent {
   cursor: number;
@@ -202,7 +207,7 @@ export interface AgentWorkEvent {
   threadId: string | null;
   turnId: string | null;
   type: AgentWorkEventType;
-  level: "info" | "warn" | "error";
+  level: 'info' | 'warn' | 'error';
   summary: string;
   payload: JsonObject | null;
 }
@@ -222,10 +227,10 @@ export interface CodexRunInput {
 }
 
 export type CodexRunEvent =
-  | { type: "process_started"; pid: number | null }
-  | { type: "stderr"; bytes: number }
-  | { type: "thread_started"; threadId: string }
-  | { type: "thread_resumed"; threadId: string }
-  | { type: "turn_started"; turnId: string | null }
-  | { type: "notification"; method: string; params: unknown }
-  | { type: "rate_limited"; resumeAfterMs: number | null; reason: string };
+  | { type: 'process_started'; pid: number | null }
+  | { type: 'stderr'; bytes: number }
+  | { type: 'thread_started'; threadId: string }
+  | { type: 'thread_resumed'; threadId: string }
+  | { type: 'turn_started'; turnId: string | null }
+  | { type: 'notification'; method: string; params: unknown }
+  | { type: 'rate_limited'; resumeAfterMs: number | null; reason: string };

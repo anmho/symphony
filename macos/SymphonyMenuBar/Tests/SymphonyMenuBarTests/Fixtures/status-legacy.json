@@ -1,0 +1,11 @@
+{
+  "startedAtMs": 10000,
+  "running": [],
+  "retryAttempts": [],
+  "completed": [],
+  "codexRateLimit": {
+    "resumeAfterMs": null,
+    "reason": null
+  },
+  "lastConfigError": null
+}

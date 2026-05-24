@@ -11,6 +11,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: [],
             completed: [],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
         XCTAssertTrue(StatusChangeDetector.changes(from: nil, to: current).isEmpty)
@@ -24,6 +25,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: [],
             completed: [],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
         let limited = MonitorState(
@@ -33,6 +35,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: ["ANM-1"],
             completed: [],
             rateLimited: true,
+            operatorPaused: false,
             configError: nil
         )
         let cleared = MonitorState(
@@ -42,6 +45,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: [],
             completed: [],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
 
@@ -62,6 +66,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: [],
             completed: [],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
         let after = MonitorState(
@@ -71,6 +76,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: [],
             completed: ["ANM-2"],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
 
@@ -86,6 +92,7 @@ final class StatusChangeDetectorTests: XCTestCase {
             parked: [],
             completed: [],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
 

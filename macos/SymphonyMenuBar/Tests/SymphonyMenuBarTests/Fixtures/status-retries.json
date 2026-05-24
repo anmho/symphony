@@ -24,5 +24,7 @@
     "resumeAfterMs": 1779595170136,
     "reason": "codex_rate_limited"
   },
-  "lastConfigError": null
+  "lastConfigError": null,
+  "paused": false,
+  "pausedAtMs": null
 }

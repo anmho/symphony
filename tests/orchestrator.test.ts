@@ -1,26 +1,34 @@
-import { describe, expect, it, vi } from "vitest";
-import { mkdtemp } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { AgentWorkEventStore } from "../src/events.js";
-import { Orchestrator, type OrchestratorDependencies } from "../src/orchestrator.js";
+import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { AgentWorkEventStore } from '../src/events.js';
+import {
+  Orchestrator,
+  type OrchestratorDependencies,
+} from '../src/orchestrator.js';
 import type {
   CodexRunInput,
   CodexRunEvent,
   CodexTurnResult,
   EffectiveWorkflowConfig,
   NormalizedIssue,
-  WorkspaceInfo
-} from "../src/types.js";
+  WorkspaceInfo,
+} from '../src/types.js';
 
-describe("orchestrator", () => {
-  it("dispatches up to configured concurrency", async () => {
-    const issues = Array.from({ length: 6 }, (_, index) => makeIssue(`APP-${index + 1}`));
+describe('orchestrator', () => {
+  it('dispatches up to configured concurrency', async () => {
+    const issues = Array.from({ length: 6 }, (_, index) =>
+      makeIssue(`APP-${index + 1}`),
+    );
     const deps = makeDeps({
       fetchCandidateIssues: async () => issues,
-      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined)
+      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
 
@@ -28,50 +36,58 @@ describe("orchestrator", () => {
     expect(orchestrator.snapshot().claimed).toHaveLength(5);
   });
 
-  it("skips issues without required label and repo route", async () => {
+  it('skips issues without required label and repo route', async () => {
     const config = makeConfig({
       tracker: {
-        requiredLabels: ["symphony"],
-        repoLabelPrefix: "repo:"
+        requiredLabels: ['symphony'],
+        repoLabelPrefix: 'repo:',
       },
       workspace: {
         repoRoutes: {
-          symphony: "/tmp/repo"
-        }
-      }
+          symphony: '/tmp/repo',
+        },
+      },
     });
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => [
-        makeIssue("APP-1", { labels: ["symphony"] }),
-        makeIssue("APP-2", { labels: ["repo:symphony"] }),
-        makeIssue("APP-3", { labels: ["symphony", "repo:symphony"] })
+        makeIssue('APP-1', { labels: ['symphony'] }),
+        makeIssue('APP-2', { labels: ['repo:symphony'] }),
+        makeIssue('APP-3', { labels: ['symphony', 'repo:symphony'] }),
       ],
-      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined)
+      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
 
-    expect(orchestrator.snapshot().running.map((session) => session.identifier)).toEqual(["APP-3"]);
+    expect(
+      orchestrator.snapshot().running.map((session) => session.identifier),
+    ).toEqual(['APP-3']);
   });
 
-  it("continues active issues on the same worker loop", async () => {
-    const issue = makeIssue("APP-1");
+  it('continues active issues on the same worker loop', async () => {
+    const issue = makeIssue('APP-1');
     let fetches = 0;
     let codexCalls = 0;
     const deps = makeDeps({
       fetchCandidateIssues: async () => [issue],
       fetchIssueById: async () => {
         fetches += 1;
-        return fetches <= 2 ? issue : { ...issue, state: "Human Review" };
+        return fetches <= 2 ? issue : { ...issue, state: 'Human Review' };
       },
       runCodexTurn: async () => {
         codexCalls += 1;
         return completedTurn(`thread-${codexCalls}`, `turn-${codexCalls}`);
-      }
+      },
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
     await flushPromises();
@@ -80,24 +96,36 @@ describe("orchestrator", () => {
     expect(orchestrator.snapshot().running).toHaveLength(0);
   });
 
-  it("schedules retry after failed worker", async () => {
-    const issue = makeIssue("APP-1");
+  it('schedules retry after failed worker', async () => {
+    const issue = makeIssue('APP-1');
     const deps = makeDeps({
       fetchCandidateIssues: async () => [issue],
-      runCodexTurn: async () => ({ ...completedTurn("thread", "turn"), status: "failed", error: "boom" })
+      runCodexTurn: async () => ({
+        ...completedTurn('thread', 'turn'),
+        status: 'failed',
+        error: 'boom',
+      }),
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
     await flushPromises();
 
     expect(orchestrator.snapshot().retryAttempts).toMatchObject([
-      { issueId: issue.id, identifier: issue.identifier, attempt: 1, error: "boom" }
+      {
+        issueId: issue.id,
+        identifier: issue.identifier,
+        attempt: 1,
+        error: 'boom',
+      },
     ]);
   });
 
-  it("pauses new Codex launches while rate limited", async () => {
-    const issue = makeIssue("APP-1");
+  it('pauses new Codex launches while rate limited', async () => {
+    const issue = makeIssue('APP-1');
     let now = 1000;
     let codexCalls = 0;
     const deps = makeDeps({
@@ -106,14 +134,17 @@ describe("orchestrator", () => {
       runCodexTurn: async () => {
         codexCalls += 1;
         return {
-          ...completedTurn("thread", "turn"),
-          status: "rate_limited",
+          ...completedTurn('thread', 'turn'),
+          status: 'rate_limited',
           rateLimitUntilMs: 100000,
-          error: "codex_rate_limited"
+          error: 'codex_rate_limited',
         };
-      }
+      },
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
     await flushPromises();
@@ -124,8 +155,8 @@ describe("orchestrator", () => {
     expect(orchestrator.snapshot().codexRateLimit.resumeAfterMs).toBe(100000);
   });
 
-  it("probes rate limits at a fixed jittered interval before the reported reset", async () => {
-    const issue = makeIssue("APP-1");
+  it('probes rate limits at a fixed jittered interval before the reported reset', async () => {
+    const issue = makeIssue('APP-1');
     const config = makeConfig();
     config.agent.rateLimitProbeIntervalMs = 1000;
     let now = 1000;
@@ -137,14 +168,17 @@ describe("orchestrator", () => {
       runCodexTurn: async () => {
         codexCalls += 1;
         return {
-          ...completedTurn("thread", "turn"),
-          status: "rate_limited",
+          ...completedTurn('thread', 'turn'),
+          status: 'rate_limited',
           rateLimitUntilMs: 100000,
-          error: "codex_rate_limited"
+          error: 'codex_rate_limited',
         };
-      }
+      },
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
     await flushPromises();
@@ -153,86 +187,230 @@ describe("orchestrator", () => {
     await flushPromises();
 
     expect(codexCalls).toBe(2);
-    expect(orchestrator.snapshot().retryAttempts[0]?.dueAtMs).toBeGreaterThan(now);
+    expect(orchestrator.snapshot().retryAttempts[0]?.dueAtMs).toBeGreaterThan(
+      now,
+    );
   });
 
-  it("keeps last known good config on invalid reload", async () => {
+  it('keeps last known good config on invalid reload', async () => {
     const config = makeConfig();
     let loads = 0;
     const deps = makeDeps({
       loadWorkflowConfig: async () => {
         loads += 1;
         if (loads > 1) {
-          throw new Error("bad config");
+          throw new Error('bad config');
         }
         return config;
       },
-      fetchCandidateIssues: async () => []
+      fetchCandidateIssues: async () => [],
     });
-    const orchestrator = new Orchestrator({ workflowPath: "/tmp/WORKFLOW.md" }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
 
     await orchestrator.tick();
     await orchestrator.tick();
 
-    expect(orchestrator.snapshot().lastConfigError).toBe("bad config");
+    expect(orchestrator.snapshot().lastConfigError).toBe('bad config');
   });
 
-  it("captures Codex work events for status and logs", async () => {
-    const issue = makeIssue("APP-1");
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-orchestrator-events-"));
-    const eventStore = new AgentWorkEventStore(path.join(dir, "WORKFLOW.md"), () => 2000);
+  it('captures Codex work events for status and logs', async () => {
+    const issue = makeIssue('APP-1');
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), 'symphony-orchestrator-events-'),
+    );
+    const eventStore = new AgentWorkEventStore(
+      path.join(dir, 'WORKFLOW.md'),
+      () => 2000,
+    );
     let fetches = 0;
     const deps = makeDeps({
       eventStore,
       fetchCandidateIssues: async () => [issue],
       fetchIssueById: async () => {
         fetches += 1;
-        return fetches === 1 ? issue : { ...issue, state: "Human Review" };
+        return fetches === 1 ? issue : { ...issue, state: 'Human Review' };
       },
       runCodexTurn: async (_input, options) => {
-        options.onEvent({ type: "thread_started", threadId: "thread-1" });
+        options.onEvent({ type: 'thread_started', threadId: 'thread-1' });
         options.onEvent({
-          type: "notification",
-          method: "item/agentMessage/delta",
-          params: { delta: "Working on it" }
+          type: 'notification',
+          method: 'item/agentMessage/delta',
+          params: { delta: 'Working on it' },
         });
-        return completedTurn("thread-1", "turn-1");
-      }
+        return completedTurn('thread-1', 'turn-1');
+      },
     });
-    const orchestrator = new Orchestrator({ workflowPath: path.join(dir, "WORKFLOW.md") }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: path.join(dir, 'WORKFLOW.md') },
+      deps,
+    );
 
     await orchestrator.tick();
     await flushPromises();
 
-    expect(orchestrator.events("APP-1", 0, 20).map((event) => event.type)).toContain("assistant_delta");
+    expect(
+      orchestrator.events('APP-1', 0, 20).map((event) => event.type),
+    ).toContain('assistant_delta');
     expect(orchestrator.snapshot().running).toHaveLength(0);
   });
 
-  it("attaches queued steering to the next prompt", async () => {
-    const issue = makeIssue("APP-1");
-    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-orchestrator-steer-"));
-    let prompt = "";
-    let fetches = 0;
+  it('records Codex goal updates in live session status', async () => {
+    const issue = makeIssue('APP-1');
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), 'symphony-orchestrator-goal-'),
+    );
+    const eventStore = new AgentWorkEventStore(
+      path.join(dir, 'WORKFLOW.md'),
+      () => 2000,
+    );
     const deps = makeDeps({
-      eventStore: new AgentWorkEventStore(path.join(dir, "WORKFLOW.md"), () => 2000),
+      eventStore,
       fetchCandidateIssues: async () => [issue],
-      fetchIssueById: async () => {
-        fetches += 1;
-        return fetches === 1 ? issue : { ...issue, state: "Human Review" };
+      runCodexTurn: async (_input, options) => {
+        options.onEvent({
+          type: 'notification',
+          method: 'thread/goal/updated',
+          params: {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            goal: {
+              threadId: 'thread-1',
+              objective: 'Complete Linear issue APP-1',
+              status: 'complete',
+              tokenBudget: null,
+              tokensUsed: 100,
+              timeUsedSeconds: 10,
+              createdAt: 1,
+              updatedAt: 2,
+            },
+          },
+        });
+        return new Promise<CodexTurnResult>(() => undefined);
       },
-      runCodexTurn: async (input) => {
-        prompt = input.prompt;
-        return completedTurn("thread-1", "turn-1");
-      }
     });
-    const orchestrator = new Orchestrator({ workflowPath: path.join(dir, "WORKFLOW.md") }, deps);
+    const orchestrator = new Orchestrator(
+      { workflowPath: path.join(dir, 'WORKFLOW.md') },
+      deps,
+    );
 
-    orchestrator.queueSteer("APP-1", "prioritize the keyboard regression");
     await orchestrator.tick();
     await flushPromises();
 
-    expect(prompt).toContain("## Operator Guidance");
-    expect(prompt).toContain("prioritize the keyboard regression");
+    expect(orchestrator.snapshot().running[0]).toMatchObject({
+      identifier: 'APP-1',
+      goalStatus: 'complete',
+      goalObjective: 'Complete Linear issue APP-1',
+      goalUpdatedAtMs: 1000,
+    });
+    expect(orchestrator.events('APP-1', 0, 20).map((event) => event.type)).toContain('goal');
+  });
+
+  it('attaches queued steering to the next prompt', async () => {
+    const issue = makeIssue('APP-1');
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), 'symphony-orchestrator-steer-'),
+    );
+    let prompt = '';
+    let fetches = 0;
+    const deps = makeDeps({
+      eventStore: new AgentWorkEventStore(
+        path.join(dir, 'WORKFLOW.md'),
+        () => 2000,
+      ),
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => {
+        fetches += 1;
+        return fetches === 1 ? issue : { ...issue, state: 'Human Review' };
+      },
+      runCodexTurn: async (input) => {
+        prompt = input.prompt;
+        return completedTurn('thread-1', 'turn-1');
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: path.join(dir, 'WORKFLOW.md') },
+      deps,
+    );
+
+    orchestrator.queueSteer('APP-1', 'prioritize the keyboard regression');
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(prompt).toContain('## Operator Guidance');
+    expect(prompt).toContain('prioritize the keyboard regression');
+  });
+
+  it('aborts running agents and blocks new dispatch while paused', async () => {
+    const runningIssue = makeIssue('APP-1');
+    const queuedIssue = makeIssue('APP-2');
+    let codexCalls = 0;
+    const deps = makeDeps({
+      fetchCandidateIssues: async () => [runningIssue, queuedIssue],
+      runCodexTurn: async (_input, options) => {
+        codexCalls += 1;
+        return abortableTurn(options.signal);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+    expect(orchestrator.snapshot().running).toHaveLength(2);
+    expect(codexCalls).toBe(2);
+
+    orchestrator.pause();
+    expect(orchestrator.snapshot().paused).toBe(true);
+    expect(orchestrator.snapshot().pausedAtMs).toBe(1000);
+    await flushPromises();
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+
+    await orchestrator.tick();
+    await flushPromises();
+    expect(codexCalls).toBe(2);
+  });
+
+  it('holds retries while paused and resumes dispatch after unpause', async () => {
+    const issue = makeIssue('APP-1');
+    let now = 1000;
+    let codexCalls = 0;
+    const deps = makeDeps({
+      now: () => now,
+      fetchCandidateIssues: async () => [issue],
+      runCodexTurn: async () => {
+        codexCalls += 1;
+        return {
+          ...completedTurn('thread', 'turn'),
+          status: 'failed',
+          error: 'boom',
+        };
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+    expect(orchestrator.snapshot().retryAttempts).toHaveLength(1);
+
+    orchestrator.pause();
+    now = 5000;
+    await orchestrator.tick();
+    await flushPromises();
+    expect(codexCalls).toBe(1);
+
+    now = 12000;
+    orchestrator.resume();
+    await flushPromises();
+    expect(orchestrator.snapshot().paused).toBe(false);
+    expect(codexCalls).toBeGreaterThan(1);
   });
 });
 
@@ -252,101 +430,109 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     workspacePathExists: async () => true,
     runHook: async () => undefined,
     renderIssuePrompt: async (_config, issue) => `Prompt ${issue.identifier}`,
-    runCodexTurn: async (_input: CodexRunInput, _options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void }) =>
-      completedTurn("thread", "turn"),
+    runCodexTurn: async (
+      _input: CodexRunInput,
+      _options: {
+        signal: AbortSignal;
+        onEvent: (event: CodexRunEvent) => void;
+      },
+    ) => completedTurn('thread', 'turn'),
     now: () => 1000,
     sleep: async () => undefined,
     logger: {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
-      debug: vi.fn()
+      debug: vi.fn(),
     },
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeConfig(
   overrides: {
-    tracker?: Partial<EffectiveWorkflowConfig["tracker"]>;
-    workspace?: Partial<EffectiveWorkflowConfig["workspace"]>;
-  } = {}
+    tracker?: Partial<EffectiveWorkflowConfig['tracker']>;
+    workspace?: Partial<EffectiveWorkflowConfig['workspace']>;
+  } = {},
 ): EffectiveWorkflowConfig {
   const config: EffectiveWorkflowConfig = {
-    workflowPath: "/tmp/WORKFLOW.md",
-    workflowDir: "/tmp",
-    promptTemplate: "Prompt {{ issue.identifier }}",
+    workflowPath: '/tmp/WORKFLOW.md',
+    workflowDir: '/tmp',
+    promptTemplate: 'Prompt {{ issue.identifier }}',
     tracker: {
-      kind: "linear",
-      endpoint: "https://linear.example/graphql",
-      apiKey: "lin_test",
-      projectSlug: "project",
+      kind: 'linear',
+      endpoint: 'https://linear.example/graphql',
+      apiKey: 'lin_test',
+      projectSlug: 'project',
       teamKey: null,
       requiredLabels: [],
-      repoLabelPrefix: "repo:",
-      activeStates: ["Todo", "In Progress"],
-      terminalStates: ["Done", "Closed", "Canceled"]
+      repoLabelPrefix: 'repo:',
+      activeStates: ['Todo', 'In Progress'],
+      terminalStates: ['Done', 'Closed', 'Canceled'],
     },
     polling: { intervalMs: 30000 },
     workspace: {
-      root: "/tmp/workspaces",
-      repoPath: "/tmp/repo",
+      root: '/tmp/workspaces',
+      repoPath: '/tmp/repo',
       projectsRoot: null,
       repoRoutes: {},
-      baseBranch: "main"
+      baseBranch: 'main',
     },
     hooks: {
       afterCreate: null,
       beforeRun: null,
       afterRun: null,
       beforeRemove: null,
-      timeoutMs: 60000
+      timeoutMs: 60000,
     },
     agent: {
       maxConcurrentAgents: 5,
       maxTurns: 20,
       maxRetryBackoffMs: 300000,
       rateLimitProbeIntervalMs: 300000,
-      maxConcurrentAgentsByState: {}
+      maxConcurrentAgentsByState: {},
     },
     codex: {
-      command: "codex app-server --listen stdio://",
-      approvalPolicy: "never",
+      command: 'codex app-server --listen stdio://',
+      approvalPolicy: 'never',
       threadSandbox: null,
       turnSandboxPolicy: null,
       turnTimeoutMs: 3600000,
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
-      model: null
-    }
+      model: null,
+    },
   };
   return {
     ...config,
     tracker: {
       ...config.tracker,
-      ...overrides.tracker
+      ...overrides.tracker,
     },
     workspace: {
       ...config.workspace,
-      ...overrides.workspace
-    }
+      ...overrides.workspace,
+    },
   };
 }
 
-function makeIssue(identifier: string, overrides: Partial<NormalizedIssue> = {}): NormalizedIssue {
+function makeIssue(
+  identifier: string,
+  overrides: Partial<NormalizedIssue> = {},
+): NormalizedIssue {
   return {
     id: overrides.id ?? identifier,
     identifier: overrides.identifier ?? identifier,
     title: overrides.title ?? `Issue ${identifier}`,
     description: overrides.description ?? null,
     priority: overrides.priority ?? null,
-    state: overrides.state ?? "Todo",
+    state: overrides.state ?? 'Todo',
     branchName: overrides.branchName ?? null,
     url: overrides.url ?? null,
     labels: overrides.labels ?? [],
     blockedBy: overrides.blockedBy ?? [],
     createdAt: overrides.createdAt ?? null,
-    updatedAt: overrides.updatedAt ?? null
+    updatedAt: overrides.updatedAt ?? null,
   };
 }
 
@@ -356,14 +542,26 @@ function makeWorkspace(issue: NormalizedIssue): WorkspaceInfo {
     workspaceKey: issue.identifier,
     branchName: `symphony/${issue.identifier}`,
     repoKey: null,
-    repoPath: "/tmp/repo",
-    createdNow: false
+    repoPath: '/tmp/repo',
+    createdNow: false,
   };
+}
+
+function abortableTurn(signal: AbortSignal): Promise<CodexTurnResult> {
+  return new Promise((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      reject(new DOMException('Aborted', 'AbortError'));
+    });
+  });
 }
 
 function completedTurn(threadId: string, turnId: string): CodexTurnResult {
   return {
-    status: "completed",
+    status: 'completed',
     threadId,
     turnId,
     rateLimitUntilMs: null,
@@ -371,7 +569,7 @@ function completedTurn(threadId: string, turnId: string): CodexTurnResult {
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
-    error: null
+    error: null,
   };
 }
 
