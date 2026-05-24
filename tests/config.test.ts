@@ -29,6 +29,7 @@ Hello {{ issue.identifier }}
     expect(config.agent.maxConcurrentAgents).toBe(5);
     expect(config.codex.command).toBe("codex app-server --listen stdio://");
     expect(config.codex.threadSandbox).toBe("workspace-write");
+    expect(config.pullRequest).toEqual({ backend: "github", graphiteFallback: "fail" });
     expect(config.workspace.repoPath).toBe(path.resolve("/tmp/symphony"));
     expect(config.promptTemplate).toContain("Hello");
   });
@@ -167,5 +168,23 @@ Prompt
       }
     });
     await expect(resolveWorkflowPath()).resolves.toBe("/tmp/custom/WORKFLOW.md");
+  });
+
+  it("parses Graphite PR backend config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+pull_request:
+  backend: graphite
+  graphite:
+    fallback: github
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.pullRequest).toEqual({ backend: "graphite", graphiteFallback: "github" });
   });
 });

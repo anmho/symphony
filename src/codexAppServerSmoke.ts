@@ -232,6 +232,10 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null
+    },
+    pullRequest: {
+      backend: "github",
+      graphiteFallback: "fail"
     }
   };
 }

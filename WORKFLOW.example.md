@@ -47,6 +47,11 @@ codex:
   read_timeout_ms: 5000
   stall_timeout_ms: 300000
   model:
+
+pull_request:
+  backend: github
+  graphite:
+    fallback: fail
 ---
 You are implementing Linear issue {{ issue.identifier }}: {{ issue.title }}.
 

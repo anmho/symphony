@@ -212,6 +212,10 @@ function makeConfig(command: string): EffectiveWorkflowConfig {
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null
+    },
+    pullRequest: {
+      backend: "github",
+      graphiteFallback: "fail"
     }
   };
 }

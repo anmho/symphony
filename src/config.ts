@@ -89,6 +89,16 @@ const RawWorkflowConfigSchema = z
         stall_timeout_ms: z.number().int().optional(),
         model: z.string().nullable().optional()
       })
+      .optional(),
+    pull_request: z
+      .object({
+        backend: z.enum(["github", "graphite"]).optional(),
+        graphite: z
+          .object({
+            fallback: z.enum(["fail", "github"]).optional()
+          })
+          .optional()
+      })
       .optional()
   })
   .passthrough();
@@ -186,6 +196,7 @@ export function resolveWorkflowConfig(
   const agent = raw.agent ?? {};
   const hooks = raw.hooks ?? {};
   const codex = raw.codex ?? {};
+  const pullRequest = raw.pull_request ?? {};
 
   const apiKey = resolveEnvValue(tracker.api_key ?? "$LINEAR_API_KEY", userConfig);
   const projectSlug = normalizeOptionalString(tracker.project_slug);
@@ -255,6 +266,10 @@ export function resolveWorkflowConfig(
       readTimeoutMs: codex.read_timeout_ms ?? 5000,
       stallTimeoutMs: codex.stall_timeout_ms ?? 300000,
       model: codex.model ?? null
+    },
+    pullRequest: {
+      backend: pullRequest.backend ?? "github",
+      graphiteFallback: pullRequest.graphite?.fallback ?? "fail"
     }
   };
 }
@@ -267,6 +282,7 @@ export function renderConfigSummary(config: EffectiveWorkflowConfig): string {
     `workspaceRoot=${config.workspace.root}`,
     `repo=${config.workspace.repoPath}`,
     `concurrency=${config.agent.maxConcurrentAgents}`,
+    `prBackend=${config.pullRequest.backend}`,
     `taskCodex="${config.codex.command}"`
   ].join(" ");
 }

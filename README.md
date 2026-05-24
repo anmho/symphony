@@ -157,6 +157,42 @@ Use `--description-file path/to/body.md` to supply a fully grilled brief. Withou
 
 Linear also supports team issue templates in the UI. `symphony ticket template install` creates the same structure via the Linear API so new issues can reuse the preset.
 
+## PR Handoff Backend
+
+Symphony defaults to the existing GitHub PR handoff flow:
+
+```yaml
+pull_request:
+  backend: github
+```
+
+For stacked PR work, opt into the Graphite CLI backend in `WORKFLOW.md`:
+
+```yaml
+pull_request:
+  backend: graphite
+  graphite:
+    fallback: fail # or github
+```
+
+Graphite setup is local to each repository:
+
+```sh
+brew install withgraphite/tap/graphite
+gt auth
+gt init --trunk main
+```
+
+In Graphite mode, Symphony adds PR handoff instructions to each agent prompt. The worker must verify Graphite with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`, submit with `gt submit --stack --no-interactive --no-edit --no-ai`, and then verify the GitHub PR metadata with `gh pr view --json url,baseRefName,headRefName,body`. Handoff is not complete unless the PR head matches the Symphony branch, the PR base matches the expected parent stack branch, and the PR body still contains the Linear Ticket link.
+
+If `fallback: fail`, a missing or uninitialized Graphite setup is a clear blocker and the worker should leave a Linear handoff explaining it. If `fallback: github`, the worker may use the normal GitHub PR flow and note the fallback in Linear.
+
+Recommended Graphite Inbox filter for Symphony PRs:
+
+```text
+author:@me (title:ANM- OR branch:symphony/)
+```
+
 Stop it:
 
 ```sh

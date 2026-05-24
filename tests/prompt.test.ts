@@ -5,7 +5,11 @@ import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
 describe("prompt rendering", () => {
   it("renders Liquid issue fields", async () => {
     const config = {
-      promptTemplate: "Implement {{ issue.identifier }}: {{ issue.title }} on attempt {{ attempt }}."
+      promptTemplate: "Implement {{ issue.identifier }}: {{ issue.title }} on attempt {{ attempt }}.",
+      pullRequest: {
+        backend: "github",
+        graphiteFallback: "fail"
+      }
     } as EffectiveWorkflowConfig;
     const issue = {
       identifier: "APP-1",
@@ -22,6 +26,9 @@ describe("prompt rendering", () => {
       updatedAt: null
     } satisfies NormalizedIssue;
 
-    await expect(renderIssuePrompt(config, issue, 2)).resolves.toBe("Implement APP-1: Add checkout on attempt 2.");
+    const prompt = await renderIssuePrompt(config, issue, 2);
+    expect(prompt).toContain("Implement APP-1: Add checkout on attempt 2.");
+    expect(prompt).toContain("## PR Handoff Backend");
+    expect(prompt).toContain("Use the default GitHub PR flow for handoff.");
   });
 });

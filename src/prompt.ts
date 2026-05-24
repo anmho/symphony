@@ -1,4 +1,5 @@
 import { Liquid } from "liquidjs";
+import { buildPrHandoffInstructions } from "./prHandoff.js";
 import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
 
 export async function renderIssuePrompt(
@@ -7,7 +8,11 @@ export async function renderIssuePrompt(
   attempt: number | null
 ): Promise<string> {
   if (config.promptTemplate.trim().length === 0) {
-    return `You are working on Linear issue ${issue.identifier}: ${issue.title}.`;
+    return withPrHandoffInstructions(
+      `You are working on Linear issue ${issue.identifier}: ${issue.title}.`,
+      config,
+      issue
+    );
   }
 
   const engine = new Liquid({
@@ -15,8 +20,17 @@ export async function renderIssuePrompt(
     strictVariables: true
   });
 
-  return engine.parseAndRender(config.promptTemplate, {
+  const rendered = await engine.parseAndRender(config.promptTemplate, {
     issue,
     attempt
   });
+  return withPrHandoffInstructions(rendered, config, issue);
+}
+
+function withPrHandoffInstructions(
+  prompt: string,
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue
+): string {
+  return `${prompt.trim()}\n\n${buildPrHandoffInstructions(config, issue)}`;
 }

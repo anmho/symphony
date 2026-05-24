@@ -635,6 +635,10 @@ function makeConfig(
       stallTimeoutMs: 300000,
       model: null,
     },
+    pullRequest: {
+      backend: 'github',
+      graphiteFallback: 'fail',
+    },
   };
   return {
     ...config,
