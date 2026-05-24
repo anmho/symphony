@@ -62,6 +62,17 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.rows(for: .waiting, nowMs: 1_000_000_000).count, inventory.queued)
     }
 
+    func testDoneSectionUsesCompletedIdentifiers() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "status", withExtension: "json"))
+        let data = try Data(contentsOf: url)
+        let snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
+
+        let doneRows = snapshot.rows(for: .done, nowMs: 20_000)
+        XCTAssertEqual(doneRows.map(\.identifier), ["ANM-99"])
+        XCTAssertEqual(doneRows.first?.status, "completed")
+        XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 1)
+    }
+
     func testUsageLimitErrorsAreRateLimited() {
         XCTAssertTrue(isRateLimitedError("codex_rate_limited"))
         XCTAssertTrue(isRateLimitedError("{\"message\":\"You've hit your usage limit.\",\"codexErrorInfo\":\"usageLimitExceeded\"}"))
