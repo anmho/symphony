@@ -19,7 +19,7 @@ The default posture is high-trust local execution. Symphony is intended for repo
 - [Symphony smoke](docs/symphony-smoke.md)
 - [Release process](docs/release.md)
 - [Linear issue templates for Symphony dispatch](templates/README.md)
-- [Cursor agent skill](https://github.com/anmho/skills/tree/main/skills/symphony) — install with `npx skills add anmho/skills --skill symphony --global -y`
+- [Symphony agent skill](https://github.com/anmho/skills/tree/main/skills/symphony)
 
 ## Requirements
 
@@ -81,6 +81,17 @@ Install the `symphony` command globally:
 bun run install:global
 ```
 
+Install the Symphony agent skill from the canonical `anmho/skills` repo:
+
+```sh
+npx skills add anmho/skills --skill symphony --global --agent '*' -y
+```
+
+The skill is intentionally not vendored in this repo. The canonical source is
+[`anmho/skills/skills/symphony`](https://github.com/anmho/skills/tree/main/skills/symphony);
+the installer places it into the supported agent skill directories, including
+`~/.agents/skills/symphony`.
+
 Start the runner:
 
 ```sh
@@ -105,10 +116,22 @@ symphony watch
 
 Native **Swift/SwiftUI** app (not Electron) — lightweight menu bar popover with clickable Linear ticket links.
 
-**Install:**
+**Install the latest packaged release:**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/anmho/symphony/main/macos/SymphonyMenuBar/install.sh | bash
+curl -fsSL https://github.com/anmho/symphony/releases/latest/download/install.sh | bash
+open -a Symphony
+```
+
+The installer places the app at `/Applications/Symphony.app`. The app is menu
+bar only, so it will not appear in the Dock after onboarding.
+
+**Install from source for local development:**
+
+```sh
+cd macos/SymphonyMenuBar
+./install-local.sh
+open -a Symphony
 ```
 
 Or download a `.dmg` from [GitHub Releases](https://github.com/anmho/symphony/releases) (`menubar-v*` tags).
