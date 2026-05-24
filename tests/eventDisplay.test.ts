@@ -79,6 +79,35 @@ describe("event display compaction", () => {
     ]);
   });
 
+  it("waits for assistant_message before emitting in CLI follow mode", () => {
+    const display = new StreamingEventDisplay();
+    expect(display.push(makeEvent({ cursor: 1, type: "assistant_delta", summary: "Hel", payload: { itemId: "item-1" } }))).toEqual([]);
+    expect(display.push(makeEvent({ cursor: 2, type: "assistant_delta", summary: "lo", payload: { itemId: "item-1" } }))).toEqual([]);
+    expect(display.push(makeEvent({
+      cursor: 3,
+      type: "assistant_message",
+      summary: "assistant message",
+      payload: { itemId: "item-1", item: { type: "agentMessage", text: "Hello" } }
+    }))).toEqual([
+      expect.objectContaining({ kind: "assistant", text: "Hello" })
+    ]);
+  });
+
+  it("shows in-progress assistant text for incomplete delta streams in watch compaction", () => {
+    const growing = [
+      makeEvent({ cursor: 1, type: "assistant_delta", summary: "Work", turnId: "turn-1", payload: { itemId: "item-1" } }),
+      makeEvent({ cursor: 2, type: "assistant_delta", summary: "ing", turnId: "turn-1", payload: { itemId: "item-1" } })
+    ];
+
+    expect(compactAgentWorkEvents(growing)).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "Working",
+        sourceCount: 2
+      })
+    ]);
+  });
+
   it("formats concise human labels", () => {
     const line = formatDisplayEvent({
       cursor: 1,
