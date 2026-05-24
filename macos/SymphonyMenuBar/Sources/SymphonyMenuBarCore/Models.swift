@@ -48,6 +48,40 @@ public enum AgentKind {
     case completed
 }
 
+public struct AgentInventory: Equatable {
+    public let running: Int
+    public let waiting: Int
+    public let parked: Int
+    public let completed: Int
+    public let active: Int
+
+    public var queued: Int { waiting + parked }
+}
+
+public enum AgentSection {
+    case running
+    case waiting
+    case done
+}
+
+public func isRateLimitedError(_ value: String?) -> Bool {
+    guard let value, !value.isEmpty else { return false }
+    if value == "codex_rate_limited" {
+        return true
+    }
+    if value.localizedCaseInsensitiveContains("usage limit") {
+        return true
+    }
+    if value.contains("usageLimitExceeded") {
+        return true
+    }
+    if let summary = summarizeRetryError(value),
+       summary.localizedCaseInsensitiveContains("usage limit") {
+        return true
+    }
+    return false
+}
+
 public extension OrchestratorSnapshot {
     func agentRows(nowMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> [AgentRow] {
         var rows: [AgentRow] = running.map { session in
@@ -84,8 +118,39 @@ public extension OrchestratorSnapshot {
         return rows
     }
 
+    func agentInventory(nowMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> AgentInventory {
+        let rows = agentRows(nowMs: nowMs)
+        let runningCount = rows.filter { $0.kind == .running }.count
+        let parkedCount = rows.filter { $0.kind == .parked }.count
+        let waitingCount = rows.filter { $0.kind == .retry }.count
+        let completedCount = rows.filter { $0.kind == .completed }.count
+        let activeIdentifiers = Set(
+            rows.filter { $0.kind != .completed }.map(\.identifier)
+        )
+        return AgentInventory(
+            running: runningCount,
+            waiting: waitingCount,
+            parked: parkedCount,
+            completed: completedCount,
+            active: activeIdentifiers.count
+        )
+    }
+
+    func rows(for section: AgentSection, nowMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> [AgentRow] {
+        agentRows(nowMs: nowMs).filter { row in
+            switch section {
+            case .running:
+                return row.kind == .running
+            case .waiting:
+                return row.kind == .retry || row.kind == .parked
+            case .done:
+                return row.kind == .completed
+            }
+        }
+    }
+
     private func isParkedAttempt(_ attempt: RunAttempt) -> Bool {
-        attempt.error == "codex_rate_limited"
+        isRateLimitedError(attempt.error)
     }
 
     private func retryDetail(_ attempt: RunAttempt, parked: Bool, nowMs: Int) -> String {

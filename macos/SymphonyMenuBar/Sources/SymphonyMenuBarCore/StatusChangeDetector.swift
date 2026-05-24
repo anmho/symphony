@@ -43,7 +43,7 @@ public struct MonitorState: Equatable {
         var retrying = Set<String>()
         var parked = Set<String>()
         for attempt in snapshot.retryAttempts {
-            if attempt.error == "codex_rate_limited" {
+            if isRateLimitedError(attempt.error) {
                 parked.insert(attempt.identifier)
             } else {
                 retrying.insert(attempt.identifier)

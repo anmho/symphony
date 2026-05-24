@@ -104,11 +104,19 @@ struct SymphonyPanelView: View {
 
     private func sidebarCount(for item: PanelSection) -> Int? {
         guard let snapshot = service.snapshot, service.isOnline else { return nil }
+        let inventory = snapshot.agentInventory()
         switch item {
-        case .running: return snapshot.running.count
-        case .waiting: return snapshot.retryAttempts.count
-        case .done: return snapshot.completed.count
-        default: return nil
+        case .overview:
+            return inventory.active > 0 ? inventory.active : nil
+        case .running:
+            return inventory.running > 0 ? inventory.running : nil
+        case .waiting:
+            let queued = inventory.queued
+            return queued > 0 ? queued : nil
+        case .done:
+            return inventory.completed > 0 ? inventory.completed : nil
+        default:
+            return nil
         }
     }
 
@@ -135,6 +143,25 @@ struct SymphonyPanelView: View {
         }
     }
 
+    private var sectionTitle: String {
+        guard let snapshot = service.snapshot, service.isOnline else {
+            return section.title
+        }
+        let inventory = snapshot.agentInventory()
+        switch section {
+        case .overview:
+            return inventory.active > 0 ? "Overview · \(inventory.active) active" : section.title
+        case .running:
+            return inventory.running > 0 ? "Running · \(inventory.running)" : section.title
+        case .waiting:
+            return inventory.queued > 0 ? "Waiting · \(inventory.queued)" : section.title
+        case .done:
+            return inventory.completed > 0 ? "Done · \(inventory.completed)" : section.title
+        case .settings:
+            return section.title
+        }
+    }
+
     private var panelHeader: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
@@ -143,7 +170,7 @@ struct SymphonyPanelView: View {
                         .font(.title3.weight(.semibold))
                     statusBadge
                 }
-                Text(section.title)
+                Text(sectionTitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -204,27 +231,37 @@ struct SymphonyPanelView: View {
             }
 
             if let snapshot = service.snapshot, service.isOnline {
+                let inventory = snapshot.agentInventory()
+
+                metricCard(
+                    title: "Active agents",
+                    value: "\(inventory.active)",
+                    subtitle: activeAgentsSubtitle(inventory),
+                    progress: progressFraction(active: inventory.active, total: max(inventory.active + inventory.completed, 1)),
+                    tint: .primary
+                )
+
                 metricCard(
                     title: "Running agents",
-                    value: "\(snapshot.running.count)",
-                    subtitle: snapshot.running.isEmpty ? "No active runs" : "Currently executing",
-                    progress: progressFraction(active: snapshot.running.count, total: totalAgents(snapshot)),
+                    value: "\(inventory.running)",
+                    subtitle: inventory.running == 0 ? "No active runs" : "Using execution slots",
+                    progress: progressFraction(active: inventory.running, total: max(inventory.active, 1)),
                     tint: .green
                 )
 
                 metricCard(
                     title: "Waiting to retry",
-                    value: "\(snapshot.retryAttempts.count)",
-                    subtitle: waitingSubtitle(snapshot),
-                    progress: progressFraction(active: snapshot.retryAttempts.count, total: totalAgents(snapshot)),
+                    value: "\(inventory.queued)",
+                    subtitle: waitingSubtitle(snapshot, inventory: inventory),
+                    progress: progressFraction(active: inventory.queued, total: max(inventory.active, 1)),
                     tint: .orange
                 )
 
                 metricCard(
                     title: "Completed",
-                    value: "\(snapshot.completed.count)",
+                    value: "\(inventory.completed)",
                     subtitle: "Finished this session",
-                    progress: progressFraction(active: snapshot.completed.count, total: totalAgents(snapshot)),
+                    progress: progressFraction(active: inventory.completed, total: max(inventory.active + inventory.completed, 1)),
                     tint: .blue
                 )
 
@@ -256,7 +293,7 @@ struct SymphonyPanelView: View {
     private var agentSectionContent: some View {
         Group {
             if let snapshot = service.snapshot, service.isOnline {
-                let rows = filteredRows(snapshot: snapshot)
+                let rows = rowsForCurrentSection(snapshot: snapshot)
                 if rows.isEmpty {
                     emptyState(
                         symbol: section.symbol,
@@ -329,34 +366,45 @@ struct SymphonyPanelView: View {
         return "Updated \(elapsed)s ago"
     }
 
-    private func filteredRows(snapshot: OrchestratorSnapshot) -> [AgentRow] {
-        let rows = snapshot.agentRows()
+    private func rowsForCurrentSection(snapshot: OrchestratorSnapshot) -> [AgentRow] {
         switch section {
         case .running:
-            return rows.filter { $0.kind == .running }
+            return snapshot.rows(for: .running)
         case .waiting:
-            return rows.filter { $0.kind == .retry || $0.kind == .parked }
+            return snapshot.rows(for: .waiting)
         case .done:
-            return rows.filter { $0.kind == .completed }
+            return snapshot.rows(for: .done)
         default:
-            return rows
+            return []
         }
     }
 
-    private func totalAgents(_ snapshot: OrchestratorSnapshot) -> Int {
-        max(snapshot.running.count + snapshot.retryAttempts.count + snapshot.completed.count, 1)
+    private func activeAgentsSubtitle(_ inventory: AgentInventory) -> String {
+        if inventory.active == 0 {
+            return "No in-flight work"
+        }
+        if inventory.queued == 0 {
+            return "\(inventory.running) running"
+        }
+        return "\(inventory.running) running · \(inventory.queued) queued"
     }
 
     private func progressFraction(active: Int, total: Int) -> Double {
         Double(active) / Double(max(total, 1))
     }
 
-    private func waitingSubtitle(_ snapshot: OrchestratorSnapshot) -> String {
+    private func waitingSubtitle(_ snapshot: OrchestratorSnapshot, inventory: AgentInventory) -> String {
         if snapshot.codexRateLimit.resumeAfterMs != nil {
             return "Blocked by Codex rate limit"
         }
-        if snapshot.retryAttempts.isEmpty {
+        if inventory.queued == 0 {
             return "Queue is clear"
+        }
+        if inventory.parked > 0, inventory.waiting > 0 {
+            return "\(inventory.parked) rate limited · \(inventory.waiting) scheduled"
+        }
+        if inventory.parked > 0 {
+            return "Rate limited"
         }
         return "Scheduled for retry"
     }
