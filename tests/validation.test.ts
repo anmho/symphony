@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateConfiguredRepoRouteLabels } from "../src/validation.js";
+import { syncConfiguredRepoRouteLabels, validateConfiguredRepoRouteLabels } from "../src/validation.js";
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("config validation", () => {
@@ -30,9 +30,38 @@ describe("config validation", () => {
     );
 
     expect(warnings.map((warning) => warning.message)).toEqual([
-      "Missing Linear label for configured repo route: repo:auth",
-      "Missing Linear label for configured repo route: repo:terraform"
+      "Missing Linear label for configured repo route: repo:auth. Run `symphony labels sync --workflow WORKFLOW.md` to create missing route labels.",
+      "Missing Linear label for configured repo route: repo:terraform. Run `symphony labels sync --workflow WORKFLOW.md` to create missing route labels."
     ]);
+  });
+
+  it("creates only missing configured repo route labels", async () => {
+    const created: string[] = [];
+
+    const result = await syncConfiguredRepoRouteLabels(
+      makeConfig({
+        repoRoutes: {
+          symphony: "/tmp/symphony",
+          auth: "/tmp/auth",
+          terraform: "/tmp/terraform"
+        }
+      }),
+      {
+        fetchLabels: async () => ["repo:symphony"],
+        fetchTeam: async () => ({ id: "team-1", key: "ANM", name: "ANM" }),
+        createLabel: async (_config, name) => {
+          created.push(name);
+          return { id: `label-${name}`, name };
+        }
+      }
+    );
+
+    expect(result).toEqual({
+      existingLabels: ["repo:symphony"],
+      createdLabels: ["repo:auth", "repo:terraform"],
+      missingLabels: ["repo:auth", "repo:terraform"]
+    });
+    expect(created).toEqual(["repo:auth", "repo:terraform"]);
   });
 
   it("warns without failing when Linear labels cannot be fetched", async () => {
@@ -59,6 +88,7 @@ describe("config validation", () => {
 function makeConfig(overrides: { repoRoutes: Record<string, string> }): EffectiveWorkflowConfig {
   return {
     tracker: {
+      teamKey: "ANM",
       repoLabelPrefix: "repo:"
     },
     workspace: {

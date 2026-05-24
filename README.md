@@ -142,6 +142,9 @@ Create a Linear ticket for Symphony dispatch using the agent-brief preset (label
 # once per team: install the Linear issue template preset
 symphony ticket template install --workflow WORKFLOW.md
 
+# whenever WORKFLOW.md gains repo_routes entries, create missing repo:<key> labels
+symphony labels sync --workflow WORKFLOW.md
+
 symphony ticket create \
   --workflow WORKFLOW.md \
   --title "create-svc: ensure service destroy cleans up Grafana dashboards" \
