@@ -37,6 +37,18 @@ interface IssuesQueryData {
   };
 }
 
+interface IssueLabelsQueryData {
+  issueLabels?: {
+    nodes?: Array<{ name?: string | null }>;
+    pageInfo?: IssueLabelsPageInfo;
+  };
+}
+
+interface IssueLabelsPageInfo {
+  hasNextPage?: boolean;
+  endCursor?: string | null;
+}
+
 const ISSUE_FIELDS = `
   id
   identifier
@@ -133,6 +145,37 @@ export async function writeRunnerComment(
     `,
     { issueId, body }
   );
+}
+
+export async function fetchIssueLabelNames(config: EffectiveWorkflowConfig): Promise<string[]> {
+  const names: string[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const data: IssueLabelsQueryData = await linearGraphql<IssueLabelsQueryData>(
+      config,
+      `
+        query SymphonyIssueLabels($after: String) {
+          issueLabels(first: 100, after: $after) {
+            nodes { name }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `,
+      { after: cursor }
+    );
+
+    const labelNodes: Array<{ name?: string | null }> = data.issueLabels?.nodes ?? [];
+    names.push(...labelNodes.map((label) => label.name).filter((name): name is string => Boolean(name)));
+
+    const pageInfo: IssueLabelsPageInfo | undefined = data.issueLabels?.pageInfo;
+    cursor = pageInfo?.hasNextPage ? (pageInfo.endCursor ?? null) : null;
+  } while (cursor);
+
+  return names;
 }
 
 async function linearGraphql<T>(
