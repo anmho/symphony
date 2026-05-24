@@ -15,9 +15,11 @@ final class StatusService: ObservableObject {
     var settings = AppSettings.load()
 
     private var timer: Timer?
+    private var lastMonitorState: MonitorState?
 
     func start() {
         timer?.invalidate()
+        NotificationService.shared.requestAuthorizationIfNeeded()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: settings.pollIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -47,22 +49,37 @@ final class StatusService: ObservableObject {
                     let http = response as? HTTPURLResponse,
                     (200 ..< 300).contains(http.statusCode)
                 else {
-                    snapshot = nil
-                    isOnline = false
-                    lastError = "Symphony is not running on port \(statusPort)."
+                    applyMonitorState(.offline(), lastError: "Symphony is not running on port \(statusPort).")
                     return
                 }
 
-                snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
-                isOnline = true
-                lastError = nil
+                let decoded = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
+                applyMonitorState(MonitorState(snapshot: decoded, isOnline: true), snapshot: decoded)
             } catch {
                 lastUpdated = Date()
-                snapshot = nil
-                isOnline = false
-                lastError = error.localizedDescription
+                applyMonitorState(.offline(), lastError: error.localizedDescription)
             }
         }
+    }
+
+    private func applyMonitorState(
+        _ state: MonitorState,
+        snapshot newSnapshot: OrchestratorSnapshot? = nil,
+        lastError newLastError: String? = nil
+    ) {
+        let changes = StatusChangeDetector.changes(from: lastMonitorState, to: state)
+        lastMonitorState = state
+        snapshot = newSnapshot
+        isOnline = state.isOnline
+        lastError = newLastError
+
+        for change in changes {
+            NotificationService.shared.post(change)
+        }
+    }
+
+    private func resetMonitorState() {
+        lastMonitorState = nil
     }
 
     func openIssue(_ identifier: String) {
@@ -99,8 +116,8 @@ final class StatusService: ObservableObject {
 
     func stopSymphony() {
         performCLI(["stop"], success: "Symphony stopped.") {
-            self.snapshot = nil
-            self.isOnline = false
+            self.applyMonitorState(.offline())
+            self.resetMonitorState()
         }
     }
 
@@ -192,15 +209,22 @@ struct AppSettings: Equatable {
     var statusPort: Int
     var linearOrgSlug: String
     var pollIntervalSeconds: TimeInterval
+    var notificationsEnabled: Bool
 
-    static let defaults = AppSettings(statusPort: 3979, linearOrgSlug: "anmho", pollIntervalSeconds: 5)
+    static let defaults = AppSettings(
+        statusPort: 3979,
+        linearOrgSlug: "anmho",
+        pollIntervalSeconds: 5,
+        notificationsEnabled: true
+    )
 
     static func load() -> AppSettings {
         let defaults = UserDefaults.standard
         return AppSettings(
             statusPort: defaults.object(forKey: "statusPort") as? Int ?? Self.defaults.statusPort,
             linearOrgSlug: defaults.string(forKey: "linearOrgSlug") ?? Self.defaults.linearOrgSlug,
-            pollIntervalSeconds: defaults.object(forKey: "pollIntervalSeconds") as? TimeInterval ?? Self.defaults.pollIntervalSeconds
+            pollIntervalSeconds: defaults.object(forKey: "pollIntervalSeconds") as? TimeInterval ?? Self.defaults.pollIntervalSeconds,
+            notificationsEnabled: defaults.object(forKey: "notificationsEnabled") as? Bool ?? Self.defaults.notificationsEnabled
         )
     }
 
@@ -209,5 +233,6 @@ struct AppSettings: Equatable {
         defaults.set(statusPort, forKey: "statusPort")
         defaults.set(linearOrgSlug, forKey: "linearOrgSlug")
         defaults.set(pollIntervalSeconds, forKey: "pollIntervalSeconds")
+        defaults.set(notificationsEnabled, forKey: "notificationsEnabled")
     }
 }

@@ -14,6 +14,7 @@ Source lives here in the symphony repo; **users install the packaged release**, 
 - Status panel with running/retry/parked rows and Linear links
 - Live status from Symphony `GET /status`
 - CLI controls via `symphony start`, `stop`, `watch`, and HTTP resume/steer endpoints
+- **macOS notifications** when status changes (rate limit, agent started/finished/parked, offline)
 - **Watch** opens `symphony watch`; errors surface if the CLI is missing from PATH
 
 ## Install (recommended)
