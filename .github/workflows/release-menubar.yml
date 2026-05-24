@@ -97,6 +97,9 @@ jobs:
           echo "value=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -122,6 +125,7 @@ jobs:
             }
           }
           EOF
+          cp macos/SymphonyMenuBar/install.sh artifacts/install.sh
 
       - name: Create release
         uses: softprops/action-gh-release@v2
