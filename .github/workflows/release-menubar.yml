@@ -80,8 +80,8 @@ jobs:
             macos/SymphonyMenuBar/dist/*.sha256
 
   release:
-    needs: [build-aarch64, build-x64]
-    if: always() && needs.build-aarch64.result == 'success'
+    needs: [build-aarch64]
+    if: needs.build-aarch64.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Resolve version
