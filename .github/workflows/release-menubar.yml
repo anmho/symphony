@@ -47,38 +47,6 @@ jobs:
             macos/SymphonyMenuBar/dist/checksums-${{ steps.version.outputs.value }}.txt
             macos/SymphonyMenuBar/dist/*.sha256
 
-  build-x64:
-    runs-on: macos-13
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Resolve version
-        id: version
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/menubar-v* ]]; then
-            version="${GITHUB_REF_NAME#menubar-v}"
-          else
-            version="${{ inputs.version }}"
-          fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Package app
-        working-directory: macos/SymphonyMenuBar
-        run: |
-          chmod +x build.sh package.sh
-          ./package.sh "${{ steps.version.outputs.value }}"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: symphony-menubar-x64
-          path: |
-            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_x64.app.tar.gz
-            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_x64.dmg
-            macos/SymphonyMenuBar/dist/*.sha256
-
   release:
     needs: [build-aarch64]
     if: needs.build-aarch64.result == 'success'
@@ -117,10 +85,6 @@ jobs:
               "aarch64": {
                 "dmg": "SymphonyMenuBar_${version}_aarch64.dmg",
                 "tarball": "SymphonyMenuBar_${version}_aarch64.app.tar.gz"
-              },
-              "x64": {
-                "dmg": "SymphonyMenuBar_${version}_x64.dmg",
-                "tarball": "SymphonyMenuBar_${version}_x64.app.tar.gz"
               }
             }
           }
