@@ -4,3 +4,6 @@ dist/
 symphony_workspaces/
 *.log
 *.tsbuildinfo
+macos/**/.build/
+macos/**/*.app
+macos/**/dist/

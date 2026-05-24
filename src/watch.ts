@@ -8,9 +8,19 @@ import {
 } from "./eventDisplay.js";
 import type { AgentWorkEvent, OrchestratorSnapshot } from "./types.js";
 import { fetchDaemonEvents, fetchDaemonStatus, queueSteer, resumeIssue } from "./status.js";
+import {
+  computeWatchLayout,
+  fillTerminalScreen,
+  formatWatchTableHeader,
+  formatWatchTableRow,
+  measureWatchTableWidths,
+  padLineToWidth,
+  type WatchLayout,
+  type WatchTableRow
+} from "./watchLayout.js";
 
 const LOG_FETCH_LIMIT = 400;
-const LOG_VIEWPORT_HEIGHT = 16;
+const WATCH_CHROME_LINES = 5;
 
 export interface WatchOptions {
   port: number;
@@ -45,7 +55,10 @@ interface RenderOptions {
   logViewport?: LogViewportState;
   logViewportHeight?: number;
   terminalWidth?: number;
+  terminalRows?: number;
+  layout?: WatchLayout;
   logLines?: string[];
+  fillScreen?: boolean;
   color?: boolean;
 }
 
@@ -91,6 +104,7 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
   let logViewport: LogViewportState = { ...DEFAULT_LOG_VIEWPORT };
   let logEvents: AgentWorkEvent[] = [];
   let logEventsIssue: string | null = null;
+  let currentLogViewportHeight = 16;
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
   const opentui = await import("@opentui/core");
@@ -98,7 +112,9 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
     clearOnShutdown: true,
-    targetFps: 30
+    targetFps: 30,
+    backgroundColor: "#11111b",
+    screenMode: "alternate-screen"
   });
   const screen = new TextRenderable(renderer, {
     id: "symphony-watch",
@@ -127,6 +143,19 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     const rowCount = snapshot ? filteredRows(snapshot, Date.now(), filterText).length : 0;
     selectedIndex = clamp(selectedIndex, 0, Math.max(rowCount - 1, 0));
     const selected = snapshot ? filteredRows(snapshot, Date.now(), filterText)[selectedIndex] ?? null : null;
+    const terminalWidth = renderer.terminalWidth ?? output.columns ?? 120;
+    const terminalRows = renderer.terminalHeight ?? output.rows ?? 40;
+    const layout = computeWatchLayout({
+      view,
+      terminalWidth,
+      terminalRows,
+      chromeLineCount: WATCH_CHROME_LINES,
+      rowCount,
+      selectedIndex
+    });
+    const logViewportHeight = layout.logViewportHeight;
+    currentLogViewportHeight = logViewportHeight;
+
     if (selected && view === "events") {
       if (logEventsIssue !== selected.issue) {
         logEventsIssue = selected.issue;
@@ -141,9 +170,8 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     const describeEvents = snapshot && selected && view === "describe"
       ? await fetchDaemonEvents(options.port, { issue: selected.issue, limit: 40 })
       : [];
-    const terminalWidth = output.columns ?? 120;
     const logSection = view === "events" && selected
-      ? renderLogSection(logEvents, logViewport, LOG_VIEWPORT_HEIGHT, terminalWidth, createTheme(true))
+      ? renderLogSection(logEvents, logViewport, logViewportHeight, terminalWidth, createTheme(true))
       : null;
     if (logSection) {
       logViewport = logSection.viewport;
@@ -159,8 +187,11 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
       filterText,
       events: view === "describe" ? describeEvents ?? [] : logEvents,
       logViewport,
-      logViewportHeight: LOG_VIEWPORT_HEIGHT,
+      logViewportHeight,
       terminalWidth,
+      terminalRows,
+      layout,
+      fillScreen: true,
       color: true
     };
     if (logSection) {
@@ -168,6 +199,12 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     }
     screen.content = ansiToStyledText(renderStatusScreen(snapshot, renderOptions), opentui) as string;
   };
+
+  renderer.on("resize", () => {
+    if (!stopped) {
+      void render();
+    }
+  });
 
   renderer.keyInput.on("keypress", (key: { name: string; ctrl?: boolean; raw?: string; sequence?: string; preventDefault?: () => void }) => {
     const chunk = key.raw ?? key.sequence ?? key.name;
@@ -293,12 +330,11 @@ async function runOpenTuiStatusWatch(options: Required<Pick<WatchOptions, "port"
     }
 
     if (view === "events") {
-      const viewportHeight = LOG_VIEWPORT_HEIGHT;
       const terminalWidth = output.columns ?? 120;
       const lineCount = buildLogLines(logEvents, Math.max(terminalWidth - 4, 40), logViewport.wrap).length;
       const logKey = watchLogKey(key);
       if (logKey) {
-        logViewport = applyLogViewportKey(logViewport, logKey, lineCount, viewportHeight);
+        logViewport = applyLogViewportKey(logViewport, logKey, lineCount, currentLogViewportHeight);
         void render();
         return;
       }
@@ -355,16 +391,45 @@ export function renderStatusScreen(
     ? theme.warn(`${formatTime(snapshot.codexRateLimit.resumeAfterMs)} ${snapshot.codexRateLimit.reason ?? ""}`.trim())
     : theme.ok("-");
   const configError = snapshot.lastConfigError ? theme.error(snapshot.lastConfigError) : theme.ok("-");
+  const terminalWidth = options.terminalWidth ?? 120;
+  const terminalRows = options.terminalRows ?? 40;
+  const layout = options.layout ?? computeWatchLayout({
+    view,
+    terminalWidth,
+    terminalRows,
+    chromeLineCount: WATCH_CHROME_LINES,
+    rowCount: rows.length,
+    selectedIndex
+  });
 
-  return [
+  const headerLine = padLineToWidth(
     `${theme.title("symphony@local")}  ${theme.dim("view=")}${theme.accent(view)}  ${theme.dim("port=")}${options.port}  ${theme.dim("uptime=")}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim("running=")}${theme.ok(String(snapshot.running.length))}  ${theme.dim("retries=")}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : "0"}  ${theme.dim("completed=")}${snapshot.completed.length}`,
-    `${theme.dim("workflow=")}${snapshot.workflowPath}`,
+    terminalWidth
+  );
+  const workflowLine = padLineToWidth(
+    `${theme.dim("workflow=")}${truncate(snapshot.workflowPath, Math.max(terminalWidth - 11, 20))}`,
+    terminalWidth
+  );
+  const metaLine = padLineToWidth(
     `${theme.dim("filter=")}${filterText || "-"}  ${theme.dim("rate-limit=")}${rateLimit}  ${theme.dim("config-error=")}${configError}`,
+    terminalWidth
+  );
+  const menuLine = padLineToWidth(renderMenu(inputMode, commandBuffer, theme), terminalWidth);
+
+  const content = [
+    headerLine,
+    workflowLine,
+    metaLine,
     "",
-    renderMenu(inputMode, commandBuffer, theme),
+    menuLine,
     "",
-    renderView(view, rows, selectedIndex, selected, theme, options)
+    renderView(view, rows, selectedIndex, selected, theme, { ...options, layout, terminalWidth })
   ].join("\n");
+
+  if (!options.fillScreen) {
+    return content;
+  }
+  return fillTerminalScreen(content, terminalWidth, terminalRows);
 }
 
 export function renderLogSection(
@@ -380,7 +445,7 @@ export function renderLogSection(
   const rendered = window.lines.map((line, index) => {
     const absoluteLine = window.scrollTop + index;
     const marker = absoluteLine === window.selectedLine ? ">" : " ";
-    return colorLogLine(`${marker} ${line}`, theme);
+    return colorLogLine(padLineToWidth(`${marker} ${line}`, terminalWidth), theme);
   });
   return {
     lines: rendered,
@@ -502,17 +567,39 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
   return [...running, ...retries, ...completed];
 }
 
-function renderTable(rows: WatchRow[], selectedIndex: number, theme: Theme): string {
-  const header = theme.header(`${pad(" ", 2)} ${pad("ISSUE", 10)} ${pad("STATUS", 9)} ${pad("AGE", 10)} ${pad("TURN", 4)} ${pad("EVENT", 14)} ${pad("UPDATED", 9)} WORKSPACE`);
-  const body = rows.map((row, index) => {
-    const marker = index === selectedIndex ? ">" : " ";
-    const line = `${pad(marker, 2)} ${pad(row.issue, 10)} ${pad(row.kind, 9)} ${pad(row.age, 10)} ${pad(row.turn, 4)} ${pad(row.event, 14)} ${pad(row.updated, 9)} ${row.workspace}`;
-    if (index === selectedIndex) {
-      return theme.selected(line);
+function renderTable(
+  rows: WatchRow[],
+  selectedIndex: number,
+  theme: Theme,
+  terminalWidth: number,
+  layout: WatchLayout | null
+): string {
+  const tableRows = rows.map(toWatchTableRow);
+  const widths = measureWatchTableWidths(tableRows, terminalWidth);
+  const header = theme.header(formatWatchTableHeader(widths));
+  const window = layout?.tableWindow ?? { start: 0, end: rows.length };
+  const body = rows.slice(window.start, window.end).map((row, index) => {
+    const absoluteIndex = window.start + index;
+    const marker = absoluteIndex === selectedIndex ? ">" : " ";
+    const line = formatWatchTableRow(toWatchTableRow(row), widths, marker);
+    if (absoluteIndex === selectedIndex) {
+      return theme.selected(padLineToWidth(line, terminalWidth));
     }
-    return theme.status(row.kind, line);
+    return theme.status(row.kind, padLineToWidth(line, terminalWidth));
   });
-  return [header, ...body].join("\n");
+  return [padLineToWidth(header, terminalWidth), ...body].join("\n");
+}
+
+function toWatchTableRow(row: WatchRow): WatchTableRow {
+  return {
+    issue: row.issue,
+    kind: row.kind,
+    age: row.age,
+    turn: row.turn,
+    event: row.event,
+    updated: row.updated,
+    workspace: row.workspace
+  };
 }
 
 function renderView(
@@ -524,6 +611,8 @@ function renderView(
   options: RenderOptions
 ): string {
   const events = options.events ?? [];
+  const terminalWidth = options.terminalWidth ?? 120;
+  const layout = options.layout ?? null;
   if (view === "help") {
     return [
       theme.header("HELP"),
@@ -552,9 +641,9 @@ function renderView(
 
   if (view === "describe") {
     return [
-      renderTable(rows, selectedIndex, theme),
+      renderTable(rows, selectedIndex, theme, terminalWidth, layout),
       "",
-      theme.header("DESCRIBE"),
+      theme.header(padLineToWidth("DESCRIBE", terminalWidth)),
       selected ? colorDetail(selected.detail, theme) : theme.warn("No selected agent.")
     ].join("\n");
   }
@@ -566,17 +655,17 @@ function renderView(
     const logBody = options.logLines
       ? options.logLines.join("\n")
       : selected
-        ? renderEvents(selected, events, theme)
+        ? renderEvents(selected, events, theme, terminalWidth)
         : theme.warn("No selected agent.");
     return [
-      renderTable(rows, selectedIndex, theme),
+      renderTable(rows, selectedIndex, theme, terminalWidth, layout),
       "",
-      `${theme.header("LOGS")}  ${theme.dim("follow=")}${followLabel}  ${theme.dim("wrap=")}${wrapLabel}  ${theme.dim("esc")} agents`,
+      padLineToWidth(`${theme.header("LOGS")}  ${theme.dim("follow=")}${followLabel}  ${theme.dim("wrap=")}${wrapLabel}  ${theme.dim("esc")} agents`, terminalWidth),
       logBody
     ].join("\n");
   }
 
-  return renderTable(rows, selectedIndex, theme);
+  return renderTable(rows, selectedIndex, theme, terminalWidth, layout);
 }
 
 function renderMenu(inputMode: InputMode, commandBuffer: string, theme: Theme): string {
@@ -600,12 +689,12 @@ function renderMenu(inputMode: InputMode, commandBuffer: string, theme: Theme): 
   ].join("  ");
 }
 
-function renderEvents(selected: WatchRow, events: AgentWorkEvent[], theme: Theme): string {
+function renderEvents(selected: WatchRow, events: AgentWorkEvent[], theme: Theme, terminalWidth: number): string {
   if (events.length === 0) {
     return colorDetail([selected.detail.at(-1) ?? "No events loaded."], theme);
   }
-  const lines = buildLogLines(events, 120, false);
-  return lines.map((line) => colorLogLine(`  ${line}`, theme)).join("\n");
+  const lines = buildLogLines(events, Math.max(terminalWidth - 4, 40), false);
+  return lines.map((line) => colorLogLine(padLineToWidth(`  ${line}`, terminalWidth), theme)).join("\n");
 }
 
 function colorLogLine(line: string, theme: Theme): string {
@@ -685,8 +774,7 @@ function formatTime(ms: number): string {
 
 function shortenPath(value: string): string {
   const home = process.env.HOME;
-  const shortened = home && value.startsWith(`${home}/`) ? `~/${value.slice(home.length + 1)}` : value;
-  return truncate(shortened, 70);
+  return home && value.startsWith(`${home}/`) ? `~/${value.slice(home.length + 1)}` : value;
 }
 
 function truncate(value: string, length: number): string {
@@ -694,11 +782,6 @@ function truncate(value: string, length: number): string {
     return value;
   }
   return `${value.slice(0, Math.max(length - 3, 0))}...`;
-}
-
-function pad(value: string, length: number): string {
-  const truncated = truncate(value, length);
-  return truncated.padEnd(length, " ");
 }
 
 function clamp(value: number, min: number, max: number): number {
