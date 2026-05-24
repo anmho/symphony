@@ -25,7 +25,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "waveform.circle.fill"
         case .running: return "play.circle.fill"
-        case .waiting: return "pause.circle.fill"
+        case .waiting: return "clock.fill"
         case .done: return "checkmark.circle.fill"
         case .settings: return "gearshape.fill"
         }
@@ -184,20 +184,48 @@ struct SymphonyPanelView: View {
     private var statusBadge: some View {
         HStack(spacing: 4) {
             Circle()
-                .fill(service.isOnline ? Color.green : Color.secondary)
+                .fill(statusBadgeColor)
                 .frame(width: 7, height: 7)
-            Text(service.isOnline ? "Live" : "Offline")
+            Text(statusBadgeLabel)
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(service.isOnline ? .green : .secondary)
+                .foregroundStyle(statusBadgeColor)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(Capsule().fill(Color.primary.opacity(0.06)))
     }
 
+    private var statusBadgeLabel: String {
+        guard service.isOnline else { return "Offline" }
+        if service.snapshot?.paused == true { return "Paused" }
+        return "Live"
+    }
+
+    private var statusBadgeColor: Color {
+        guard service.isOnline else { return .secondary }
+        if service.snapshot?.paused == true { return .orange }
+        return .green
+    }
+
     private var headerActions: some View {
         HStack(spacing: 8) {
             if service.isOnline {
+                if service.snapshot?.paused == true {
+                    Button {
+                        service.resumeDispatch()
+                    } label: {
+                        Label("Resume Dispatch", systemImage: "play.fill")
+                    }
+                    .disabled(service.isBusy)
+                } else {
+                    Button {
+                        service.pauseDispatch()
+                    } label: {
+                        Label("Pause Dispatch", systemImage: "pause.fill")
+                    }
+                    .disabled(service.isBusy)
+                    .help("Stop running agents and hold new dispatch and retries.")
+                }
                 Button("Stop") { service.stopSymphony() }
                     .disabled(service.isBusy)
             } else {
@@ -267,6 +295,10 @@ struct SymphonyPanelView: View {
 
                 if snapshot.codexRateLimit.resumeAfterMs != nil {
                     rateLimitCard(snapshot: snapshot)
+                }
+
+                if snapshot.paused {
+                    pausedCard
                 }
 
                 if let configError = snapshot.lastConfigError, !configError.isEmpty {
@@ -394,6 +426,9 @@ struct SymphonyPanelView: View {
     }
 
     private func waitingSubtitle(_ snapshot: OrchestratorSnapshot, inventory: AgentInventory) -> String {
+        if snapshot.paused {
+            return "Dispatch paused by operator"
+        }
         if snapshot.codexRateLimit.resumeAfterMs != nil {
             return "Blocked by Codex rate limit"
         }
@@ -407,6 +442,27 @@ struct SymphonyPanelView: View {
             return "Rate limited"
         }
         return "Scheduled for retry"
+    }
+
+    private var pausedCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Dispatch paused", systemImage: "pause.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Spacer()
+                Button("Resume Dispatch") {
+                    service.resumeDispatch()
+                }
+                .controlSize(.small)
+                .disabled(service.isBusy)
+            }
+            Text("Running agents are stopped. New dispatch and retries are held.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.08)))
     }
 
     private func rateLimitCard(snapshot: OrchestratorSnapshot) -> some View {

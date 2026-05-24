@@ -1,6 +1,11 @@
-import { loadWorkflowConfig } from "./config.js";
-import { fetchCandidateIssues, fetchIssueById, fetchTerminalIssues, writeRunnerComment } from "./linear.js";
-import { logger as defaultLogger } from "./logger.js";
+import { loadWorkflowConfig } from './config.js';
+import {
+  fetchCandidateIssues,
+  fetchIssueById,
+  fetchTerminalIssues,
+  writeRunnerComment,
+} from './linear.js';
+import { logger as defaultLogger } from './logger.js';
 import {
   continuationPrompt,
   isActiveState,
@@ -8,14 +13,19 @@ import {
   isTerminalState,
   millisUntil,
   nextFailureBackoffMs,
-  sortIssuesForDispatch
-} from "./policy.js";
-import { renderIssuePrompt } from "./prompt.js";
-import { isGateParked } from "./rateLimit.js";
-import { runCodexTurn } from "./codexRpc.js";
-import { AgentWorkEventStore, workEventFromCodexEvent } from "./events.js";
-import { runHook, type HookName } from "./hooks.js";
-import { ensureWorkspace, removeWorkspace, workspaceInfoForIssue, workspacePathExists } from "./workspace.js";
+  sortIssuesForDispatch,
+} from './policy.js';
+import { renderIssuePrompt } from './prompt.js';
+import { isGateParked } from './rateLimit.js';
+import { runCodexTurn } from './codexRpc.js';
+import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
+import { runHook, type HookName } from './hooks.js';
+import {
+  ensureWorkspace,
+  removeWorkspace,
+  workspaceInfoForIssue,
+  workspacePathExists,
+} from './workspace.js';
 import type {
   CodexRunEvent,
   CodexRunInput,
@@ -27,34 +37,59 @@ import type {
   NormalizedIssue,
   OrchestratorSnapshot,
   RunAttempt,
-  WorkspaceInfo
-} from "./types.js";
+  WorkspaceInfo,
+} from './types.js';
 
 export interface OrchestratorDependencies {
-  loadWorkflowConfig: (workflowPath: string) => Promise<EffectiveWorkflowConfig>;
-  fetchCandidateIssues: (config: EffectiveWorkflowConfig) => Promise<NormalizedIssue[]>;
-  fetchIssueById: (config: EffectiveWorkflowConfig, issueId: string) => Promise<NormalizedIssue | null>;
-  fetchTerminalIssues: (config: EffectiveWorkflowConfig) => Promise<NormalizedIssue[]>;
-  writeRunnerComment: (config: EffectiveWorkflowConfig, issueId: string, body: string) => Promise<void>;
-  prepareWorkspace: (config: EffectiveWorkflowConfig, issue: NormalizedIssue) => Promise<WorkspaceInfo>;
-  removeWorkspace: (config: EffectiveWorkflowConfig, workspace: WorkspaceInfo) => Promise<void>;
-  workspaceInfoForIssue: (config: EffectiveWorkflowConfig, issue: NormalizedIssue) => WorkspaceInfo;
+  loadWorkflowConfig: (
+    workflowPath: string,
+  ) => Promise<EffectiveWorkflowConfig>;
+  fetchCandidateIssues: (
+    config: EffectiveWorkflowConfig,
+  ) => Promise<NormalizedIssue[]>;
+  fetchIssueById: (
+    config: EffectiveWorkflowConfig,
+    issueId: string,
+  ) => Promise<NormalizedIssue | null>;
+  fetchTerminalIssues: (
+    config: EffectiveWorkflowConfig,
+  ) => Promise<NormalizedIssue[]>;
+  writeRunnerComment: (
+    config: EffectiveWorkflowConfig,
+    issueId: string,
+    body: string,
+  ) => Promise<void>;
+  prepareWorkspace: (
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ) => Promise<WorkspaceInfo>;
+  removeWorkspace: (
+    config: EffectiveWorkflowConfig,
+    workspace: WorkspaceInfo,
+  ) => Promise<void>;
+  workspaceInfoForIssue: (
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ) => WorkspaceInfo;
   workspacePathExists: (workspacePath: string) => Promise<boolean>;
   runHook: (
     config: EffectiveWorkflowConfig,
     hookName: HookName,
     issue: NormalizedIssue,
-    workspace: WorkspaceInfo
+    workspace: WorkspaceInfo,
   ) => Promise<void>;
   renderIssuePrompt: (
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
-    attempt: number | null
+    attempt: number | null,
   ) => Promise<string>;
-  runCodexTurn: (input: CodexRunInput, options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void }) => Promise<CodexTurnResult>;
+  runCodexTurn: (
+    input: CodexRunInput,
+    options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void },
+  ) => Promise<CodexTurnResult>;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
-  logger: Pick<typeof defaultLogger, "info" | "warn" | "error" | "debug">;
+  logger: Pick<typeof defaultLogger, 'info' | 'warn' | 'error' | 'debug'>;
   eventStore: AgentWorkEventStore;
 }
 
@@ -82,6 +117,8 @@ export class Orchestrator {
   private lastConfigError: string | null = null;
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private operatorPaused = false;
+  private pausedAtMs: number | null = null;
   private startupCleanupDone = false;
   private tickInFlight: Promise<void> | null = null;
 
@@ -93,15 +130,18 @@ export class Orchestrator {
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
-    runtimeMs: 0
+    runtimeMs: 0,
   };
   private codexRateLimit = {
     resumeAfterMs: null as number | null,
     reason: null as string | null,
-    updatedAtMs: null as number | null
+    updatedAtMs: null as number | null,
   };
 
-  constructor(options: OrchestratorOptions, deps: Partial<OrchestratorDependencies> = {}) {
+  constructor(
+    options: OrchestratorOptions,
+    deps: Partial<OrchestratorDependencies> = {},
+  ) {
     this.workflowPath = options.workflowPath;
     this.startedAtMs = (deps.now ?? Date.now)();
     const now = deps.now ?? Date.now;
@@ -121,8 +161,9 @@ export class Orchestrator {
       now,
       sleep,
       logger: defaultLogger,
-      eventStore: deps.eventStore ?? new AgentWorkEventStore(this.workflowPath, now),
-      ...deps
+      eventStore:
+        deps.eventStore ?? new AgentWorkEventStore(this.workflowPath, now),
+      ...deps,
     };
     this.eventStore = this.deps.eventStore;
   }
@@ -137,15 +178,19 @@ export class Orchestrator {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.operatorPaused = false;
+    this.pausedAtMs = null;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
     for (const entry of this.running.values()) {
-      entry.cancelReason = "daemon_stopped";
+      entry.cancelReason = 'daemon_stopped';
       entry.abortController.abort();
     }
-    await Promise.allSettled([...this.running.values()].map((entry) => entry.promise));
+    await Promise.allSettled(
+      [...this.running.values()].map((entry) => entry.promise),
+    );
   }
 
   async tick(): Promise<void> {
@@ -163,33 +208,71 @@ export class Orchestrator {
     return {
       startedAtMs: this.startedAtMs,
       workflowPath: this.workflowPath,
-      running: [...this.running.values()].map((entry) => ({ ...entry.session })),
+      running: [...this.running.values()].map((entry) => ({
+        ...entry.session,
+      })),
       claimed: [...this.claimed],
-      retryAttempts: [...this.retryAttempts.values()].map((attempt) => ({ ...attempt })),
+      retryAttempts: [...this.retryAttempts.values()].map((attempt) => ({
+        ...attempt,
+      })),
       completed: [...this.completed],
       codexTotals: { ...this.codexTotals },
       codexRateLimit: { ...this.codexRateLimit },
       lastTickAtMs: this.lastTickAtMs,
-      lastConfigError: this.lastConfigError
+      lastConfigError: this.lastConfigError,
+      paused: this.operatorPaused,
+      pausedAtMs: this.pausedAtMs,
     };
   }
 
-  events(issue: string | null, cursor: number | null, limit: number | null): AgentWorkEvent[] {
+  pause(): { paused: boolean } {
+    if (this.operatorPaused) {
+      return { paused: true };
+    }
+    this.operatorPaused = true;
+    this.pausedAtMs = this.deps.now();
+    for (const entry of this.running.values()) {
+      entry.cancelReason = 'operator_paused';
+      this.appendRunnerEvent(entry, 'operator paused Symphony');
+      entry.abortController.abort();
+    }
+    this.deps.logger.info('operator paused Symphony');
+    return { paused: true };
+  }
+
+  resume(): { paused: boolean } {
+    if (!this.operatorPaused) {
+      return { paused: false };
+    }
+    this.operatorPaused = false;
+    this.pausedAtMs = null;
+    this.deps.logger.info('operator resumed Symphony');
+    void this.tick();
+    return { paused: false };
+  }
+
+  events(
+    issue: string | null,
+    cursor: number | null,
+    limit: number | null,
+  ): AgentWorkEvent[] {
     return this.eventStore.query({ issue, cursor, limit });
   }
 
   queueSteer(issue: string, text: string): { queued: boolean; issue: string } {
     const trimmed = text.trim();
     if (!trimmed) {
-      throw new Error("empty_steer_instruction");
+      throw new Error('empty_steer_instruction');
     }
     this.eventStore.queueSteer(issue, trimmed);
-    const runningEntry = [...this.running.values()].find((entry) =>
-      entry.issue.identifier === issue || entry.issue.id === issue
+    const runningEntry = [...this.running.values()].find(
+      (entry) => entry.issue.identifier === issue || entry.issue.id === issue,
     );
     if (runningEntry) {
-      runningEntry.session.queuedSteerCount = this.eventStore.queuedSteerCount(runningEntry.issue.identifier);
-      this.appendRunnerEvent(runningEntry, "operator guidance queued");
+      runningEntry.session.queuedSteerCount = this.eventStore.queuedSteerCount(
+        runningEntry.issue.identifier,
+      );
+      this.appendRunnerEvent(runningEntry, 'operator guidance queued');
     }
     return { queued: true, issue };
   }
@@ -211,11 +294,11 @@ export class Orchestrator {
     this.codexRateLimit = {
       resumeAfterMs: null,
       reason: null,
-      updatedAtMs: null
+      updatedAtMs: null,
     };
 
     for (const attempt of this.retryAttempts.values()) {
-      if (attempt.error === "codex_rate_limited") {
+      if (attempt.error === 'codex_rate_limited') {
         attempt.dueAtMs = now;
         resumed += 1;
       }
@@ -233,16 +316,25 @@ export class Orchestrator {
     }
 
     await this.reconcileRunning(config);
-    await this.dispatchDueRetries(config);
 
-    if (isGateParked(this.codexRateLimit, this.deps.now())) {
-      this.deps.logger.info({ codexRateLimit: this.codexRateLimit }, "codex launches paused by rate limit");
+    if (this.operatorPaused) {
+      this.deps.logger.debug('operator pause active; skipping dispatch');
       return;
     }
 
-    const candidates = sortIssuesForDispatch(await this.deps.fetchCandidateIssues(config)).filter((issue) =>
-      isIssueEligible(issue, config)
-    );
+    await this.dispatchDueRetries(config);
+
+    if (isGateParked(this.codexRateLimit, this.deps.now())) {
+      this.deps.logger.info(
+        { codexRateLimit: this.codexRateLimit },
+        'codex launches paused by rate limit',
+      );
+      return;
+    }
+
+    const candidates = sortIssuesForDispatch(
+      await this.deps.fetchCandidateIssues(config),
+    ).filter((issue) => isIssueEligible(issue, config));
 
     for (const issue of candidates) {
       if (this.running.size >= config.agent.maxConcurrentAgents) {
@@ -255,7 +347,9 @@ export class Orchestrator {
     }
   }
 
-  private async reloadConfig(requireValid: boolean): Promise<EffectiveWorkflowConfig> {
+  private async reloadConfig(
+    requireValid: boolean,
+  ): Promise<EffectiveWorkflowConfig> {
     try {
       const config = await this.deps.loadWorkflowConfig(this.workflowPath);
       this.lastKnownGoodConfig = config;
@@ -265,14 +359,19 @@ export class Orchestrator {
       const message = error instanceof Error ? error.message : String(error);
       this.lastConfigError = message;
       if (this.lastKnownGoodConfig && !requireValid) {
-        this.deps.logger.error({ error: message }, "workflow reload failed; keeping last known good config");
+        this.deps.logger.error(
+          { error: message },
+          'workflow reload failed; keeping last known good config',
+        );
         return this.lastKnownGoodConfig;
       }
       throw error;
     }
   }
 
-  private async cleanupTerminalWorkspaces(config: EffectiveWorkflowConfig): Promise<void> {
+  private async cleanupTerminalWorkspaces(
+    config: EffectiveWorkflowConfig,
+  ): Promise<void> {
     this.startupCleanupDone = true;
     const terminalIssues = await this.deps.fetchTerminalIssues(config);
     for (const issue of terminalIssues) {
@@ -280,35 +379,63 @@ export class Orchestrator {
       try {
         workspace = this.deps.workspaceInfoForIssue(config, issue);
       } catch (error) {
-        this.deps.logger.debug({ error, issue: issue.identifier }, "terminal issue has no configured workspace route");
+        this.deps.logger.debug(
+          { error, issue: issue.identifier },
+          'terminal issue has no configured workspace route',
+        );
         continue;
       }
       if (!(await this.deps.workspacePathExists(workspace.path))) {
         continue;
       }
-      await this.runHookIgnoringFailure(config, "beforeRemove", issue, workspace);
+      await this.runHookIgnoringFailure(
+        config,
+        'beforeRemove',
+        issue,
+        workspace,
+      );
       await this.deps.removeWorkspace(config, workspace);
-      this.deps.logger.info({ issue: issue.identifier, workspace: workspace.path }, "removed terminal issue workspace");
+      this.deps.logger.info(
+        { issue: issue.identifier, workspace: workspace.path },
+        'removed terminal issue workspace',
+      );
     }
   }
 
-  private async reconcileRunning(config: EffectiveWorkflowConfig): Promise<void> {
+  private async reconcileRunning(
+    config: EffectiveWorkflowConfig,
+  ): Promise<void> {
     for (const entry of this.running.values()) {
-      const latestIssue = await this.deps.fetchIssueById(config, entry.issue.id).catch((error: unknown) => {
-        this.deps.logger.warn({ error, issue: entry.issue.identifier }, "failed to reconcile running issue");
-        return null;
-      });
+      const latestIssue = await this.deps
+        .fetchIssueById(config, entry.issue.id)
+        .catch((error: unknown) => {
+          this.deps.logger.warn(
+            { error, issue: entry.issue.identifier },
+            'failed to reconcile running issue',
+          );
+          return null;
+        });
 
-      if (!latestIssue || isTerminalState(latestIssue.state, config) || !isActiveState(latestIssue.state, config)) {
-        entry.cancelReason = latestIssue ? `state_${latestIssue.state}` : "issue_not_found";
+      if (
+        !latestIssue ||
+        isTerminalState(latestIssue.state, config) ||
+        !isActiveState(latestIssue.state, config)
+      ) {
+        entry.cancelReason = latestIssue
+          ? `state_${latestIssue.state}`
+          : 'issue_not_found';
         entry.abortController.abort();
       }
     }
   }
 
-  private async dispatchDueRetries(config: EffectiveWorkflowConfig): Promise<void> {
+  private async dispatchDueRetries(
+    config: EffectiveWorkflowConfig,
+  ): Promise<void> {
     const now = this.deps.now();
-    const dueAttempts = [...this.retryAttempts.values()].filter((attempt) => attempt.dueAtMs <= now);
+    const dueAttempts = [...this.retryAttempts.values()].filter(
+      (attempt) => attempt.dueAtMs <= now,
+    );
     for (const attempt of dueAttempts) {
       if (this.running.size >= config.agent.maxConcurrentAgents) {
         return;
@@ -325,7 +452,12 @@ export class Orchestrator {
       }
 
       this.retryAttempts.delete(attempt.issueId);
-      this.dispatchIssue(config, issue, attempt.attempt, attempt.error === "codex_rate_limited");
+      this.dispatchIssue(
+        config,
+        issue,
+        attempt.attempt,
+        attempt.error === 'codex_rate_limited',
+      );
     }
   }
 
@@ -333,7 +465,7 @@ export class Orchestrator {
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
     attempt: number,
-    bypassRateLimitGate = false
+    bypassRateLimitGate = false,
   ): void {
     this.claimed.add(issue.id);
     const abortController = new AbortController();
@@ -355,8 +487,11 @@ export class Orchestrator {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
+      goalStatus: null,
+      goalObjective: null,
+      goalUpdatedAtMs: null,
       turnCount: 0,
-      startedAtMs: this.deps.now()
+      startedAtMs: this.deps.now(),
     };
 
     const entry: RunningEntry = {
@@ -365,35 +500,46 @@ export class Orchestrator {
       abortController,
       promise: Promise.resolve(),
       cancelReason: null,
-      bypassRateLimitGate
+      bypassRateLimitGate,
     };
 
-    entry.promise = this.runIssue(config, issue, attempt, entry).catch(async (error: unknown) => {
-      if (entry.cancelReason) {
-        this.deps.logger.info({ issue: issue.identifier, reason: entry.cancelReason }, "issue run canceled");
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      this.deps.logger.error({ issue: issue.identifier, error: message }, "issue run failed");
-      this.appendRunnerEvent(entry, message, null, "error");
-      this.scheduleRetry(config, issue, attempt + 1, message);
-    }).finally(() => {
-      this.codexTotals.runtimeMs += Math.max(this.deps.now() - session.startedAtMs, 0);
-      this.running.delete(issue.id);
-      if (!this.retryAttempts.has(issue.id)) {
-        this.claimed.delete(issue.id);
-      }
-    });
+    entry.promise = this.runIssue(config, issue, attempt, entry)
+      .catch(async (error: unknown) => {
+        if (entry.cancelReason) {
+          this.deps.logger.info(
+            { issue: issue.identifier, reason: entry.cancelReason },
+            'issue run canceled',
+          );
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        this.deps.logger.error(
+          { issue: issue.identifier, error: message },
+          'issue run failed',
+        );
+        this.appendRunnerEvent(entry, message, null, 'error');
+        this.scheduleRetry(config, issue, attempt + 1, message);
+      })
+      .finally(() => {
+        this.codexTotals.runtimeMs += Math.max(
+          this.deps.now() - session.startedAtMs,
+          0,
+        );
+        this.running.delete(issue.id);
+        if (!this.retryAttempts.has(issue.id)) {
+          this.claimed.delete(issue.id);
+        }
+      });
 
     this.running.set(issue.id, entry);
-    this.appendRunnerEvent(entry, "issue claimed by Symphony");
+    this.appendRunnerEvent(entry, 'issue claimed by Symphony');
   }
 
   private async runIssue(
     initialConfig: EffectiveWorkflowConfig,
     initialIssue: NormalizedIssue,
     attempt: number,
-    entry: RunningEntry
+    entry: RunningEntry,
   ): Promise<void> {
     let config = initialConfig;
     let issue = initialIssue;
@@ -405,9 +551,18 @@ export class Orchestrator {
       }
 
       config = await this.reloadConfig(false);
-      const gateDelay = millisUntil(this.codexRateLimit.resumeAfterMs ?? 0, this.deps.now());
+      const gateDelay = millisUntil(
+        this.codexRateLimit.resumeAfterMs ?? 0,
+        this.deps.now(),
+      );
       if (gateDelay > 0 && !entry.bypassRateLimitGate) {
-        this.scheduleRateLimitProbe(config, issue, attempt + 1, this.codexRateLimit.reason ?? "codex_rate_limited", this.codexRateLimit.resumeAfterMs);
+        this.scheduleRateLimitProbe(
+          config,
+          issue,
+          attempt + 1,
+          this.codexRateLimit.reason ?? 'codex_rate_limited',
+          this.codexRateLimit.resumeAfterMs,
+        );
         return;
       }
       entry.bypassRateLimitGate = false;
@@ -433,41 +588,54 @@ export class Orchestrator {
       const workspace = await this.deps.prepareWorkspace(config, issue);
       entry.session.repoKey = workspace.repoKey;
       entry.session.workspacePath = workspace.path;
-      entry.session.eventLogPath = this.eventStore.logPathForIssue(issue.identifier);
+      entry.session.eventLogPath = this.eventStore.logPathForIssue(
+        issue.identifier,
+      );
       if (workspace.createdNow) {
-        await this.deps.runHook(config, "afterCreate", issue, workspace);
+        await this.deps.runHook(config, 'afterCreate', issue, workspace);
       }
 
-      await this.deps.runHook(config, "beforeRun", issue, workspace);
+      await this.deps.runHook(config, 'beforeRun', issue, workspace);
       await this.deps.writeRunnerComment(
         config,
         issue.id,
         turnIndex === 0
           ? `Symphony started work in ${workspace.path} on ${workspace.branchName}.`
-          : `Symphony continuing work, turn ${turnIndex + 1}.`
+          : `Symphony continuing work, turn ${turnIndex + 1}.`,
       );
 
       const queuedSteer = this.eventStore.consumeSteer(issue.identifier);
-      entry.session.queuedSteerCount = this.eventStore.queuedSteerCount(issue.identifier);
+      entry.session.queuedSteerCount = this.eventStore.queuedSteerCount(
+        issue.identifier,
+      );
       if (queuedSteer) {
-        this.appendRunnerEvent(entry, "operator guidance attached to next turn", {
-          queuedAtMs: queuedSteer.queuedAtMs
-        });
+        this.appendRunnerEvent(
+          entry,
+          'operator guidance attached to next turn',
+          {
+            queuedAtMs: queuedSteer.queuedAtMs,
+          },
+        );
       }
-      const basePrompt = turnIndex === 0 ? await this.deps.renderIssuePrompt(config, issue, attempt || null) : continuationPrompt(issue);
-      const prompt = queuedSteer ? `${basePrompt}\n\n## Operator Guidance\n\n${queuedSteer.text}` : basePrompt;
+      const basePrompt =
+        turnIndex === 0
+          ? await this.deps.renderIssuePrompt(config, issue, attempt || null)
+          : continuationPrompt(issue);
+      const prompt = queuedSteer
+        ? `${basePrompt}\n\n## Operator Guidance\n\n${queuedSteer.text}`
+        : basePrompt;
       const result = await this.deps.runCodexTurn(
         {
           config,
           issue,
           workspacePath: workspace.path,
           prompt,
-          threadId
+          threadId,
         },
         {
           signal: entry.abortController.signal,
-          onEvent: (event) => this.recordCodexEvent(entry, event)
-        }
+          onEvent: (event) => this.recordCodexEvent(entry, event),
+        },
       );
 
       threadId = result.threadId;
@@ -481,33 +649,51 @@ export class Orchestrator {
       this.codexTotals.outputTokens += result.outputTokens;
       this.codexTotals.totalTokens += result.totalTokens;
 
-      await this.runHookIgnoringFailure(config, "afterRun", issue, workspace);
+      await this.runHookIgnoringFailure(config, 'afterRun', issue, workspace);
 
-      if (result.status === "rate_limited") {
-        const resumeAfterMs = result.rateLimitUntilMs ?? this.deps.now() + 5 * 60 * 60 * 1000;
+      if (result.status === 'rate_limited') {
+        const resumeAfterMs =
+          result.rateLimitUntilMs ?? this.deps.now() + 5 * 60 * 60 * 1000;
         this.codexRateLimit = {
           resumeAfterMs,
-          reason: result.error ?? "codex_rate_limited",
-          updatedAtMs: this.deps.now()
+          reason: result.error ?? 'codex_rate_limited',
+          updatedAtMs: this.deps.now(),
         };
         await this.deps.writeRunnerComment(
           config,
           issue.id,
-          `Symphony parked Codex work until ${new Date(resumeAfterMs).toISOString()} because Codex reported a rate limit.`
+          `Symphony parked Codex work until ${new Date(resumeAfterMs).toISOString()} because Codex reported a rate limit.`,
         );
-        this.scheduleRateLimitProbe(config, issue, attempt + 1, this.codexRateLimit.reason, resumeAfterMs);
+        this.scheduleRateLimitProbe(
+          config,
+          issue,
+          attempt + 1,
+          this.codexRateLimit.reason,
+          resumeAfterMs,
+        );
         return;
       }
 
-      if (result.status === "failed") {
-        this.appendRunnerEvent(entry, result.error ?? "codex_failed", null, "error");
-        throw new Error(result.error ?? "codex_failed");
+      if (result.status === 'failed') {
+        this.appendRunnerEvent(
+          entry,
+          result.error ?? 'codex_failed',
+          null,
+          'error',
+        );
+        throw new Error(result.error ?? 'codex_failed');
       }
     }
 
     const latestIssue = await this.deps.fetchIssueById(config, issue.id);
     if (latestIssue && isActiveState(latestIssue.state, config)) {
-      this.scheduleRetry(config, latestIssue, 1, "continuation_after_max_turns", this.deps.now() + 1000);
+      this.scheduleRetry(
+        config,
+        latestIssue,
+        1,
+        'continuation_after_max_turns',
+        this.deps.now() + 1000,
+      );
     } else {
       this.releaseIssue(issue.id);
     }
@@ -518,16 +704,19 @@ export class Orchestrator {
     issue: NormalizedIssue,
     attempt: number,
     error: string | null,
-    dueAtMs?: number
+    dueAtMs?: number,
   ): void {
-    const resolvedDueAtMs = dueAtMs ?? this.deps.now() + nextFailureBackoffMs(attempt, config.agent.maxRetryBackoffMs);
+    const resolvedDueAtMs =
+      dueAtMs ??
+      this.deps.now() +
+        nextFailureBackoffMs(attempt, config.agent.maxRetryBackoffMs);
     this.retryAttempts.set(issue.id, {
       issueId: issue.id,
       identifier: issue.identifier,
       title: issue.title,
       attempt,
       dueAtMs: resolvedDueAtMs,
-      error
+      error,
     });
     this.claimed.add(issue.id);
   }
@@ -537,11 +726,15 @@ export class Orchestrator {
     issue: NormalizedIssue,
     attempt: number,
     error: string | null,
-    resumeAfterMs: number | null
+    resumeAfterMs: number | null,
   ): void {
     const now = this.deps.now();
-    const probeDueAtMs = now + rateLimitProbeDelayMs(config.agent.rateLimitProbeIntervalMs, issue.id);
-    const dueAtMs = resumeAfterMs ? Math.min(resumeAfterMs, probeDueAtMs) : probeDueAtMs;
+    const probeDueAtMs =
+      now +
+      rateLimitProbeDelayMs(config.agent.rateLimitProbeIntervalMs, issue.id);
+    const dueAtMs = resumeAfterMs
+      ? Math.min(resumeAfterMs, probeDueAtMs)
+      : probeDueAtMs;
     this.scheduleRetry(config, issue, attempt, error, dueAtMs);
   }
 
@@ -550,12 +743,15 @@ export class Orchestrator {
     this.claimed.delete(issueId);
   }
 
-  private async cleanupIssueWorkspace(config: EffectiveWorkflowConfig, issue: NormalizedIssue): Promise<void> {
+  private async cleanupIssueWorkspace(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ): Promise<void> {
     const workspace = this.deps.workspaceInfoForIssue(config, issue);
     if (!(await this.deps.workspacePathExists(workspace.path))) {
       return;
     }
-    await this.runHookIgnoringFailure(config, "beforeRemove", issue, workspace);
+    await this.runHookIgnoringFailure(config, 'beforeRemove', issue, workspace);
     await this.deps.removeWorkspace(config, workspace);
   }
 
@@ -563,12 +759,15 @@ export class Orchestrator {
     config: EffectiveWorkflowConfig,
     hookName: HookName,
     issue: NormalizedIssue,
-    workspace: WorkspaceInfo
+    workspace: WorkspaceInfo,
   ): Promise<void> {
     try {
       await this.deps.runHook(config, hookName, issue, workspace);
     } catch (error) {
-      this.deps.logger.warn({ error, hookName, issue: issue.identifier }, "hook failed and was ignored");
+      this.deps.logger.warn(
+        { error, hookName, issue: issue.identifier },
+        'hook failed and was ignored',
+      );
     }
   }
 
@@ -577,18 +776,28 @@ export class Orchestrator {
     entry.session.lastCodexEvent = event.type;
     entry.session.lastCodexTimestamp = timestampMs;
     entry.session.lastCodexMessage = JSON.stringify(event).slice(0, 1000);
-    if (event.type === "process_started") {
+    if (event.type === 'process_started') {
       entry.session.codexAppServerPid = event.pid;
-    } else if (event.type === "thread_started" || event.type === "thread_resumed") {
+    } else if (
+      event.type === 'thread_started' ||
+      event.type === 'thread_resumed'
+    ) {
       entry.session.threadId = event.threadId;
-    } else if (event.type === "turn_started") {
+    } else if (event.type === 'turn_started') {
       entry.session.turnId = event.turnId;
-    } else if (event.type === "rate_limited") {
+    } else if (event.type === 'rate_limited') {
       this.codexRateLimit = {
         resumeAfterMs: event.resumeAfterMs,
         reason: event.reason,
-        updatedAtMs: this.deps.now()
+        updatedAtMs: this.deps.now(),
       };
+    } else if (event.type === 'notification' && event.method === 'thread/goal/updated') {
+      const goal = goalFromNotification(event.params);
+      if (goal) {
+        entry.session.goalStatus = goal.status;
+        entry.session.goalObjective = goal.objective;
+        entry.session.goalUpdatedAtMs = timestampMs;
+      }
     }
     const normalized = workEventFromCodexEvent(
       {
@@ -597,9 +806,9 @@ export class Orchestrator {
         repoKey: entry.session.repoKey,
         workspacePath: entry.session.workspacePath,
         threadId: entry.session.threadId,
-        turnId: entry.session.turnId
+        turnId: entry.session.turnId,
       },
-      event
+      event,
     );
     const workEvent = this.eventStore.append({
       issueId: entry.issue.id,
@@ -609,7 +818,7 @@ export class Orchestrator {
       threadId: entry.session.threadId,
       turnId: entry.session.turnId,
       ...normalized,
-      timestampMs
+      timestampMs,
     });
     entry.session.latestEventCursor = workEvent.cursor;
   }
@@ -618,7 +827,7 @@ export class Orchestrator {
     entry: RunningEntry,
     summary: string,
     payload: Record<string, unknown> | null = null,
-    level: AgentWorkEvent["level"] = "info"
+    level: AgentWorkEvent['level'] = 'info',
   ): void {
     const event = this.eventStore.append({
       issueId: entry.issue.id,
@@ -627,10 +836,10 @@ export class Orchestrator {
       workspacePath: entry.session.workspacePath,
       threadId: entry.session.threadId,
       turnId: entry.session.turnId,
-      type: level === "error" ? "error" : "runner",
+      type: level === 'error' ? 'error' : 'runner',
       level,
       summary,
-      payload
+      payload,
     });
     entry.session.lastCodexEvent = event.type;
     entry.session.lastCodexTimestamp = event.timestampMs;
@@ -645,10 +854,11 @@ export class Orchestrator {
     this.timer = setTimeout(() => {
       this.tick()
         .catch((error: unknown) => {
-          this.deps.logger.error({ error }, "poll tick failed");
+          this.deps.logger.error({ error }, 'poll tick failed');
         })
         .finally(() => {
-          const nextInterval = this.lastKnownGoodConfig?.polling.intervalMs ?? intervalMs;
+          const nextInterval =
+            this.lastKnownGoodConfig?.polling.intervalMs ?? intervalMs;
           this.scheduleNextTick(nextInterval);
         });
     }, intervalMs);
@@ -674,4 +884,19 @@ function hashString(value: string): number {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
   }
   return hash;
+}
+
+function goalFromNotification(params: unknown): { status: string | null; objective: string | null } | null {
+  if (!params || typeof params !== 'object') {
+    return null;
+  }
+  const goal = (params as { goal?: unknown }).goal;
+  if (!goal || typeof goal !== 'object') {
+    return null;
+  }
+  const record = goal as { status?: unknown; objective?: unknown };
+  return {
+    status: typeof record.status === 'string' ? record.status : null,
+    objective: typeof record.objective === 'string' ? record.objective : null,
+  };
 }

@@ -7,6 +7,7 @@ public struct MonitorState: Equatable {
     public var parked: Set<String>
     public var completed: Set<String>
     public var rateLimited: Bool
+    public var operatorPaused: Bool
     public var configError: String?
 
     public static func offline() -> MonitorState {
@@ -17,6 +18,7 @@ public struct MonitorState: Equatable {
             parked: [],
             completed: [],
             rateLimited: false,
+            operatorPaused: false,
             configError: nil
         )
     }
@@ -28,6 +30,7 @@ public struct MonitorState: Equatable {
         parked: Set<String>,
         completed: Set<String>,
         rateLimited: Bool,
+        operatorPaused: Bool,
         configError: String?
     ) {
         self.isOnline = isOnline
@@ -36,6 +39,7 @@ public struct MonitorState: Equatable {
         self.parked = parked
         self.completed = completed
         self.rateLimited = rateLimited
+        self.operatorPaused = operatorPaused
         self.configError = configError
     }
 
@@ -57,6 +61,7 @@ public struct MonitorState: Equatable {
             parked: parked,
             completed: Set(snapshot.completed),
             rateLimited: snapshot.codexRateLimit.resumeAfterMs != nil,
+            operatorPaused: snapshot.paused,
             configError: snapshot.lastConfigError.flatMap { $0.isEmpty ? nil : $0 }
         )
     }
@@ -118,6 +123,24 @@ public enum StatusChangeDetector {
                     title: "Codex rate limit cleared",
                     body: "Symphony can dispatch runs again.",
                     identifier: "symphony.rate_limit.off"
+                )
+            )
+        }
+
+        if !previous.operatorPaused, current.operatorPaused {
+            notifications.append(
+                StatusNotification(
+                    title: "Symphony paused",
+                    body: "Running agents were stopped. New dispatch is paused.",
+                    identifier: "symphony.operator_pause.on"
+                )
+            )
+        } else if previous.operatorPaused, !current.operatorPaused {
+            notifications.append(
+                StatusNotification(
+                    title: "Symphony resumed",
+                    body: "Agent dispatch is active again.",
+                    identifier: "symphony.operator_pause.off"
                 )
             )
         }

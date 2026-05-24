@@ -18,5 +18,7 @@
     "resumeAfterMs": null,
     "reason": null
   },
-  "lastConfigError": null
+  "lastConfigError": null,
+  "paused": false,
+  "pausedAtMs": null
 }

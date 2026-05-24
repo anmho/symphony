@@ -128,6 +128,26 @@ final class StatusService: ObservableObject {
         }
     }
 
+    func pauseDispatch() {
+        performControlWithCLIFallback(
+            cliArguments: ["pause"],
+            success: "Symphony dispatch paused."
+        ) {
+            _ = try await StatusControl.pauseDispatch(port: self.settings.statusPort)
+            return "Symphony dispatch paused."
+        }
+    }
+
+    func resumeDispatch() {
+        performControlWithCLIFallback(
+            cliArguments: ["unpause"],
+            success: "Symphony dispatch resumed."
+        ) {
+            _ = try await StatusControl.resumeDispatch(port: self.settings.statusPort)
+            return "Symphony dispatch resumed."
+        }
+    }
+
     func resumeIssue(_ identifier: String) {
         performControl(success: "Queued \(identifier) for retry.") {
             let result = try await StatusControl.resumeIssue(identifier, port: self.settings.statusPort)
@@ -180,6 +200,34 @@ final class StatusService: ObservableObject {
                 refresh()
             } catch {
                 actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func performControlWithCLIFallback(
+        cliArguments: [String],
+        success: String,
+        operation: @escaping () async throws -> String
+    ) {
+        guard !isBusy else { return }
+        actionError = nil
+        actionMessage = nil
+        isBusy = true
+
+        Task {
+            defer { isBusy = false }
+            do {
+                let message = try await operation()
+                actionMessage = message.isEmpty ? success : message
+                refresh()
+            } catch {
+                do {
+                    _ = try SymphonyCLI.runSync(cliArguments, statusPort: settings.statusPort)
+                    actionMessage = success
+                    refresh()
+                } catch {
+                    actionError = error.localizedDescription
+                }
             }
         }
     }

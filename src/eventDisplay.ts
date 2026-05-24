@@ -8,6 +8,7 @@ export type DisplayEventKind =
   | "rate-limit"
   | "runner"
   | "diff"
+  | "goal"
   | "reasoning"
   | "other";
 
@@ -172,6 +173,8 @@ function displayKindForType(type: AgentWorkEventType): DisplayEventKind {
       return "runner";
     case "diff":
       return "diff";
+    case "goal":
+      return "goal";
     case "reasoning_summary":
       return "reasoning";
     default:

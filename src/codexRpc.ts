@@ -41,6 +41,7 @@ export async function runCodexTurn(input: CodexRunInput, options: CodexRunOption
       ? await client.resumeThread(input.threadId, input)
       : await client.startThread(input);
 
+    await client.setGoal(threadId, input);
     const turn = await client.startTurn(threadId, input);
     const completion = await client.waitForTurnCompletion(threadId, turn.turnId);
 
@@ -91,7 +92,7 @@ class CodexJsonRpcClient {
   }
 
   static async start(command: string, cwd: string, options: CodexRunOptions): Promise<CodexJsonRpcClient> {
-    const child = spawn("bash", ["-lc", command], {
+    const child = spawn("/bin/bash", ["-lc", command], {
       cwd,
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"]
@@ -145,6 +146,15 @@ class CodexJsonRpcClient {
     const resumedThreadId = result.thread?.id ?? threadId;
     this.onEvent?.({ type: "thread_resumed", threadId: resumedThreadId });
     return resumedThreadId;
+  }
+
+  async setGoal(threadId: string, input: CodexRunInput): Promise<void> {
+    await this.request("thread/goal/set", {
+      threadId,
+      objective: goalObjectiveForIssue(input),
+      status: "active",
+      tokenBudget: null
+    });
   }
 
   async startTurn(threadId: string, input: CodexRunInput): Promise<{ turnId: string | null }> {
@@ -313,6 +323,10 @@ function extractRateLimitUntil(notification: JsonRpcNotification): number | null
   }
 
   return null;
+}
+
+export function goalObjectiveForIssue(input: Pick<CodexRunInput, "issue">): string {
+  return `Complete Linear issue ${input.issue.identifier}: ${input.issue.title}. Satisfy the issue, commit, push, open or update a PR, and leave a Linear handoff.`;
 }
 
 function delay(ms: number): Promise<void> {

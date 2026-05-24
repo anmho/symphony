@@ -23,6 +23,14 @@ public enum StatusControl {
         try await postControl(path: "resume-rate-limited", body: [:], port: port)
     }
 
+    public static func pauseDispatch(port: Int) async throws -> PauseDispatchResult {
+        try await postControl(path: "pause", body: [:], port: port)
+    }
+
+    public static func resumeDispatch(port: Int) async throws -> ResumeDispatchResult {
+        try await postControl(path: "resume", body: [:], port: port)
+    }
+
     public static func queueSteer(_ issue: String, text: String, port: Int) async throws -> SteerResult {
         try await postControl(path: "steer", body: ["issue": issue, "text": text], port: port)
     }
@@ -77,6 +85,14 @@ public struct ResumeIssueResult: Codable {
 
 public struct ResumeRateLimitedResult: Codable {
     public let resumed: Int
+}
+
+public struct PauseDispatchResult: Codable {
+    public let paused: Bool
+}
+
+public struct ResumeDispatchResult: Codable {
+    public let paused: Bool
 }
 
 public struct SteerResult: Codable {

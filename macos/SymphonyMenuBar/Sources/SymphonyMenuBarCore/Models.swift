@@ -7,6 +7,31 @@ public struct OrchestratorSnapshot: Codable {
     public let completed: [String]
     public let codexRateLimit: CodexRateLimitSnapshot
     public let lastConfigError: String?
+    public let paused: Bool
+    public let pausedAtMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case startedAtMs
+        case running
+        case retryAttempts
+        case completed
+        case codexRateLimit
+        case lastConfigError
+        case paused
+        case pausedAtMs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startedAtMs = try container.decode(Int.self, forKey: .startedAtMs)
+        running = try container.decode([LiveSession].self, forKey: .running)
+        retryAttempts = try container.decode([RunAttempt].self, forKey: .retryAttempts)
+        completed = try container.decode([String].self, forKey: .completed)
+        codexRateLimit = try container.decode(CodexRateLimitSnapshot.self, forKey: .codexRateLimit)
+        lastConfigError = try container.decodeIfPresent(String.self, forKey: .lastConfigError)
+        paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        pausedAtMs = try container.decodeIfPresent(Int.self, forKey: .pausedAtMs)
+    }
 }
 
 public struct LiveSession: Codable, Identifiable {

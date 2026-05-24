@@ -229,7 +229,8 @@ function normalizeNotification(
   method: string,
   params: unknown
 ): Omit<AppendAgentWorkEventInput, keyof AgentWorkContext> {
-  const payload = params && typeof params === "object" ? sanitizeNotificationPayload(params as JsonObject) : null;
+  const rawPayload = params && typeof params === "object" ? params as JsonObject : null;
+  const payload = rawPayload ? sanitizeNotificationPayload(rawPayload) : null;
   const item = payload && typeof payload.item === "object" && payload.item ? payload.item as JsonObject : null;
   const itemType = typeof item?.type === "string" ? item.type : "";
   const lowerMethod = method.toLowerCase();
@@ -238,6 +239,22 @@ function normalizeNotification(
   if (method === "item/agentMessage/delta") {
     const delta = stringValue(payload?.delta) ?? stringValue(item?.text) ?? stringValue(item?.content) ?? "assistant message delta";
     return { type: "assistant_delta", summary: delta, payload };
+  }
+  if (method === "thread/goal/updated") {
+    const goal = rawPayload && typeof rawPayload.goal === "object" && rawPayload.goal ? rawPayload.goal as JsonObject : null;
+    const status = stringValue(goal?.status) ?? "unknown";
+    const objective = stringValue(goal?.objective) ?? "goal updated";
+    const tokensUsed = numberValue(goal?.tokensUsed);
+    const timeUsedSeconds = numberValue(goal?.timeUsedSeconds);
+    const usage = [
+      tokensUsed === null ? null : `tokens=${tokensUsed}`,
+      timeUsedSeconds === null ? null : `time=${timeUsedSeconds}s`
+    ].filter(Boolean).join(" ");
+    return {
+      type: "goal",
+      summary: `goal ${status}: ${objective}${usage ? ` (${usage})` : ""}`,
+      payload
+    };
   }
   if (method === "item/agentMessage/completed" || lowerItemType.includes("agent")) {
     const text = stringValue(item?.text) ?? stringValue(item?.content) ?? "assistant message";
@@ -330,6 +347,10 @@ function sanitizeFilename(value: string): string {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function clampLimit(value: number): number {
