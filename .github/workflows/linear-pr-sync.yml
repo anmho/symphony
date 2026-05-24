@@ -1,0 +1,11 @@
+name: Linear PR Sync
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, closed]
+
+jobs:
+  linear-pr-sync:
+    uses: anmho/.github/.github/workflows/linear-pr-sync.yml@main
+    secrets:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
