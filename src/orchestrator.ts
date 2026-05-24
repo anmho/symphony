@@ -123,7 +123,28 @@ function issueSummary(
     identifier: issue.identifier,
     title: issue.title,
     repoKey: repoKeyFromIssue(config, issue),
+    state: issue.state,
+    reviewKind: reviewKindFromIssue(config, issue),
+    prUrl: githubPullRequestUrlFromIssue(issue),
   };
+}
+
+function reviewKindFromIssue(
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue,
+): IssueSummary['reviewKind'] {
+  if (isTerminalState(issue.state, config)) {
+    return 'completed';
+  }
+  if (issue.state.toLowerCase().includes('block')) {
+    return 'blocked';
+  }
+  return 'pr_review';
+}
+
+function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
+  const haystack = [issue.description ?? '', ...issue.comments].join('\n');
+  return haystack.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/)?.[0] ?? null;
 }
 
 function repoKeyFromIssue(

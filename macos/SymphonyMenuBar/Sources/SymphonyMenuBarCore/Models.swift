@@ -61,6 +61,9 @@ public struct IssueSummary: Codable, Identifiable {
     public let identifier: String
     public let title: String?
     public let repoKey: String?
+    public let state: String?
+    public let reviewKind: String?
+    public let prUrl: String?
 }
 
 public struct RunAttempt: Codable, Identifiable {
@@ -85,6 +88,7 @@ public struct AgentRow: Identifiable {
     public let detail: String
     public let kind: AgentKind
     public let repoKey: String?
+    public let prUrl: String?
 
     public var headline: String {
         issueHeadline(identifier: identifier, title: title)
@@ -142,7 +146,8 @@ public extension OrchestratorSnapshot {
                 status: "running",
                 detail: sessionDetail(session, nowMs: nowMs),
                 kind: .running,
-                repoKey: session.repoKey
+                repoKey: session.repoKey,
+                prUrl: nil
             )
         }
 
@@ -155,7 +160,8 @@ public extension OrchestratorSnapshot {
                 status: parked ? "parked" : "retry",
                 detail: retryDetail(attempt, parked: parked, nowMs: nowMs),
                 kind: parked ? .parked : .retry,
-                repoKey: nil
+                repoKey: nil,
+                prUrl: nil
             )
         }
 
@@ -165,10 +171,11 @@ public extension OrchestratorSnapshot {
                 id: "handoff-\(issueId)",
                 identifier: issueId,
                 title: detail?.title,
-                status: "review",
-                detail: detail?.repoKey.map { "Ready for human review · \($0)" } ?? "Ready for human review",
+                status: statusLabel(for: detail?.reviewKind, fallback: "review"),
+                detail: handoffDetail(detail),
                 kind: .completed,
-                repoKey: detail?.repoKey
+                repoKey: detail?.repoKey,
+                prUrl: detail?.prUrl
             )
         }
 
@@ -179,9 +186,10 @@ public extension OrchestratorSnapshot {
                 identifier: issueId,
                 title: detail?.title,
                 status: "completed",
-                detail: detail?.repoKey.map { "Finished · \($0)" } ?? "Finished",
+                detail: terminalDetail(detail),
                 kind: .completed,
-                repoKey: detail?.repoKey
+                repoKey: detail?.repoKey,
+                prUrl: detail?.prUrl
             )
         }
 
@@ -244,6 +252,39 @@ public extension OrchestratorSnapshot {
         let event = session.lastCodexEvent ?? "-"
         let message = summarizeCodexMessage(session.lastCodexMessage)
         return "Turn \(session.turnCount) · \(event) · \(message) · \(age)"
+    }
+
+    private func statusLabel(for reviewKind: String?, fallback: String) -> String {
+        switch reviewKind {
+        case "pr_review": return "PR review"
+        case "blocked": return "blocked"
+        case "completed": return "completed"
+        default: return fallback
+        }
+    }
+
+    private func handoffDetail(_ detail: IssueSummary?) -> String {
+        let state = detail?.state ?? "In Review"
+        let label = statusLabel(for: detail?.reviewKind, fallback: "review")
+        var parts = ["\(state) · \(label)"]
+        if let repoKey = detail?.repoKey {
+            parts.append(repoKey)
+        }
+        if detail?.prUrl != nil {
+            parts.append("GitHub PR linked")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func terminalDetail(_ detail: IssueSummary?) -> String {
+        var parts = [detail?.state ?? "Done"]
+        if let repoKey = detail?.repoKey {
+            parts.append(repoKey)
+        }
+        if detail?.prUrl != nil {
+            parts.append("GitHub PR linked")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

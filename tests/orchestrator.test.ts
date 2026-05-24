@@ -509,6 +509,9 @@ describe('orchestrator', () => {
         identifier: 'ANM-283',
         title: 'Make Symphony npm publishing fully workflow-driven',
         repoKey: null,
+        state: 'Done',
+        reviewKind: 'completed',
+        prUrl: null,
       },
     ]);
   });
@@ -527,6 +530,7 @@ describe('orchestrator', () => {
           title: 'Ready for human review',
           state: 'In Review',
           labels: ['symphony'],
+          comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/37'],
         }),
       ],
       fetchCandidateIssues: async () => [],
@@ -544,6 +548,9 @@ describe('orchestrator', () => {
         identifier: 'ANM-284',
         title: 'Ready for human review',
         repoKey: null,
+        state: 'In Review',
+        reviewKind: 'pr_review',
+        prUrl: 'https://github.com/anmho/symphony/pull/37',
       },
     ]);
     expect(orchestrator.snapshot().completed).toEqual([]);
@@ -743,6 +750,7 @@ function makeIssue(
     branchName: overrides.branchName ?? null,
     url: overrides.url ?? null,
     labels: overrides.labels ?? [],
+    comments: overrides.comments ?? [],
     blockedBy: overrides.blockedBy ?? [],
     createdAt: overrides.createdAt ?? null,
     updatedAt: overrides.updatedAt ?? null,

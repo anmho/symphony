@@ -21,6 +21,7 @@ describe("prompt rendering", () => {
       branchName: null,
       url: null,
       labels: [],
+      comments: [],
       blockedBy: [],
       createdAt: null,
       updatedAt: null

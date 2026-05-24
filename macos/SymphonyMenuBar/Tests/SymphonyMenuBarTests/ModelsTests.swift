@@ -13,6 +13,8 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.running[0].repoKey, "symphony")
         XCTAssertEqual(snapshot.handoff, ["ANM-98"])
         XCTAssertEqual(snapshot.handoffDetails.first?.repoKey, ".github")
+        XCTAssertEqual(snapshot.handoffDetails.first?.reviewKind, "pr_review")
+        XCTAssertEqual(snapshot.handoffDetails.first?.prUrl, "https://github.com/anmho/.github/pull/1")
         XCTAssertEqual(snapshot.completed, ["ANM-99"])
         XCTAssertEqual(snapshot.completedDetails.first?.repoKey, "symphony")
     }
@@ -34,7 +36,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(rows.count, 3)
         XCTAssertEqual(rows[0].headline, "ANM-1 · Example Symphony issue")
         XCTAssertTrue(rows[0].detail.contains("Working on the ticket"))
-        XCTAssertEqual(rows[1].status, "review")
+        XCTAssertEqual(rows[1].status, "PR review")
         XCTAssertEqual(rows[2].status, "completed")
     }
 
@@ -74,8 +76,10 @@ final class ModelsTests: XCTestCase {
 
         let doneRows = snapshot.rows(for: .done, nowMs: 20_000)
         XCTAssertEqual(doneRows.map(\.identifier), ["ANM-98", "ANM-99"])
-        XCTAssertEqual(doneRows.first?.status, "review")
+        XCTAssertEqual(doneRows.first?.status, "PR review")
         XCTAssertEqual(doneRows.first?.repoKey, ".github")
+        XCTAssertEqual(doneRows.first?.prUrl, "https://github.com/anmho/.github/pull/1")
+        XCTAssertTrue(doneRows.first?.detail.contains("In Review") == true)
         XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 2)
     }
 

@@ -6,13 +6,15 @@ struct AgentRowView: View {
     let row: AgentRow
     let canOpenLinear: Bool
     let canOpenGitHub: Bool
+    let canOpenPullRequest: Bool
     let openIssue: () -> Void
     let onOpenGitHub: () -> Void
+    let onOpenPullRequest: () -> Void
     let onOpenLogs: () -> Void
     let onRetry: () -> Void
 
     var body: some View {
-        Button(action: openIssue) {
+        Button(action: canOpenPullRequest ? onOpenPullRequest : openIssue) {
             HStack(alignment: .top, spacing: 10) {
                 Circle()
                     .fill(statusColor)
@@ -48,6 +50,9 @@ struct AgentRowView: View {
         .contextMenu {
             if canOpenLinear {
                 Button("Open in Linear") { openIssue() }
+            }
+            if canOpenPullRequest {
+                Button("Open GitHub PR") { onOpenPullRequest() }
             }
             if canOpenGitHub {
                 Button("Open GitHub Repo") { onOpenGitHub() }

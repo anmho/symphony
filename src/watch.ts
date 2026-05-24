@@ -732,7 +732,13 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       event: 'completed',
       updated: '-',
       workspace: '-',
-      detail: [`Issue id: ${issueId}`, 'State: completed', `Repo: ${detail?.repoKey ?? '-'}`],
+      detail: [
+        `Issue id: ${issueId}`,
+        `State: ${detail?.state ?? 'completed'}`,
+        `Review type: ${detail?.reviewKind ?? 'completed'}`,
+        `PR: ${detail?.prUrl ?? '-'}`,
+        `Repo: ${detail?.repoKey ?? '-'}`,
+      ],
       };
     },
   );
@@ -746,10 +752,16 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       issueKey: issueId,
       age: '-',
       turn: '-',
-      event: 'review',
+      event: detail?.reviewKind === 'blocked' ? 'blocked' : 'pr-review',
       updated: '-',
       workspace: '-',
-      detail: [`Issue id: ${issueId}`, 'State: ready for human review', `Repo: ${detail?.repoKey ?? '-'}`],
+      detail: [
+        `Issue id: ${issueId}`,
+        `State: ${detail?.state ?? 'ready for human review'}`,
+        `Review type: ${detail?.reviewKind ?? 'pr_review'}`,
+        `PR: ${detail?.prUrl ?? '-'}`,
+        `Repo: ${detail?.repoKey ?? '-'}`,
+      ],
       };
     },
   );

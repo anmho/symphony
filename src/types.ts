@@ -18,6 +18,7 @@ export interface NormalizedIssue {
   branchName: string | null;
   url: string | null;
   labels: string[];
+  comments: string[];
   blockedBy: BlockerRef[];
   createdAt: string | null;
   updatedAt: string | null;
@@ -154,6 +155,9 @@ export interface IssueSummary {
   identifier: string;
   title: string | null;
   repoKey: string | null;
+  state: string | null;
+  reviewKind: 'pr_review' | 'blocked' | 'completed';
+  prUrl: string | null;
 }
 
 export interface LiveSession {

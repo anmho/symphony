@@ -19,7 +19,10 @@
     {
       "identifier": "ANM-98",
       "title": "Ready for review",
-      "repoKey": ".github"
+      "repoKey": ".github",
+      "state": "In Review",
+      "reviewKind": "pr_review",
+      "prUrl": "https://github.com/anmho/.github/pull/1"
     }
   ],
   "completed": ["ANM-99"],
@@ -27,7 +30,10 @@
     {
       "identifier": "ANM-99",
       "title": "Finished task",
-      "repoKey": "symphony"
+      "repoKey": "symphony",
+      "state": "Done",
+      "reviewKind": "completed",
+      "prUrl": "https://github.com/anmho/symphony/pull/1"
     }
   ],
   "codexRateLimit": {

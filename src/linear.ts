@@ -18,6 +18,7 @@ interface LinearIssueNode {
   updatedAt?: string | null;
   state?: { name?: string | null } | null;
   labels?: { nodes?: Array<{ name?: string | null }> } | null;
+  comments?: { nodes?: Array<{ body?: string | null }> } | null;
   relations?: {
     nodes?: Array<{
       type?: string | null;
@@ -62,6 +63,7 @@ const ISSUE_FIELDS = `
   updatedAt
   state { name }
   labels { nodes { name } }
+  comments(first: 25) { nodes { body } }
   relations(first: 50) {
     nodes {
       type
@@ -583,6 +585,9 @@ function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {
       .map((label) => label.name)
       .filter((name): name is string => Boolean(name))
       .map((name) => name.toLowerCase()),
+    comments: (node.comments?.nodes ?? [])
+      .map((comment) => comment.body)
+      .filter((body): body is string => Boolean(body)),
     blockedBy: (node.relations?.nodes ?? [])
       .filter((relation) => relation.type === "blocks" || relation.type === "blocked_by")
       .map((relation) => relation.relatedIssue)
