@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Server } from 'node:http';
 import {
   fetchDaemonEvents,
+  latestVisibleWorkEvents,
   queueSteer,
   resumeIssue,
   startStatusServer,
@@ -57,7 +58,42 @@ describe('status server', () => {
       issue: 'ANM-1',
     });
   });
+
+  it('can select latest visible events from a noisy raw tail', () => {
+    const events = latestVisibleWorkEvents(
+      [
+        event(1, 'assistant_message', 'completed work'),
+        event(2, 'notification', 'skills/changed'),
+        event(3, 'notification', 'skills/changed'),
+      ],
+      10,
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.summary).toBe('completed work');
+  });
 });
+
+function event(
+  cursor: number,
+  type: 'assistant_message' | 'notification',
+  summary: string,
+) {
+  return {
+    cursor,
+    timestampMs: 1000,
+    issueId: 'issue-1',
+    identifier: 'ANM-1',
+    repoKey: null,
+    workspacePath: null,
+    threadId: null,
+    turnId: null,
+    type,
+    level: 'info',
+    summary,
+    payload: null,
+  } as const;
+}
 
 function snapshot(): OrchestratorSnapshot {
   return {

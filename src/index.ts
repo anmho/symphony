@@ -287,7 +287,12 @@ async function runForeground(options: CliOptions): Promise<void> {
     statusPort,
     {
       getEvents: (query) =>
-        orchestrator.events(query.issue, query.cursor, query.limit),
+        orchestrator.events(
+          query.issue,
+          query.cursor,
+          query.limit,
+          query.visible,
+        ),
       queueSteer: (issue, text) => orchestrator.queueSteer(issue, text),
       resumeIssue: (issue) => orchestrator.resumeIssue(issue),
       resumeRateLimitedRuns: async () => {

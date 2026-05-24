@@ -96,6 +96,44 @@ describe('watch', () => {
     expect(screen).not.toContain('assistant_delta');
   });
 
+  it('renders an explicit fallback when fetched events are all hidden', () => {
+    const section = renderLogSection(
+      [
+        {
+          cursor: 1,
+          timestampMs: 12_500,
+          issueId: 'issue-1',
+          identifier: 'ANM-1',
+          repoKey: null,
+          workspacePath: null,
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          type: 'notification',
+          level: 'info',
+          summary: 'skills/changed',
+          payload: null,
+        },
+      ],
+      { ...DEFAULT_LOG_VIEWPORT },
+      8,
+      100,
+      {
+        dim: (value) => value,
+        title: (value) => value,
+        accent: (value) => value,
+        warn: (value) => value,
+        error: (value) => value,
+        ok: (value) => value,
+        header: (value) => value,
+        selected: (value) => value,
+        status: (_kind, value) => value,
+      },
+    );
+
+    expect(section.lines.join('\n')).toContain('No visible log lines');
+    expect(section.lines.join('\n')).toContain('skills/changed');
+  });
+
   it('maps log scroll keys only in logs view', () => {
     expect(watchLogKey({ name: 'j' })).toBe('down');
     expect(watchLogKey({ name: 'k' })).toBe('up');

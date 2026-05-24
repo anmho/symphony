@@ -308,6 +308,89 @@ describe('orchestrator', () => {
     expect(orchestrator.events('APP-1', 0, 20).map((event) => event.type)).toContain('goal');
   });
 
+  it('moves completed Codex goals to the configured handoff state', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'Human Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => issue,
+      moveIssueToState: moved,
+      runCodexTurn: async (_input, options) => {
+        options.onEvent({
+          type: 'notification',
+          method: 'thread/goal/updated',
+          params: {
+            goal: {
+              objective: 'Complete Linear issue APP-1',
+              status: 'complete',
+            },
+          },
+        });
+        return completedTurn('thread-1', 'turn-1');
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Human Review');
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().claimed).toHaveLength(0);
+    expect(orchestrator.events('APP-1', 0, 20).map((event) => event.summary)).toContain(
+      'issue moved to handoff state',
+    );
+  });
+
+  it('moves blocked Codex goals to the configured handoff state', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'Human Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => issue,
+      moveIssueToState: moved,
+      runCodexTurn: async (_input, options) => {
+        options.onEvent({
+          type: 'notification',
+          method: 'thread/goal/updated',
+          params: {
+            goal: {
+              objective: 'Complete Linear issue APP-1',
+              status: 'blocked',
+            },
+          },
+        });
+        return completedTurn('thread-1', 'turn-1');
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Human Review');
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().claimed).toHaveLength(0);
+  });
+
   it('attaches queued steering to the next prompt', async () => {
     const issue = makeIssue('APP-1');
     const dir = await mkdtemp(
@@ -424,6 +507,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     fetchIssueById: async (_config, issueId) => makeIssue(issueId),
     fetchTerminalIssues: async () => [],
     writeRunnerComment: async () => undefined,
+    moveIssueToState: async () => undefined,
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),
     removeWorkspace: async () => undefined,
     workspaceInfoForIssue: (_config, issue) => makeWorkspace(issue),
@@ -469,6 +553,7 @@ function makeConfig(
       repoLabelPrefix: 'repo:',
       activeStates: ['Todo', 'In Progress'],
       terminalStates: ['Done', 'Closed', 'Canceled'],
+      handoffState: null,
     },
     polling: { intervalMs: 30000 },
     workspace: {

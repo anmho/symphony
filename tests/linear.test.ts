@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchCandidateIssues, fetchIssueLabelNames } from "../src/linear.js";
+import { fetchCandidateIssues, fetchIssueLabelNames, moveIssueToState } from "../src/linear.js";
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {
@@ -55,6 +55,37 @@ describe("linear client", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("moves an issue to a named workflow state", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
+      if (body.query.includes("query SymphonyIssueTeam")) {
+        expect(body.variables).toEqual({ id: "issue-1" });
+        return response({ issue: { team: { id: "team-1" } } });
+      }
+      if (body.query.includes("query SymphonyWorkflowStates")) {
+        expect(body.variables).toEqual({ teamId: "team-1" });
+        return response({
+          workflowStates: {
+            nodes: [
+              { id: "state-1", name: "Todo" },
+              { id: "state-2", name: "Human Review" }
+            ]
+          }
+        });
+      }
+      if (body.query.includes("mutation SymphonyIssueMoveState")) {
+        expect(body.variables).toEqual({ id: "issue-1", stateId: "state-2" });
+        return response({ issueUpdate: { success: true } });
+      }
+      throw new Error(`unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await moveIssueToState(makeConfig({ projectSlug: null, teamKey: "ANM" }), "issue-1", "Human Review");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
 
 function makeConfig(tracker: { projectSlug: string | null; teamKey: string | null }): EffectiveWorkflowConfig {
@@ -68,7 +99,8 @@ function makeConfig(tracker: { projectSlug: string | null; teamKey: string | nul
       requiredLabels: [],
       repoLabelPrefix: "repo:",
       activeStates: ["Todo"],
-      terminalStates: ["Done"]
+      terminalStates: ["Done"],
+      handoffState: null
     }
   } as unknown as EffectiveWorkflowConfig;
 }

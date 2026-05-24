@@ -3,6 +3,7 @@ import {
   fetchCandidateIssues,
   fetchIssueById,
   fetchTerminalIssues,
+  moveIssueToState,
   writeRunnerComment,
 } from './linear.js';
 import { logger as defaultLogger } from './logger.js';
@@ -19,6 +20,7 @@ import { renderIssuePrompt } from './prompt.js';
 import { isGateParked } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
+import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
   ensureWorkspace,
@@ -58,6 +60,11 @@ export interface OrchestratorDependencies {
     config: EffectiveWorkflowConfig,
     issueId: string,
     body: string,
+  ) => Promise<void>;
+  moveIssueToState: (
+    config: EffectiveWorkflowConfig,
+    issueId: string,
+    stateName: string,
   ) => Promise<void>;
   prepareWorkspace: (
     config: EffectiveWorkflowConfig,
@@ -151,6 +158,7 @@ export class Orchestrator {
       fetchIssueById,
       fetchTerminalIssues,
       writeRunnerComment,
+      moveIssueToState,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
       workspaceInfoForIssue,
@@ -255,8 +263,14 @@ export class Orchestrator {
     issue: string | null,
     cursor: number | null,
     limit: number | null,
+    visible = false,
   ): AgentWorkEvent[] {
-    return this.eventStore.query({ issue, cursor, limit });
+    const events = this.eventStore.query({
+      issue,
+      cursor,
+      limit: visible ? 1000 : limit,
+    });
+    return visible ? latestVisibleWorkEvents(events, limit) : events;
   }
 
   queueSteer(issue: string, text: string): { queued: boolean; issue: string } {
@@ -683,6 +697,20 @@ export class Orchestrator {
         );
         throw new Error(result.error ?? 'codex_failed');
       }
+
+      if (this.shouldMoveToHandoff(config, entry)) {
+        await this.deps.moveIssueToState(
+          config,
+          issue.id,
+          config.tracker.handoffState!,
+        );
+        this.appendRunnerEvent(entry, 'issue moved to handoff state', {
+          state: config.tracker.handoffState,
+          reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
+        });
+        this.releaseIssue(issue.id);
+        return;
+      }
     }
 
     const latestIssue = await this.deps.fetchIssueById(config, issue.id);
@@ -719,6 +747,21 @@ export class Orchestrator {
       error,
     });
     this.claimed.add(issue.id);
+  }
+
+  private shouldMoveToHandoff(
+    config: EffectiveWorkflowConfig,
+    entry: RunningEntry,
+  ): boolean {
+    const handoffState = config.tracker.handoffState;
+    if (!handoffState) {
+      return false;
+    }
+    if (isActiveState(handoffState, config)) {
+      return false;
+    }
+    const status = entry.session.goalStatus?.toLowerCase();
+    return status === 'complete' || status === 'completed' || status === 'blocked';
   }
 
   private scheduleRateLimitProbe(
