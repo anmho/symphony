@@ -15,7 +15,7 @@ Source lives here in the symphony repo; **users install the packaged release**, 
 - Live status from Symphony `GET /status`
 - CLI controls via `symphony start`, `stop`, `watch`, and HTTP resume/steer endpoints
 - **macOS notifications** when status changes (rate limit, agent started/finished/parked, offline)
-- **Watch** opens `symphony watch`; errors surface if the CLI is missing from PATH
+- **Watch** opens a new iTerm2 window (or Terminal.app) running `symphony watch`
 
 ## Install (recommended)
 
@@ -48,14 +48,14 @@ Cask definition: [`Casks/symphony-menubar.rb`](Casks/symphony-menubar.rb)
 
 Each `menubar-v*` release includes:
 
-| Asset | Purpose |
-|-------|---------|
-| `Symphony_<ver>_aarch64.dmg` | Drag-to-Applications installer (Apple Silicon) |
-| `Symphony_<ver>_x64.dmg` | Drag-to-Applications installer (Intel) |
-| `Symphony_<ver>_*.app.tar.gz` | CLI/install.sh payload |
-| `*.sha256` | Checksum sidecars |
-| `latest-menubar.json` | Version manifest for install script |
-| `install.sh` | One-line installer (served from release, not raw GitHub CDN) |
+| Asset                         | Purpose                                                      |
+| ----------------------------- | ------------------------------------------------------------ |
+| `Symphony_<ver>_aarch64.dmg`  | Drag-to-Applications installer (Apple Silicon)               |
+| `Symphony_<ver>_x64.dmg`      | Drag-to-Applications installer (Intel)                       |
+| `Symphony_<ver>_*.app.tar.gz` | CLI/install.sh payload                                       |
+| `*.sha256`                    | Checksum sidecars                                            |
+| `latest-menubar.json`         | Version manifest for install script                          |
+| `install.sh`                  | One-line installer (served from release, not raw GitHub CDN) |
 
 CI builds on tag push via [`.github/workflows/release-menubar.yml`](../../.github/workflows/release-menubar.yml).
 

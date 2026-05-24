@@ -17,10 +17,31 @@ struct SymphonyMenuBarApp: App {
     }
 
     private var menuBarLabel: some View {
-        Image(systemName: menuBarSymbol)
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(menuBarTint)
-            .help(menuBarHelp)
+        HStack(spacing: 3) {
+            Image(systemName: menuBarSymbol)
+                .symbolRenderingMode(.hierarchical)
+            if let badge = menuBarBadge {
+                Text(badge)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+            }
+        }
+        .foregroundStyle(menuBarTint)
+        .help(menuBarHelp)
+    }
+
+    private var menuBarBadge: String? {
+        guard statusService.isOnline, let snapshot = statusService.snapshot else {
+            return nil
+        }
+        let running = snapshot.running.count
+        let retries = snapshot.retryAttempts.count
+        if retries > 0 {
+            return "\(running)/\(retries)"
+        }
+        if running > 0 {
+            return "\(running)"
+        }
+        return nil
     }
 
     private var menuBarSymbol: String {
@@ -37,7 +58,7 @@ struct SymphonyMenuBarApp: App {
     }
 
     private var menuBarTint: Color {
-        guard statusService.isOnline else { return .secondary }
+        guard statusService.isOnline else { return .primary.opacity(0.55) }
         if (statusService.snapshot?.retryAttempts.count ?? 0) > 0 {
             return .orange
         }
