@@ -1,0 +1,27 @@
+{
+  "teamKey": "ANM",
+  "teamId": "68f73eea-6903-4663-9a31-56c18e93b4cb",
+  "defaultTemplateKey": "symphony-agent-brief",
+  "labelNames": [
+    "symphony",
+    "needs-triage"
+  ],
+  "templates": [
+    {
+      "key": "symphony-agent-brief",
+      "linearId": "e29d0217-dd21-4259-b535-c955e98adee8",
+      "name": "Symphony agent brief",
+      "description": "Default issue body for Symphony-dispatchable work. Pre-applies labels: symphony, needs-triage. Add repo:<key> before ready-for-agent.",
+      "icon": ":robot:",
+      "markdownFile": "linear-symphony-issue.md"
+    },
+    {
+      "key": "symphony-grilled-brief",
+      "linearId": "292be30c-0588-4ca2-8ed9-994062e72977",
+      "name": "Symphony grilled brief",
+      "description": "Issue body for triaged work with locked design decisions. Pre-applies labels: symphony, needs-triage. Add repo:<key> before ready-for-agent.",
+      "icon": ":mag:",
+      "markdownFile": "linear-symphony-grilled-issue.md"
+    }
+  ]
+}

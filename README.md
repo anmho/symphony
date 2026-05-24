@@ -17,6 +17,8 @@ The default posture is high-trust local execution. Symphony is intended for repo
 ## Docs
 
 - [Symphony smoke](docs/symphony-smoke.md)
+- [Linear issue templates for Symphony dispatch](templates/README.md)
+- [Cursor agent skill](skills/symphony/SKILL.md) — install with `npx skills add anmho/skills --skill symphony --global -y`
 
 ## Requirements
 
@@ -132,6 +134,24 @@ If Codex becomes available before a reported reset time, force a probe immediate
 ```sh
 symphony resume
 ```
+
+Create a Linear ticket for Symphony dispatch using the agent-brief preset (labels `symphony`, `repo:<key>`, `needs-triage`):
+
+```sh
+# once per team: install the Linear issue template preset
+symphony ticket template install --workflow WORKFLOW.md
+
+symphony ticket create \
+  --workflow WORKFLOW.md \
+  --title "create-svc: ensure service destroy cleans up Grafana dashboards" \
+  --repo create-svc \
+  --context "Destroy already calls gcx resources delete when ./grafana exists." \
+  --problem "Generated grafana manifests are not valid gcx resources manifests."
+```
+
+Use `--description-file path/to/body.md` to supply a fully grilled brief. Without section flags or a description file, Symphony fills the bundled `templates/symphony-issue.md` with `_TBD during triage/grill._` placeholders.
+
+Linear also supports team issue templates in the UI. `symphony ticket template install` creates the same structure via the Linear API so new issues can reuse the preset.
 
 Stop it:
 

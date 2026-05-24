@@ -21,6 +21,7 @@
   ],
   "files": [
     "dist",
+    "templates",
     "README.md",
     "WORKFLOW.example.md"
   ],
@@ -41,6 +42,7 @@
     "resume": "tsx src/index.ts resume",
     "watch": "tsx src/index.ts watch",
     "validate-config": "tsx src/index.ts validate-config",
+    "templates:sync-linear": "tsx scripts/sync-linear-templates.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "validate": "bun run typecheck && bun run test"

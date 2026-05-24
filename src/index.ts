@@ -34,6 +34,7 @@ import {
 import { StreamingEventDisplay, formatDisplayEvent } from './eventDisplay.js';
 import { runStatusWatch } from './watch.js';
 import { validateConfiguredRepoRouteLabels } from './validation.js';
+import { createSymphonyTicket, installSymphonyIssueTemplate } from './ticket.js';
 
 interface CliOptions {
   workflow?: string;
@@ -220,6 +221,69 @@ program
       return;
     }
     console.log('Symphony dispatch resumed.');
+  });
+
+const ticket = program.command('ticket').description('Create Linear issues for Symphony dispatch.');
+
+ticket
+  .command('create')
+  .description('Create a Linear issue using the Symphony agent-brief template and dispatch labels.')
+  .requiredOption('--title <title>', 'Issue title')
+  .requiredOption('--repo <repoKey>', 'Repo route key (adds repo:<repoKey> label)')
+  .option('-d, --description <markdown>', 'Issue body markdown (overrides template sections)')
+  .option('--description-file <path>', 'Read issue body from a markdown file')
+  .option('--template <path>', 'Alternate issue body template file')
+  .option('--context <markdown>', 'Template section: Context')
+  .option('--problem <markdown>', 'Template section: Problem')
+  .option('--design-decisions <markdown>', 'Template section: Design decisions (locked)')
+  .option('--what-to-build <markdown>', 'Template section: What to build')
+  .option('--acceptance-criteria <markdown>', 'Template section: Acceptance criteria')
+  .option('--out-of-scope <markdown>', 'Template section: Out of scope')
+  .option('--references <markdown>', 'Template section: References')
+  .option('--triage-label <name>', 'Triage label to apply', 'needs-triage')
+  .option('--state <name>', 'Initial workflow state', 'Todo')
+  .action(async (options) => {
+    const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const result = await createSymphonyTicket(config, {
+      title: options.title,
+      repoKey: options.repo,
+      description: options.description,
+      descriptionFile: options.descriptionFile,
+      templatePath: options.template,
+      triageLabel: options.triageLabel,
+      stateName: options.state,
+      sections: {
+        context: options.context,
+        problem: options.problem,
+        designDecisions: options.designDecisions,
+        whatToBuild: options.whatToBuild,
+        acceptanceCriteria: options.acceptanceCriteria,
+        outOfScope: options.outOfScope,
+        references: options.references,
+      },
+    });
+    console.log(result.url ?? result.identifier);
+    if (result.templateId) {
+      console.log(`Template: ${result.templateId}`);
+    }
+  });
+
+const ticketTemplate = ticket
+  .command('template')
+  .description('Manage the Linear issue template preset used by ticket create.');
+
+ticketTemplate
+  .command('install')
+  .description('Install or refresh the Symphony agent brief template on the configured Linear team.')
+  .option('--template <path>', 'Alternate issue body template file')
+  .action(async (options) => {
+    const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const result = await installSymphonyIssueTemplate(config, options.template);
+    console.log(
+      `${result.created ? 'Installed' : 'Already installed'} Linear template "${result.name}" (${result.templateId}).`,
+    );
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
