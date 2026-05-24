@@ -458,6 +458,54 @@ describe('orchestrator', () => {
     expect(codexCalls).toBe(2);
   });
 
+  it('records externally terminal running issues as completed identifiers', async () => {
+    const issue = makeIssue('APP-1');
+    let terminal = false;
+    const deps = makeDeps({
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () =>
+        terminal ? { ...issue, state: 'Done' } : issue,
+      runCodexTurn: async (_input, options) => abortableTurn(options.signal),
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+    expect(orchestrator.snapshot().running).toHaveLength(1);
+
+    terminal = true;
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().completed).toEqual(['APP-1']);
+  });
+
+  it('hydrates completed issues from terminal Linear state on tick', async () => {
+    const deps = makeDeps({
+      fetchTerminalIssues: async () => [
+        makeIssue('ANM-283', {
+          id: 'issue-283',
+          title: 'Make Symphony npm publishing fully workflow-driven',
+          state: 'Done',
+          labels: ['symphony'],
+        }),
+      ],
+      fetchCandidateIssues: async () => [],
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot().completed).toEqual(['ANM-283']);
+  });
+
   it('holds retries while paused and resumes dispatch after unpause', async () => {
     const issue = makeIssue('APP-1');
     let now = 1000;
