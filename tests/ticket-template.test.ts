@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { renderIssueTemplate } from "../src/ticket-template.js";
+import {
+  renderIssueTemplate,
+  resolveDefaultIssueTemplatePath,
+} from "../src/ticket-template.js";
 
 describe("ticket template", () => {
   it("renders placeholder sections", () => {
@@ -13,6 +17,14 @@ describe("ticket template", () => {
     expect(body).toContain("Background here");
     expect(body).toContain("_TBD during triage/grill._");
     expect(body).not.toContain("{{context}}");
+  });
+
+  it("resolves the packaged template from compiled dist modules", () => {
+    const moduleDir = path.resolve(process.cwd(), "dist/src");
+
+    expect(resolveDefaultIssueTemplatePath(moduleDir)).toBe(
+      path.resolve(process.cwd(), "templates/symphony-issue.md")
+    );
   });
 
   it("loads the bundled default template from built CLI output", async () => {
