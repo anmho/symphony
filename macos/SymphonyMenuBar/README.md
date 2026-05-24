@@ -84,3 +84,14 @@ Gear icon in the popover:
 - macOS 13+
 - Symphony running locally (`symphony start`)
 - `symphony` on PATH for the Watch button
+
+## Troubleshooting
+
+Symphony Menu Bar is a **menu bar only** app (`LSUIElement`). It does not appear in the Dock and has no main window after onboarding.
+
+If you do not see the icon:
+
+1. Look on the **right side of the menu bar** for a blue waveform icon.
+2. On macOS 15+, check the **menu bar overflow** (Control Center chevron) — new items may be hidden until you enable them in **System Settings → Menu Bar → Symphony → Show in Menu Bar**.
+3. Quit duplicate copies: `pkill SymphonyMenuBar`, then run `open -a SymphonyMenuBar` once.
+4. Re-run the installer if Gatekeeper blocked launch.
