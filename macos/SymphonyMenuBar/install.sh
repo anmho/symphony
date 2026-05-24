@@ -3,7 +3,8 @@ set -euo pipefail
 
 REPO="${SYMPHONY_MENUBAR_REPO:-anmho/symphony}"
 INSTALL_DIR="${SYMPHONY_MENUBAR_INSTALL_DIR:-/Applications}"
-APP_NAME="SymphonyMenuBar.app"
+APP_NAME="Symphony.app"
+LEGACY_APP_NAME="SymphonyMenuBar.app"
 
 log() {
   printf '==> %s\n' "$*"
@@ -89,35 +90,43 @@ main() {
   require_cmd shasum
 
   if [[ "$(uname -s)" != "Darwin" ]]; then
-    die "Symphony Menu Bar requires macOS"
+    die "Symphony requires macOS"
   fi
 
-  local version arch asset checksum_asset url app_path
+  local version arch asset legacy_asset checksum_asset url app_path
   version="$(resolve_version)"
   arch="$(detect_arch)"
-  asset="SymphonyMenuBar_${version}_${arch}.app.tar.gz"
+  asset="Symphony_${version}_${arch}.app.tar.gz"
+  legacy_asset="SymphonyMenuBar_${version}_${arch}.app.tar.gz"
   checksum_asset="${asset}.sha256"
   url="https://github.com/${REPO}/releases/download/menubar-v${version}/${asset}"
 
-  log "Installing Symphony Menu Bar ${version} (${arch})"
+  log "Installing Symphony ${version} (${arch})"
   WORKDIR="$(mktemp -d)"
   trap cleanup EXIT
 
-  curl -fsSL "$url" -o "$WORKDIR/$asset"
+  if ! curl -fsSL "$url" -o "$WORKDIR/$asset"; then
+    url="https://github.com/${REPO}/releases/download/menubar-v${version}/${legacy_asset}"
+    asset="$legacy_asset"
+    curl -fsSL "$url" -o "$WORKDIR/$asset"
+  fi
   curl -fsSL "${url}.sha256" -o "$WORKDIR/$checksum_asset" 2>/dev/null || true
   verify_checksum "$WORKDIR/$asset"
   tar -xzf "$WORKDIR/$asset" -C "$WORKDIR"
 
   app_path="$WORKDIR/$APP_NAME"
+  if [[ ! -d "$app_path" ]]; then
+    app_path="$WORKDIR/$LEGACY_APP_NAME"
+  fi
   [[ -d "$app_path" ]] || die "archive did not contain $APP_NAME"
 
   mkdir -p "$INSTALL_DIR"
-  rm -rf "$INSTALL_DIR/$APP_NAME"
+  rm -rf "$INSTALL_DIR/$APP_NAME" "$INSTALL_DIR/$LEGACY_APP_NAME"
   cp -R "$app_path" "$INSTALL_DIR/$APP_NAME"
   clear_quarantine "$INSTALL_DIR/$APP_NAME"
 
   log "Installed to $INSTALL_DIR/$APP_NAME"
-  log "Launch: open -a SymphonyMenuBar"
+  log "Launch: open -a Symphony"
 }
 
 main "$@"

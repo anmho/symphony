@@ -42,8 +42,8 @@ jobs:
         with:
           name: symphony-menubar-aarch64
           path: |
-            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_aarch64.app.tar.gz
-            macos/SymphonyMenuBar/dist/SymphonyMenuBar_${{ steps.version.outputs.value }}_aarch64.dmg
+            macos/SymphonyMenuBar/dist/Symphony_${{ steps.version.outputs.value }}_aarch64.app.tar.gz
+            macos/SymphonyMenuBar/dist/Symphony_${{ steps.version.outputs.value }}_aarch64.dmg
             macos/SymphonyMenuBar/dist/checksums-${{ steps.version.outputs.value }}.txt
             macos/SymphonyMenuBar/dist/*.sha256
 
@@ -83,8 +83,8 @@ jobs:
             "tag": "${{ steps.version.outputs.tag }}",
             "platforms": {
               "aarch64": {
-                "dmg": "SymphonyMenuBar_${version}_aarch64.dmg",
-                "tarball": "SymphonyMenuBar_${version}_aarch64.app.tar.gz"
+                "dmg": "Symphony_${version}_aarch64.dmg",
+                "tarball": "Symphony_${version}_aarch64.app.tar.gz"
               }
             }
           }
@@ -95,7 +95,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Symphony Menu Bar v${{ steps.version.outputs.value }}
+          name: Symphony v${{ steps.version.outputs.value }}
           generate_release_notes: true
           files: |
             artifacts/**/*

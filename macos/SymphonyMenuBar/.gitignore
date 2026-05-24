@@ -1,0 +1,7 @@
+.build/
+dist/
+Symphony.app/
+SymphonyMenuBar.app/
+*.dmg
+*.tar.gz
+*.sha256

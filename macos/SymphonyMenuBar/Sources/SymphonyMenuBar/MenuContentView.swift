@@ -9,6 +9,7 @@ struct MenuContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            controls
             summary
             Divider()
             agentList
@@ -24,7 +25,7 @@ struct MenuContentView: View {
                 service.start()
             }
         }
-        .alert("Symphony CLI", isPresented: actionErrorPresented) {
+        .alert("Symphony", isPresented: actionErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(service.actionError ?? "")
@@ -50,6 +51,12 @@ struct MenuContentView: View {
                 Text(service.isOnline ? "Connected" : "Offline")
                     .font(.caption)
                     .foregroundStyle(service.isOnline ? .green : .secondary)
+                if let message = service.actionMessage {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
             Spacer()
             Button {
@@ -58,7 +65,29 @@ struct MenuContentView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.plain)
+            .help("Settings")
         }
+    }
+
+    private var controls: some View {
+        HStack(spacing: 8) {
+            if service.isOnline {
+                Button("Stop") { service.stopSymphony() }
+                    .disabled(service.isBusy)
+                if service.snapshot?.codexRateLimit.resumeAfterMs != nil {
+                    Button("Resume All") { service.resumeRateLimited() }
+                        .disabled(service.isBusy)
+                }
+            } else {
+                Button("Start") { service.startSymphony() }
+                    .disabled(service.isBusy)
+            }
+            Button("Watch") { service.openWatch() }
+            Button("Refresh") { service.refresh() }
+            Spacer()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     private var summary: some View {
@@ -93,29 +122,42 @@ struct MenuContentView: View {
     }
 
     private var agentList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                if let snapshot = service.snapshot {
-                    let rows = snapshot.agentRows()
-                    if rows.isEmpty {
-                        Text("No agents yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(rows) { row in
-                            AgentRowView(row: row) {
-                                service.openIssue(row.identifier)
-                            } onOpenLogs: {
-                                service.openLogs(for: row.identifier)
+        Group {
+            if let snapshot = service.snapshot {
+                let rows = snapshot.agentRows()
+                if rows.isEmpty {
+                    Text("No agents yet.")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(rows) { row in
+                                AgentRowView(
+                                    row: row,
+                                    canOpenLinear: linearIssueURL(
+                                        for: row.identifier,
+                                        orgSlug: service.settings.linearOrgSlug
+                                    ) != nil
+                                ) {
+                                    service.openIssue(row.identifier)
+                                } onOpenLogs: {
+                                    service.openLogs(for: row.identifier)
+                                } onRetry: {
+                                    service.resumeIssue(row.identifier)
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } else {
-                    Text("Start Symphony with `symphony start`.")
-                        .foregroundStyle(.secondary)
+                    .frame(minHeight: min(CGFloat(rows.count) * 72, 320), maxHeight: 320)
                 }
+            } else {
+                Text("Start Symphony to see agents here.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             }
         }
-        .frame(maxHeight: 320)
     }
 
     private var footer: some View {
@@ -124,8 +166,7 @@ struct MenuContentView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Refresh") { service.refresh() }
-            Button("Watch") { service.openWatch() }
+            Button("Log") { service.openDaemonLog() }
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .buttonStyle(.link)
@@ -149,8 +190,10 @@ struct MenuContentView: View {
 
 struct AgentRowView: View {
     let row: AgentRow
+    let canOpenLinear: Bool
     let openIssue: () -> Void
     let onOpenLogs: () -> Void
+    let onRetry: () -> Void
 
     var body: some View {
         Button(action: openIssue) {
@@ -163,6 +206,12 @@ struct AgentRowView: View {
                     HStack {
                         Text(row.identifier)
                             .font(.body.weight(.semibold))
+                        if !canOpenLinear {
+                            Image(systemName: "link.badge.plus")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .help("Set Linear org slug in Settings for ticket links")
+                        }
                         Spacer()
                         Text(row.status)
                             .font(.caption.weight(.medium))
@@ -172,15 +221,19 @@ struct AgentRowView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
+                        .multilineTextAlignment(.leading)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Open in Linear") { openIssue() }
+            if canOpenLinear {
+                Button("Open in Linear") { openIssue() }
+            }
             if row.kind == .running || row.kind == .retry || row.kind == .parked {
                 Button("Follow Logs") { onOpenLogs() }
+                Button("Retry Now") { onRetry() }
             }
         }
     }
@@ -202,7 +255,7 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Symphony Menu Bar Settings")
+            Text("Symphony Settings")
                 .font(.headline)
             Stepper(value: $settings.statusPort, in: 1024 ... 65535) {
                 Text("Status port: \(settings.statusPort)")

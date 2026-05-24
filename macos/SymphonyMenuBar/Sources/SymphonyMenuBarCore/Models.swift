@@ -52,7 +52,7 @@ public extension OrchestratorSnapshot {
     func agentRows(nowMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> [AgentRow] {
         var rows: [AgentRow] = running.map { session in
             AgentRow(
-                id: session.identifier,
+                id: "running-\(session.identifier)",
                 identifier: session.identifier,
                 status: "running",
                 detail: sessionDetail(session, nowMs: nowMs),
@@ -61,21 +61,19 @@ public extension OrchestratorSnapshot {
         }
 
         rows += retryAttempts.map { attempt in
-            let parked = attempt.error == "codex_rate_limited"
+            let parked = isParkedAttempt(attempt)
             return AgentRow(
-                id: attempt.identifier,
+                id: attempt.id,
                 identifier: attempt.identifier,
                 status: parked ? "parked" : "retry",
-                detail: parked
-                    ? "Rate limited"
-                    : "Retry #\(attempt.attempt) in \(formatDuration(max(attempt.dueAtMs - nowMs, 0)))",
+                detail: retryDetail(attempt, parked: parked, nowMs: nowMs),
                 kind: parked ? .parked : .retry
             )
         }
 
         rows += completed.map { issueId in
             AgentRow(
-                id: issueId,
+                id: "completed-\(issueId)",
                 identifier: issueId,
                 status: "completed",
                 detail: "Finished",
@@ -86,12 +84,54 @@ public extension OrchestratorSnapshot {
         return rows
     }
 
+    private func isParkedAttempt(_ attempt: RunAttempt) -> Bool {
+        attempt.error == "codex_rate_limited"
+    }
+
+    private func retryDetail(_ attempt: RunAttempt, parked: Bool, nowMs: Int) -> String {
+        if parked {
+            if let resumeAfterMs = codexRateLimit.resumeAfterMs {
+                let wait = formatDuration(max(resumeAfterMs - nowMs, 0))
+                return "Rate limited · resumes in \(wait)"
+            }
+            return summarizeRetryError(attempt.error) ?? "Rate limited"
+        }
+        let wait = formatDuration(max(attempt.dueAtMs - nowMs, 0))
+        let error = summarizeRetryError(attempt.error)
+        if let error {
+            return "Retry #\(attempt.attempt) in \(wait) · \(error)"
+        }
+        return "Retry #\(attempt.attempt) in \(wait)"
+    }
+
     private func sessionDetail(_ session: LiveSession, nowMs: Int) -> String {
         let age = formatDuration(max(nowMs - session.startedAtMs, 0))
         let event = session.lastCodexEvent ?? "-"
         let message = summarizeCodexMessage(session.lastCodexMessage)
         return "Turn \(session.turnCount) · \(event) · \(message) · \(age)"
     }
+}
+
+public func summarizeRetryError(_ value: String?) -> String? {
+    guard let value, !value.isEmpty else { return nil }
+    if value == "codex_rate_limited" {
+        return "Codex rate limited"
+    }
+
+    guard
+        let data = value.data(using: .utf8),
+        let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+        return truncate(value, 120)
+    }
+
+    if let message = parsed["message"] as? String {
+        return truncate(message, 120)
+    }
+    if let info = parsed["codexErrorInfo"] as? String {
+        return truncate(info, 120)
+    }
+    return truncate(value, 120)
 }
 
 public func summarizeCodexMessage(_ value: String?) -> String {

@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Symphony Menu Bar"
+        window.title = "Symphony"
         window.contentView = content
         window.isReleasedWhenClosed = false
         window.center()

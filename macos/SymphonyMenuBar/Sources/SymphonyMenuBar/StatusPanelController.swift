@@ -1,0 +1,40 @@
+import AppKit
+import SwiftUI
+
+@MainActor
+final class StatusPanelController {
+    static let shared = StatusPanelController()
+
+    private var panel: NSPanel?
+    private weak var service: StatusService?
+
+    private init() {}
+
+    func show(statusService: StatusService) {
+        service = statusService
+
+        if let panel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let content = NSHostingView(rootView: MenuContentView(service: statusService))
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 388, height: 520),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Symphony"
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        panel.contentView = content
+        panel.isReleasedWhenClosed = false
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.panel = panel
+    }
+}
