@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SymphonyMenuBarCore
 
 @MainActor
 final class StatusService: ObservableObject {
@@ -7,6 +8,7 @@ final class StatusService: ObservableObject {
     @Published private(set) var isOnline = false
     @Published private(set) var lastError: String?
     @Published private(set) var lastUpdated = Date()
+    @Published var actionError: String?
 
     var settings = AppSettings.load()
 
@@ -67,10 +69,20 @@ final class StatusService: ObservableObject {
     }
 
     func openWatch() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["symphony", "watch", "--status-port", String(settings.statusPort)]
-        try? task.run()
+        runCLI(["watch"])
+    }
+
+    func openLogs(for identifier: String) {
+        runCLI(["logs", identifier, "-f"])
+    }
+
+    private func runCLI(_ arguments: [String]) {
+        actionError = nil
+        do {
+            _ = try SymphonyCLI.run(arguments, statusPort: settings.statusPort)
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 }
 

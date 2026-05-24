@@ -1,12 +1,19 @@
 # Symphony Menu Bar
 
-Native macOS menu bar app for monitoring local Symphony agents and opening Linear tickets.
+Native macOS menu bar app for monitoring local Symphony agents, opening Linear tickets, and following logs.
 
 ## Stack
 
 **Swift + SwiftUI** native app using `MenuBarExtra`. Not Electron, not Tauri — a small signed `.app` bundle distributed as DMG and tarball releases.
 
 Source lives here in the symphony repo; **users install the packaged release**, not the source tree.
+
+## Features
+
+- Live status from Symphony `GET /status`
+- Agent rows show turn, event, and latest Codex message summary
+- Click a row to open the Linear issue; right-click for **Follow Logs**
+- **Watch** opens `symphony watch`; errors surface if the CLI is missing from PATH
 
 ## Install (recommended)
 
@@ -57,6 +64,12 @@ open dist/SymphonyMenuBar_0.1.2_aarch64.dmg
 ```
 
 Open in Xcode: `open Package.swift`
+
+Regenerate the app icon:
+
+```bash
+swift scripts/generate-icon.swift
+```
 
 ## Settings
 

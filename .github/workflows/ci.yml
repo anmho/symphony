@@ -18,6 +18,20 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  validate-menubar:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and test menu bar app
+        working-directory: macos/SymphonyMenuBar
+        run: |
+          chmod +x scripts/generate-icon.swift build.sh
+          swift scripts/generate-icon.swift
+          swift test
+          ./build.sh "$(tr -d '[:space:]' < VERSION)"
+
   validate:
     runs-on: ubuntu-latest
 
