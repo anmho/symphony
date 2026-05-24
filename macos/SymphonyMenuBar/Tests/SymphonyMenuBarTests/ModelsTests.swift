@@ -13,13 +13,22 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.completed, ["ANM-99"])
     }
 
-    func testAgentRowsIncludeCodexMessageSummary() throws {
+    func testIssueHeadlineIncludesTitleWhenAvailable() {
+        XCTAssertEqual(
+            issueHeadline(identifier: "ANM-279", title: "Implement observability slice"),
+            "ANM-279 · Implement observability slice"
+        )
+        XCTAssertEqual(issueHeadline(identifier: "ANM-279", title: nil), "ANM-279")
+    }
+
+    func testAgentRowsIncludeIssueTitle() throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "status", withExtension: "json"))
         let data = try Data(contentsOf: url)
         let snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
 
         let rows = snapshot.agentRows(nowMs: 20_000)
         XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].headline, "ANM-1 · Example Symphony issue")
         XCTAssertTrue(rows[0].detail.contains("Working on the ticket"))
         XCTAssertEqual(rows[1].status, "completed")
     }

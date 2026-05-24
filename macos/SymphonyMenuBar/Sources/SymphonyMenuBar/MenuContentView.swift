@@ -17,9 +17,11 @@ struct AgentRowView: View {
                     .frame(width: 8, height: 8)
                     .padding(.top, 5)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(row.identifier)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(row.headline)
                             .font(.body.weight(.semibold))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                         if !canOpenLinear {
                             Image(systemName: "link.badge.plus")
                                 .font(.caption2)

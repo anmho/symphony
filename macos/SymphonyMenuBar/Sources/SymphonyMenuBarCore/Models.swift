@@ -12,6 +12,7 @@ public struct OrchestratorSnapshot: Codable {
 public struct LiveSession: Codable, Identifiable {
     public var id: String { identifier }
     public let identifier: String
+    public let title: String?
     public let turnCount: Int
     public let lastCodexEvent: String?
     public let lastCodexTimestamp: Int?
@@ -23,6 +24,7 @@ public struct LiveSession: Codable, Identifiable {
 public struct RunAttempt: Codable, Identifiable {
     public var id: String { "\(identifier)-\(attempt)" }
     public let identifier: String
+    public let title: String?
     public let attempt: Int
     public let dueAtMs: Int
     public let error: String?
@@ -36,9 +38,14 @@ public struct CodexRateLimitSnapshot: Codable {
 public struct AgentRow: Identifiable {
     public let id: String
     public let identifier: String
+    public let title: String?
     public let status: String
     public let detail: String
     public let kind: AgentKind
+
+    public var headline: String {
+        issueHeadline(identifier: identifier, title: title)
+    }
 }
 
 public enum AgentKind {
@@ -88,6 +95,7 @@ public extension OrchestratorSnapshot {
             AgentRow(
                 id: "running-\(session.identifier)",
                 identifier: session.identifier,
+                title: session.title,
                 status: "running",
                 detail: sessionDetail(session, nowMs: nowMs),
                 kind: .running
@@ -99,6 +107,7 @@ public extension OrchestratorSnapshot {
             return AgentRow(
                 id: attempt.id,
                 identifier: attempt.identifier,
+                title: attempt.title,
                 status: parked ? "parked" : "retry",
                 detail: retryDetail(attempt, parked: parked, nowMs: nowMs),
                 kind: parked ? .parked : .retry
@@ -109,6 +118,7 @@ public extension OrchestratorSnapshot {
             AgentRow(
                 id: "completed-\(issueId)",
                 identifier: issueId,
+                title: nil,
                 status: "completed",
                 detail: "Finished",
                 kind: .completed
@@ -243,6 +253,13 @@ public func formatDuration(_ ms: Int) -> String {
     if hours > 0 { return "\(hours)h\(minutes)m" }
     if minutes > 0 { return "\(minutes)m\(seconds)s" }
     return "\(seconds)s"
+}
+
+public func issueHeadline(identifier: String, title: String?) -> String {
+    guard let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return identifier
+    }
+    return "\(identifier) · \(title)"
 }
 
 public func linearIssueURL(for identifier: String, orgSlug: String) -> URL? {

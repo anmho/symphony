@@ -340,6 +340,7 @@ export class Orchestrator {
     const session: LiveSession = {
       issueId: issue.id,
       identifier: issue.identifier,
+      title: issue.title,
       repoKey: null,
       workspacePath: null,
       eventLogPath: this.eventStore.logPathForIssue(issue.identifier),
@@ -417,6 +418,7 @@ export class Orchestrator {
         return;
       }
       issue = latestIssue;
+      entry.session.title = issue.title;
       if (isTerminalState(issue.state, config)) {
         await this.cleanupIssueWorkspace(config, issue);
         this.completed.add(issue.id);
@@ -522,6 +524,7 @@ export class Orchestrator {
     this.retryAttempts.set(issue.id, {
       issueId: issue.id,
       identifier: issue.identifier,
+      title: issue.title,
       attempt,
       dueAtMs: resolvedDueAtMs,
       error

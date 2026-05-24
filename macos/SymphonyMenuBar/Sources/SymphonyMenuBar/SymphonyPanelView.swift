@@ -467,8 +467,9 @@ struct SymphonyPanelView: View {
             service.openIssue(row.identifier)
         } label: {
             HStack {
-                Text(row.identifier)
+                Text(row.headline)
                     .font(.body.weight(.medium))
+                    .lineLimit(1)
                 Spacer()
                 Text(row.status)
                     .font(.caption.weight(.medium))

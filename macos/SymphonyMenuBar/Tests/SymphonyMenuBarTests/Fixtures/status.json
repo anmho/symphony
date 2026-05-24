@@ -3,6 +3,7 @@
   "running": [
     {
       "identifier": "ANM-1",
+      "title": "Example Symphony issue",
       "turnCount": 1,
       "lastCodexEvent": "notification",
       "lastCodexTimestamp": 19000,

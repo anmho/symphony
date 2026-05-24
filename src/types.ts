@@ -134,6 +134,7 @@ export interface CodexTurnResult {
 export interface RunAttempt {
   issueId: string;
   identifier: string;
+  title: string | null;
   attempt: number;
   dueAtMs: number;
   error: string | null;
@@ -142,6 +143,7 @@ export interface RunAttempt {
 export interface LiveSession {
   issueId: string;
   identifier: string;
+  title: string | null;
   repoKey: string | null;
   workspacePath: string | null;
   eventLogPath: string | null;
@@ -184,6 +186,7 @@ export type AgentWorkEventType =
   | "command"
   | "tool"
   | "diff"
+  | "goal"
   | "reasoning_summary"
   | "rate_limited"
   | "error"
