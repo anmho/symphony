@@ -504,6 +504,13 @@ describe('orchestrator', () => {
     await orchestrator.tick();
 
     expect(orchestrator.snapshot().completed).toEqual(['ANM-283']);
+    expect(orchestrator.snapshot().completedDetails).toEqual([
+      {
+        identifier: 'ANM-283',
+        title: 'Make Symphony npm publishing fully workflow-driven',
+        repoKey: null,
+      },
+    ]);
   });
 
   it('hydrates handoff issues from configured Linear handoff state on tick', async () => {
@@ -532,6 +539,13 @@ describe('orchestrator', () => {
     await orchestrator.tick();
 
     expect(orchestrator.snapshot().handoff).toEqual(['ANM-284']);
+    expect(orchestrator.snapshot().handoffDetails).toEqual([
+      {
+        identifier: 'ANM-284',
+        title: 'Ready for human review',
+        repoKey: null,
+      },
+    ]);
     expect(orchestrator.snapshot().completed).toEqual([]);
   });
 

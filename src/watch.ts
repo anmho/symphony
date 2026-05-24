@@ -721,31 +721,37 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
   );
 
   const completed = snapshot.completed.map(
-    (issueId): WatchRow => ({
+    (issueId): WatchRow => {
+      const detail = snapshot.completedDetails.find((issue) => issue.identifier === issueId);
+      return {
       kind: 'completed',
-      issue: issueId,
+      issue: detail?.title ? `${issueId} · ${detail.title}` : issueId,
       issueKey: issueId,
       age: '-',
       turn: '-',
       event: 'completed',
       updated: '-',
       workspace: '-',
-      detail: [`Issue id: ${issueId}`, 'State: completed'],
-    }),
+      detail: [`Issue id: ${issueId}`, 'State: completed', `Repo: ${detail?.repoKey ?? '-'}`],
+      };
+    },
   );
 
   const handoff = snapshot.handoff.map(
-    (issueId): WatchRow => ({
+    (issueId): WatchRow => {
+      const detail = snapshot.handoffDetails.find((issue) => issue.identifier === issueId);
+      return {
       kind: 'completed',
-      issue: issueId,
+      issue: detail?.title ? `${issueId} · ${detail.title}` : issueId,
       issueKey: issueId,
       age: '-',
       turn: '-',
       event: 'review',
       updated: '-',
       workspace: '-',
-      detail: [`Issue id: ${issueId}`, 'State: ready for human review'],
-    }),
+      detail: [`Issue id: ${issueId}`, 'State: ready for human review', `Repo: ${detail?.repoKey ?? '-'}`],
+      };
+    },
   );
 
   return [...running, ...retries, ...handoff, ...completed];

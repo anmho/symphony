@@ -150,6 +150,12 @@ export interface RunAttempt {
   error: string | null;
 }
 
+export interface IssueSummary {
+  identifier: string;
+  title: string | null;
+  repoKey: string | null;
+}
+
 export interface LiveSession {
   issueId: string;
   identifier: string;
@@ -182,7 +188,9 @@ export interface OrchestratorSnapshot {
   claimed: string[];
   retryAttempts: RunAttempt[];
   handoff: string[];
+  handoffDetails: IssueSummary[];
   completed: string[];
+  completedDetails: IssueSummary[];
   codexTotals: CodexUsageTotals;
   codexRateLimit: CodexRateLimitSnapshot;
   lastTickAtMs: number | null;

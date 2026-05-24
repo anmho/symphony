@@ -5,7 +5,9 @@ public struct OrchestratorSnapshot: Codable {
     public let running: [LiveSession]
     public let retryAttempts: [RunAttempt]
     public let handoff: [String]
+    public let handoffDetails: [IssueSummary]
     public let completed: [String]
+    public let completedDetails: [IssueSummary]
     public let codexRateLimit: CodexRateLimitSnapshot
     public let lastConfigError: String?
     public let paused: Bool
@@ -16,7 +18,9 @@ public struct OrchestratorSnapshot: Codable {
         case running
         case retryAttempts
         case handoff
+        case handoffDetails
         case completed
+        case completedDetails
         case codexRateLimit
         case lastConfigError
         case paused
@@ -29,7 +33,9 @@ public struct OrchestratorSnapshot: Codable {
         running = try container.decode([LiveSession].self, forKey: .running)
         retryAttempts = try container.decode([RunAttempt].self, forKey: .retryAttempts)
         handoff = try container.decodeIfPresent([String].self, forKey: .handoff) ?? []
+        handoffDetails = try container.decodeIfPresent([IssueSummary].self, forKey: .handoffDetails) ?? []
         completed = try container.decode([String].self, forKey: .completed)
+        completedDetails = try container.decodeIfPresent([IssueSummary].self, forKey: .completedDetails) ?? []
         codexRateLimit = try container.decode(CodexRateLimitSnapshot.self, forKey: .codexRateLimit)
         lastConfigError = try container.decodeIfPresent(String.self, forKey: .lastConfigError)
         paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false
@@ -41,12 +47,20 @@ public struct LiveSession: Codable, Identifiable {
     public var id: String { identifier }
     public let identifier: String
     public let title: String?
+    public let repoKey: String?
     public let turnCount: Int
     public let lastCodexEvent: String?
     public let lastCodexTimestamp: Int?
     public let lastCodexMessage: String?
     public let startedAtMs: Int
     public let workspacePath: String?
+}
+
+public struct IssueSummary: Codable, Identifiable {
+    public var id: String { identifier }
+    public let identifier: String
+    public let title: String?
+    public let repoKey: String?
 }
 
 public struct RunAttempt: Codable, Identifiable {
@@ -70,6 +84,7 @@ public struct AgentRow: Identifiable {
     public let status: String
     public let detail: String
     public let kind: AgentKind
+    public let repoKey: String?
 
     public var headline: String {
         issueHeadline(identifier: identifier, title: title)
@@ -126,7 +141,8 @@ public extension OrchestratorSnapshot {
                 title: session.title,
                 status: "running",
                 detail: sessionDetail(session, nowMs: nowMs),
-                kind: .running
+                kind: .running,
+                repoKey: session.repoKey
             )
         }
 
@@ -138,29 +154,34 @@ public extension OrchestratorSnapshot {
                 title: attempt.title,
                 status: parked ? "parked" : "retry",
                 detail: retryDetail(attempt, parked: parked, nowMs: nowMs),
-                kind: parked ? .parked : .retry
+                kind: parked ? .parked : .retry,
+                repoKey: nil
             )
         }
 
         rows += handoff.map { issueId in
-            AgentRow(
+            let detail = handoffDetails.first { $0.identifier == issueId }
+            return AgentRow(
                 id: "handoff-\(issueId)",
                 identifier: issueId,
-                title: nil,
+                title: detail?.title,
                 status: "review",
-                detail: "Ready for human review",
-                kind: .completed
+                detail: detail?.repoKey.map { "Ready for human review · \($0)" } ?? "Ready for human review",
+                kind: .completed,
+                repoKey: detail?.repoKey
             )
         }
 
         rows += completed.map { issueId in
-            AgentRow(
+            let detail = completedDetails.first { $0.identifier == issueId }
+            return AgentRow(
                 id: "completed-\(issueId)",
                 identifier: issueId,
-                title: nil,
+                title: detail?.title,
                 status: "completed",
-                detail: "Finished",
-                kind: .completed
+                detail: detail?.repoKey.map { "Finished · \($0)" } ?? "Finished",
+                kind: .completed,
+                repoKey: detail?.repoKey
             )
         }
 
@@ -308,4 +329,15 @@ public func linearIssueURL(for identifier: String, orgSlug: String) -> URL? {
     let slug = orgSlug.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     guard !slug.isEmpty else { return nil }
     return URL(string: "https://linear.app/\(slug)/issue/\(identifier)")
+}
+
+public func githubRepositoryURL(for repoKey: String?, ownerSlug: String) -> URL? {
+    guard let repoKey, !repoKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return nil
+    }
+    let owner = ownerSlug.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard !owner.isEmpty else { return nil }
+    let repo = repoKey.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard !repo.isEmpty else { return nil }
+    return URL(string: "https://github.com/\(owner)/\(repo)")
 }

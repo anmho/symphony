@@ -4,6 +4,7 @@
     {
       "identifier": "ANM-1",
       "title": "Example Symphony issue",
+      "repoKey": "symphony",
       "turnCount": 1,
       "lastCodexEvent": "notification",
       "lastCodexTimestamp": 19000,
@@ -14,7 +15,21 @@
   ],
   "retryAttempts": [],
   "handoff": ["ANM-98"],
+  "handoffDetails": [
+    {
+      "identifier": "ANM-98",
+      "title": "Ready for review",
+      "repoKey": ".github"
+    }
+  ],
   "completed": ["ANM-99"],
+  "completedDetails": [
+    {
+      "identifier": "ANM-99",
+      "title": "Finished task",
+      "repoKey": "symphony"
+    }
+  ],
   "codexRateLimit": {
     "resumeAfterMs": null,
     "reason": null

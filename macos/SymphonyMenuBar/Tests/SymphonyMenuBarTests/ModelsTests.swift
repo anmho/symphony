@@ -10,8 +10,11 @@ final class ModelsTests: XCTestCase {
 
         XCTAssertEqual(snapshot.running.count, 1)
         XCTAssertEqual(snapshot.running[0].identifier, "ANM-1")
+        XCTAssertEqual(snapshot.running[0].repoKey, "symphony")
         XCTAssertEqual(snapshot.handoff, ["ANM-98"])
+        XCTAssertEqual(snapshot.handoffDetails.first?.repoKey, ".github")
         XCTAssertEqual(snapshot.completed, ["ANM-99"])
+        XCTAssertEqual(snapshot.completedDetails.first?.repoKey, "symphony")
     }
 
     func testIssueHeadlineIncludesTitleWhenAvailable() {
@@ -72,7 +75,16 @@ final class ModelsTests: XCTestCase {
         let doneRows = snapshot.rows(for: .done, nowMs: 20_000)
         XCTAssertEqual(doneRows.map(\.identifier), ["ANM-98", "ANM-99"])
         XCTAssertEqual(doneRows.first?.status, "review")
+        XCTAssertEqual(doneRows.first?.repoKey, ".github")
         XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 2)
+    }
+
+    func testGitHubRepositoryURLUsesRepoKey() {
+        XCTAssertEqual(
+            githubRepositoryURL(for: ".github", ownerSlug: "anmho")?.absoluteString,
+            "https://github.com/anmho/.github"
+        )
+        XCTAssertNil(githubRepositoryURL(for: nil, ownerSlug: "anmho"))
     }
 
     func testUsageLimitErrorsAreRateLimited() {

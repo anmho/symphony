@@ -103,7 +103,9 @@ function snapshot(): OrchestratorSnapshot {
     claimed: [],
     retryAttempts: [],
     handoff: [],
+    handoffDetails: [],
     completed: [],
+    completedDetails: [],
     codexTotals: {
       inputTokens: 0,
       outputTokens: 0,

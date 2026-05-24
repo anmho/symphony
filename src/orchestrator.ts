@@ -36,6 +36,7 @@ import type {
   CodexUsageTotals,
   EffectiveWorkflowConfig,
   AgentWorkEvent,
+  IssueSummary,
   LiveSession,
   NormalizedIssue,
   OrchestratorSnapshot,
@@ -114,6 +115,32 @@ function isHandoffState(
   );
 }
 
+function issueSummary(
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue,
+): IssueSummary {
+  return {
+    identifier: issue.identifier,
+    title: issue.title,
+    repoKey: repoKeyFromIssue(config, issue),
+  };
+}
+
+function repoKeyFromIssue(
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue,
+): string | null {
+  const prefix = config.tracker.repoLabelPrefix.toLowerCase();
+  for (const label of issue.labels) {
+    const normalized = label.toLowerCase();
+    if (normalized.startsWith(prefix)) {
+      const repoKey = normalized.slice(prefix.length).trim();
+      return repoKey || null;
+    }
+  }
+  return null;
+}
+
 export interface OrchestratorOptions {
   workflowPath: string;
   pollOnce?: boolean;
@@ -146,8 +173,8 @@ export class Orchestrator {
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RunAttempt>();
-  private readonly handoff = new Set<string>();
-  private readonly completed = new Set<string>();
+  private readonly handoff = new Map<string, IssueSummary>();
+  private readonly completed = new Map<string, IssueSummary>();
   private readonly codexTotals: CodexUsageTotals = {
     inputTokens: 0,
     outputTokens: 0,
@@ -238,8 +265,10 @@ export class Orchestrator {
       retryAttempts: [...this.retryAttempts.values()].map((attempt) => ({
         ...attempt,
       })),
-      handoff: [...this.handoff],
-      completed: [...this.completed],
+      handoff: [...this.handoff.keys()],
+      handoffDetails: [...this.handoff.values()],
+      completed: [...this.completed.keys()],
+      completedDetails: [...this.completed.values()],
       codexTotals: { ...this.codexTotals },
       codexRateLimit: { ...this.codexRateLimit },
       lastTickAtMs: this.lastTickAtMs,
@@ -440,7 +469,7 @@ export class Orchestrator {
   ): Promise<NormalizedIssue[]> {
     const terminalIssues = await this.deps.fetchTerminalIssues(config);
     for (const issue of terminalIssues) {
-      this.completed.add(issue.identifier);
+      this.completed.set(issue.identifier, issueSummary(config, issue));
       this.handoff.delete(issue.identifier);
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
@@ -457,7 +486,7 @@ export class Orchestrator {
       if (this.completed.has(issue.identifier)) {
         continue;
       }
-      this.handoff.add(issue.identifier);
+      this.handoff.set(issue.identifier, issueSummary(config, issue));
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
     }
@@ -479,7 +508,7 @@ export class Orchestrator {
         });
 
       if (latestIssue && isTerminalState(latestIssue.state, config)) {
-        this.completed.add(latestIssue.identifier);
+        this.completed.set(latestIssue.identifier, issueSummary(config, latestIssue));
         entry.cancelReason = `state_${latestIssue.state}`;
         entry.abortController.abort();
         continue;
@@ -487,7 +516,7 @@ export class Orchestrator {
 
       if (!latestIssue || !isActiveState(latestIssue.state, config)) {
         if (latestIssue && isHandoffState(latestIssue.state, config)) {
-          this.handoff.add(latestIssue.identifier);
+          this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
         }
         entry.cancelReason = latestIssue
           ? `state_${latestIssue.state}`
@@ -644,13 +673,13 @@ export class Orchestrator {
       entry.session.title = issue.title;
       if (isTerminalState(issue.state, config)) {
         await this.cleanupIssueWorkspace(config, issue);
-        this.completed.add(issue.identifier);
+        this.completed.set(issue.identifier, issueSummary(config, issue));
         this.releaseIssue(issue.id);
         return;
       }
       if (!isActiveState(issue.state, config)) {
         if (isHandoffState(issue.state, config)) {
-          this.handoff.add(issue.identifier);
+          this.handoff.set(issue.identifier, issueSummary(config, issue));
         }
         this.releaseIssue(issue.id);
         return;
@@ -765,7 +794,7 @@ export class Orchestrator {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
-        this.handoff.add(issue.identifier);
+        this.handoff.set(issue.identifier, issueSummary(config, issue));
         this.releaseIssue(issue.id);
         return;
       }
