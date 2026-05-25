@@ -13,10 +13,10 @@ Normal release path:
 3. Push a release tag named `v<package-version>`, for example `v0.1.3`.
 4. Let the `Publish` workflow validate, build, verify the tag matches `package.json`, check whether the version already exists on npm, and publish if it is missing.
 
-The workflow publishes with npm trusted publishing and provenance:
+The workflow publishes with npm trusted publishing. npm automatically adds provenance for trusted-publisher publishes from this public GitHub repository:
 
 ```sh
-npm publish --provenance --access public --tag "$NPM_DIST_TAG"
+npm publish --access public --tag "$NPM_DIST_TAG"
 ```
 
 The workflow intentionally does not use `NODE_AUTH_TOKEN` for publishing. npm authorizes the publish through GitHub Actions OIDC and the package's trusted-publisher configuration.
@@ -31,6 +31,7 @@ Configure this on npmjs.com for the existing `@anmho/symphony` package:
 - GitHub repository: `symphony`
 - Workflow filename: `publish.yml`
 - Workflow path in this repo: `.github/workflows/publish.yml`
+- `package.json` repository URL: `https://github.com/anmho/symphony`
 
 The release tag trigger is `v*`. For tag-triggered releases, the version after the leading `v` must exactly match `package.json`; otherwise the workflow exits before publishing.
 
