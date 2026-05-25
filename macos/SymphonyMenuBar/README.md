@@ -72,13 +72,16 @@ Build artifacts land in `dist/Symphony.app` only. The repo root is not used for 
 
 Open in Xcode: `open Package.swift`
 
-Regenerate the app icon:
+Regenerate the app icon from the checked-in raster master (preferred):
 
 ```bash
-swift scripts/generate-icon.swift
+# from repo root; see docs/brand/logo-design-note.md for the full iconutil recipe
+SRC=assets/brand/symphony-app-icon-1024.png
 ```
 
-The icon geometry matches the repo-owned source vector in
+The committed `AppIcon.icns` is built from
+[`../../assets/brand/symphony-app-icon-1024.png`](../../assets/brand/symphony-app-icon-1024.png).
+`swift scripts/generate-icon.swift` remains a vector fallback that matches
 [`../../assets/brand/symphony-mark.svg`](../../assets/brand/symphony-mark.svg).
 
 ## Settings
