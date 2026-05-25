@@ -33,6 +33,7 @@ workspace:
     create-svc: create-svc
     create-app-saas: create-app-saas
     create-app-consumer: create-app-consumer
+    omnichannel: omnichannel
     .github: .github
     skills: skills
     website: website
