@@ -21,7 +21,7 @@ func drawIcon(size: CGFloat) -> NSImage {
     let rect = NSRect(x: 0, y: 0, width: size, height: size)
     let background = NSColor(calibratedRed: 0.094, green: 0.125, blue: 0.122, alpha: 1)
     background.setFill()
-    NSBezierPath(roundedRect: rect, xRadius: size * 0.18, yRadius: size * 0.18).fill()
+    NSBezierPath(roundedRect: rect, xRadius: size * 0.172, yRadius: size * 0.172).fill()
 
     let lane = NSColor(calibratedRed: 0.91, green: 0.925, blue: 0.895, alpha: 1)
     let accent = NSColor(calibratedRed: 0.624, green: 0.702, blue: 0.553, alpha: 1)
@@ -36,23 +36,33 @@ func drawIcon(size: CGFloat) -> NSImage {
         path.stroke()
     }
 
-    let laneWidth = max(size * 0.0625, 2)
-    let railWidth = max(size * 0.07, 2.25)
-    let left = size * 0.258
-    let midLeft = size * 0.32
-    let laneRight = size * 0.68
-    let railX = size * 0.742
-    let topY = size * 0.695
-    let midY = size * 0.5
-    let bottomY = size * 0.305
+    func yFromTop(_ fraction: CGFloat) -> CGFloat {
+        size * (1 - fraction)
+    }
 
-    drawLine(from: NSPoint(x: left, y: topY), to: NSPoint(x: laneRight, y: topY), color: lane, width: laneWidth)
-    drawLine(from: NSPoint(x: midLeft, y: midY), to: NSPoint(x: laneRight + size * 0.062, y: midY), color: lane, width: laneWidth)
-    drawLine(from: NSPoint(x: left, y: bottomY), to: NSPoint(x: laneRight, y: bottomY), color: lane, width: laneWidth)
-    drawLine(from: NSPoint(x: railX, y: size * 0.242), to: NSPoint(x: railX, y: size * 0.758), color: accent, width: railWidth)
+    let laneWidth = max(size * 0.0508, 2)
+    let railWidth = max(size * 0.0547, 2.25)
+    let left = size * 0.203
+    let topRight = size * 0.555
+    let midRight = size * 0.656
+    let bottomRight = size * 0.523
+    let railX = size * 0.672
+    let topY = yFromTop(76 / 256)
+    let midY = yFromTop(128 / 256)
+    let bottomY = yFromTop(180 / 256)
+
+    drawLine(from: NSPoint(x: left, y: topY), to: NSPoint(x: topRight, y: topY), color: lane, width: laneWidth)
+    drawLine(from: NSPoint(x: left, y: midY), to: NSPoint(x: midRight, y: midY), color: lane, width: laneWidth)
+    drawLine(from: NSPoint(x: left, y: bottomY), to: NSPoint(x: bottomRight, y: bottomY), color: lane, width: laneWidth)
+    drawLine(
+        from: NSPoint(x: railX, y: yFromTop(64 / 256)),
+        to: NSPoint(x: railX, y: yFromTop(192 / 256)),
+        color: accent,
+        width: railWidth
+    )
 
     accent.setFill()
-    let nodeSize = max(size * 0.117, 4)
+    let nodeSize = max(size * 0.078, 3.5)
     for y in [topY, midY, bottomY] {
         NSBezierPath(ovalIn: NSRect(x: railX - nodeSize / 2, y: y - nodeSize / 2, width: nodeSize, height: nodeSize)).fill()
     }

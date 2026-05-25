@@ -2,11 +2,11 @@
   <title id="title">Symphony logo</title>
   <desc id="desc">Symphony wordmark paired with a compact orchestration mark.</desc>
   <rect x="16" y="16" width="160" height="160" rx="28" fill="#18201F"/>
-  <path d="M57.25 64.75H124.75M67.25 96H134.75M57.25 127.25H124.75" stroke="#E8ECE4" stroke-width="10" stroke-linecap="round"/>
-  <path d="M135 54.75V137.25" stroke="#9FB38D" stroke-width="11" stroke-linecap="round"/>
-  <circle cx="135" cy="64.75" r="9.5" fill="#9FB38D"/>
-  <circle cx="135" cy="96" r="9.5" fill="#9FB38D"/>
-  <circle cx="135" cy="127.25" r="9.5" fill="#9FB38D"/>
+  <path d="M48.5 57H87.375M48.5 96H105M48.5 135H83.75" stroke="#E8ECE4" stroke-width="8.125" stroke-linecap="round"/>
+  <path d="M107.5 48V144" stroke="#9FB38D" stroke-width="8.75" stroke-linecap="round"/>
+  <circle cx="107.5" cy="57" r="6.25" fill="#9FB38D"/>
+  <circle cx="107.5" cy="96" r="6.25" fill="#9FB38D"/>
+  <circle cx="107.5" cy="135" r="6.25" fill="#9FB38D"/>
   <text x="216" y="111" fill="#18201F" font-family="Avenir Next, Satoshi, Geist, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="650" letter-spacing="0">Symphony</text>
   <text x="220" y="142" fill="#64706A" font-family="Geist Mono, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="500" letter-spacing="2.5">LOCAL AGENT ORCHESTRATION</text>
 </svg>

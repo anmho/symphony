@@ -56,3 +56,11 @@ large nodes, and high contrast instead of fine detail.
   low-trust shortcuts.
 - Highly musical symbols were rejected because Symphony is an orchestration
   tool, not a music product.
+- **GPT / MCP image generation** was tried for the macOS icon and reverted: output
+  looked over-rendered and off-brand. Icons stay vector + `generate-icon.swift`.
+
+## Geometry refresh
+
+The mark was re-centered and de-cluttered (smaller nodes, staggered lane lengths,
+shared coordinates between SVG and Swift) so the menu-bar icon is less cramped on
+the right edge.

@@ -1,10 +1,10 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony mark</title>
-  <desc id="desc">A compact orchestration mark with three controlled agent lanes and a vertical conductor rail.</desc>
+  <desc id="desc">Centered conductor-rail mark with three staggered agent lanes.</desc>
   <rect width="256" height="256" rx="44" fill="#18201F"/>
-  <path d="M66 78H174M82 128H190M66 178H174" stroke="#E8ECE4" stroke-width="16" stroke-linecap="round"/>
-  <path d="M190 62V194" stroke="#9FB38D" stroke-width="18" stroke-linecap="round"/>
-  <circle cx="190" cy="78" r="15" fill="#9FB38D"/>
-  <circle cx="190" cy="128" r="15" fill="#9FB38D"/>
-  <circle cx="190" cy="178" r="15" fill="#9FB38D"/>
+  <path d="M52 76H142M52 128H168M52 180H134" stroke="#E8ECE4" stroke-width="13" stroke-linecap="round"/>
+  <path d="M172 64V192" stroke="#9FB38D" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="172" cy="76" r="10" fill="#9FB38D"/>
+  <circle cx="172" cy="128" r="10" fill="#9FB38D"/>
+  <circle cx="172" cy="180" r="10" fill="#9FB38D"/>
 </svg>
