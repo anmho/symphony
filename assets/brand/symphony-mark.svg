@@ -1,10 +1,7 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony mark</title>
-  <desc id="desc">Centered conductor-rail mark with three staggered agent lanes.</desc>
+  <desc id="desc">A restrained point-and-orbit mark: one accent dot with a thin circular field on charcoal.</desc>
   <rect width="256" height="256" rx="44" fill="#18201F"/>
-  <path d="M52 76H142M52 128H168M52 180H134" stroke="#E8ECE4" stroke-width="13" stroke-linecap="round"/>
-  <path d="M172 64V192" stroke="#9FB38D" stroke-width="14" stroke-linecap="round"/>
-  <circle cx="172" cy="76" r="10" fill="#9FB38D"/>
-  <circle cx="172" cy="128" r="10" fill="#9FB38D"/>
-  <circle cx="172" cy="180" r="10" fill="#9FB38D"/>
+  <circle cx="128" cy="128" r="88" stroke="#E8ECE4" stroke-opacity="0.14" stroke-width="2"/>
+  <circle cx="134" cy="122" r="26" fill="#7B8FA3"/>
 </svg>

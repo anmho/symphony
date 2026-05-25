@@ -23,49 +23,28 @@ func drawIcon(size: CGFloat) -> NSImage {
     background.setFill()
     NSBezierPath(roundedRect: rect, xRadius: size * 0.172, yRadius: size * 0.172).fill()
 
-    let lane = NSColor(calibratedRed: 0.91, green: 0.925, blue: 0.895, alpha: 1)
-    let accent = NSColor(calibratedRed: 0.624, green: 0.702, blue: 0.553, alpha: 1)
+    let ring = NSColor(calibratedRed: 0.91, green: 0.925, blue: 0.895, alpha: 0.14)
+    let point = NSColor(calibratedRed: 0.482, green: 0.561, blue: 0.639, alpha: 1)
 
-    func drawLine(from start: NSPoint, to end: NSPoint, color: NSColor, width: CGFloat) {
-        color.setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = width
-        path.lineCapStyle = .round
-        path.move(to: start)
-        path.line(to: end)
-        path.stroke()
-    }
+    ring.setStroke()
+    let orbit = NSBezierPath(ovalIn: NSRect(
+        x: size * 0.156,
+        y: size * 0.156,
+        width: size * 0.688,
+        height: size * 0.688
+    ))
+    orbit.lineWidth = max(size * 0.0078, 1)
+    orbit.stroke()
 
-    func yFromTop(_ fraction: CGFloat) -> CGFloat {
-        size * (1 - fraction)
-    }
-
-    let laneWidth = max(size * 0.0508, 2)
-    let railWidth = max(size * 0.0547, 2.25)
-    let left = size * 0.203
-    let topRight = size * 0.555
-    let midRight = size * 0.656
-    let bottomRight = size * 0.523
-    let railX = size * 0.672
-    let topY = yFromTop(76 / 256)
-    let midY = yFromTop(128 / 256)
-    let bottomY = yFromTop(180 / 256)
-
-    drawLine(from: NSPoint(x: left, y: topY), to: NSPoint(x: topRight, y: topY), color: lane, width: laneWidth)
-    drawLine(from: NSPoint(x: left, y: midY), to: NSPoint(x: midRight, y: midY), color: lane, width: laneWidth)
-    drawLine(from: NSPoint(x: left, y: bottomY), to: NSPoint(x: bottomRight, y: bottomY), color: lane, width: laneWidth)
-    drawLine(
-        from: NSPoint(x: railX, y: yFromTop(64 / 256)),
-        to: NSPoint(x: railX, y: yFromTop(192 / 256)),
-        color: accent,
-        width: railWidth
-    )
-
-    accent.setFill()
-    let nodeSize = max(size * 0.078, 3.5)
-    for y in [topY, midY, bottomY] {
-        NSBezierPath(ovalIn: NSRect(x: railX - nodeSize / 2, y: y - nodeSize / 2, width: nodeSize, height: nodeSize)).fill()
-    }
+    let pointRadius = size * 0.1015
+    let pointCenter = NSPoint(x: size * 0.523, y: size * 0.523)
+    point.setFill()
+    NSBezierPath(ovalIn: NSRect(
+        x: pointCenter.x - pointRadius,
+        y: pointCenter.y - pointRadius,
+        width: pointRadius * 2,
+        height: pointRadius * 2
+    )).fill()
 
     image.unlockFocus()
     return image

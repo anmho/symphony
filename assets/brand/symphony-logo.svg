@@ -1,12 +1,9 @@
 <svg width="720" height="192" viewBox="0 0 720 192" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony logo</title>
-  <desc id="desc">Symphony wordmark paired with a compact orchestration mark.</desc>
+  <desc id="desc">Symphony wordmark with a compact point-and-orbit mark.</desc>
   <rect x="16" y="16" width="160" height="160" rx="28" fill="#18201F"/>
-  <path d="M48.5 57H87.375M48.5 96H105M48.5 135H83.75" stroke="#E8ECE4" stroke-width="8.125" stroke-linecap="round"/>
-  <path d="M107.5 48V144" stroke="#9FB38D" stroke-width="8.75" stroke-linecap="round"/>
-  <circle cx="107.5" cy="57" r="6.25" fill="#9FB38D"/>
-  <circle cx="107.5" cy="96" r="6.25" fill="#9FB38D"/>
-  <circle cx="107.5" cy="135" r="6.25" fill="#9FB38D"/>
+  <circle cx="96" cy="96" r="55" stroke="#E8ECE4" stroke-opacity="0.14" stroke-width="1.25"/>
+  <circle cx="100" cy="92" r="16.25" fill="#7B8FA3"/>
   <text x="216" y="111" fill="#18201F" font-family="Avenir Next, Satoshi, Geist, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="650" letter-spacing="0">Symphony</text>
   <text x="220" y="142" fill="#64706A" font-family="Geist Mono, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="500" letter-spacing="2.5">LOCAL AGENT ORCHESTRATION</text>
 </svg>
