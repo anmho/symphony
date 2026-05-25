@@ -35,6 +35,11 @@ import { StreamingEventDisplay, formatDisplayEvent } from './eventDisplay.js';
 import { runStatusWatch } from './watch.js';
 import { syncConfiguredRepoRouteLabels, validateConfiguredRepoRouteLabels } from './validation.js';
 import { createSymphonyTicket, installSymphonyIssueTemplate } from './ticket.js';
+import { fetchRelevantIssues } from './linear.js';
+import {
+  diagnoseDispatchIssues,
+  renderDispatchDoctorReport,
+} from './doctor.js';
 
 interface CliOptions {
   workflow?: string;
@@ -207,6 +212,34 @@ program
     console.log(
       `Resumed ${result.resumed} rate-limited run${result.resumed === 1 ? '' : 's'}.`,
     );
+  });
+
+program
+  .command('doctor')
+  .description('Explain why currently relevant Linear issues are not dispatching.')
+  .option('--json', 'print JSON diagnostics')
+  .action(async (options: { json?: boolean }) => {
+    const cliOptions = program.opts<CliOptions>();
+    const workflowPath = await resolveWorkflowPath(cliOptions.workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const status = await fetchDaemonStatus(readStatusPort(cliOptions));
+    const diagnostics = diagnoseDispatchIssues(
+      await fetchRelevantIssues(config),
+      config,
+      {
+        nowMs: Date.now(),
+        codexRateLimit: status?.codexRateLimit ?? null,
+        runningCount: status?.running.length ?? 0,
+        runningIssueIds: new Set(
+          status?.running.map((session) => session.issueId) ?? [],
+        ),
+      },
+    );
+    if (options.json) {
+      console.log(JSON.stringify({ diagnostics }, null, 2));
+      return;
+    }
+    console.log(renderDispatchDoctorReport(diagnostics));
   });
 
 program

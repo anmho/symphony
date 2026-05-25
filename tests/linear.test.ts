@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchCandidateIssues, fetchIssueLabelNames, fetchTerminalIssues, moveIssueToState } from "../src/linear.js";
+import {
+  fetchCandidateIssues,
+  fetchIssueLabelNames,
+  fetchRelevantIssues,
+  fetchTerminalIssues,
+  moveIssueToState,
+} from "../src/linear.js";
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {
@@ -33,6 +39,23 @@ describe("linear client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchCandidateIssues(makeConfig({ projectSlug: "project", teamKey: null }));
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("fetches relevant issues without limiting the workflow state", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
+      expect(body.query).not.toContain("state: { name: { in: $states } }");
+      expect(body.query).toContain("$projectSlug: String!");
+      expect(body.variables).toEqual({ projectSlug: "project" });
+      return response({ issues: { nodes: [] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchRelevantIssues(
+      makeConfig({ projectSlug: "project", teamKey: null })
+    );
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });

@@ -96,6 +96,31 @@ export async function fetchCandidateIssues(config: EffectiveWorkflowConfig): Pro
   return (data.issues?.nodes ?? []).map(normalizeLinearIssue).filter(Boolean);
 }
 
+export async function fetchRelevantIssues(
+  config: EffectiveWorkflowConfig
+): Promise<NormalizedIssue[]> {
+  const { filter, variableDefinitions, variables } = issueScopeFilter(config);
+  const operationVariables = variableDefinitions
+    ? `(${variableDefinitions})`
+    : "";
+  const data = await linearGraphql<IssuesQueryData>(
+    config,
+    `
+      query SymphonyRelevantIssues${operationVariables} {
+        issues(
+          first: 100,
+          filter: ${filter}
+        ) {
+          nodes { ${ISSUE_FIELDS} }
+        }
+      }
+    `,
+    variables
+  );
+
+  return (data.issues?.nodes ?? []).map(normalizeLinearIssue).filter(Boolean);
+}
+
 export async function fetchIssueById(config: EffectiveWorkflowConfig, issueId: string): Promise<NormalizedIssue | null> {
   const data = await linearGraphql<{ issue?: LinearIssueNode | null }>(
     config,
@@ -549,12 +574,18 @@ function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {
 
 function issueScopeFilter(
   config: EffectiveWorkflowConfig,
-  states: string[],
+  states?: string[],
   options: { includeRequiredLabels?: boolean } = {}
 ): { filter: string; variableDefinitions: string; variables: Record<string, unknown> } {
-  const filters = ["state: { name: { in: $states } }"];
-  const variableDefinitions = ["$states: [String!]"];
-  const variables: Record<string, unknown> = { states };
+  const filters: string[] = [];
+  const variableDefinitions: string[] = [];
+  const variables: Record<string, unknown> = {};
+
+  if (states) {
+    filters.push("state: { name: { in: $states } }");
+    variableDefinitions.push("$states: [String!]");
+    variables.states = states;
+  }
 
   if (config.tracker.projectSlug) {
     filters.push("project: { slugId: { eq: $projectSlug } }");
