@@ -2,7 +2,9 @@ name: Linear PR Sync
 
 on:
   pull_request:
-    types: [opened, reopened, closed]
+    types: [opened, reopened, ready_for_review, closed]
+  pull_request_review:
+    types: [submitted]
 
 jobs:
   linear-pr-sync:

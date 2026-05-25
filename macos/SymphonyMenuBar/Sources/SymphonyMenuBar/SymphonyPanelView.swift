@@ -295,7 +295,7 @@ struct SymphonyPanelView: View {
                 metricCard(
                     title: "In review",
                     value: "\(inventory.review)",
-                    subtitle: inventory.review == 0 ? "No human review needed" : "Needs PR review or feedback",
+                    subtitle: inventory.review == 0 ? "No human review needed" : "Needs PR review",
                     progress: progressFraction(active: inventory.review, total: max(inventory.review + inventory.completed, 1)),
                     tint: .purple
                 )
@@ -373,18 +373,6 @@ struct SymphonyPanelView: View {
                                 service.resumeIssue(row.identifier)
                             } onRequestCodexReview: {
                                 service.requestCodexReview(row.identifier, prUrl: row.prUrl)
-                            } onRequestChanges: {
-                                service.requestChanges(row.identifier)
-                            }
-                            if row.kind == .review {
-                                Button {
-                                    service.requestChanges(row.identifier)
-                                } label: {
-                                    Label("Request Changes", systemImage: "arrow.uturn.backward")
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .disabled(service.isBusy)
                             }
                         }
                     }

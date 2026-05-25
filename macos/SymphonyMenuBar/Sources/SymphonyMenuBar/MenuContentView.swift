@@ -13,10 +13,9 @@ struct AgentRowView: View {
     let onOpenLogs: () -> Void
     let onRetry: () -> Void
     let onRequestCodexReview: () -> Void
-    let onRequestChanges: () -> Void
 
     var body: some View {
-        Button(action: canOpenPullRequest ? onOpenPullRequest : openIssue) {
+        Button(action: performPrimaryAction) {
             HStack(alignment: .top, spacing: 10) {
                 Circle()
                     .fill(statusColor)
@@ -64,9 +63,20 @@ struct AgentRowView: View {
                 Button("Follow Logs") { onOpenLogs() }
                 Button("Retry Now") { onRetry() }
             }
-            if row.kind == .review {
-                Button("Request Changes") { onRequestChanges() }
+        }
+    }
+
+    private func performPrimaryAction() {
+        if row.kind == .review {
+            if canOpenPullRequest {
+                onOpenPullRequest()
             }
+            return
+        }
+        if canOpenPullRequest {
+            onOpenPullRequest()
+        } else {
+            openIssue()
         }
     }
 
