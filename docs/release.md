@@ -31,7 +31,7 @@ Configure this on npmjs.com for the existing `@anmho/symphony` package:
 - GitHub repository: `symphony`
 - Workflow filename: `publish.yml`
 - Workflow path in this repo: `.github/workflows/publish.yml`
-- `package.json` repository URL: `https://github.com/anmho/symphony`
+- `package.json` repository URL: `git+https://github.com/anmho/symphony.git`
 
 The release tag trigger is `v*`. For tag-triggered releases, the version after the leading `v` must exactly match `package.json`; otherwise the workflow exits before publishing.
 
