@@ -99,6 +99,89 @@ Prompt
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("Warning: Missing Linear label for configured repo route: repo:auth");
+    expect(result.stderr).toContain(
+      "Warning: Missing Linear label for configured repo route: repo:auth. Run `symphony labels sync --workflow WORKFLOW.md` to create missing route labels."
+    );
+  });
+
+  it("creates missing configured repo route labels from the CLI", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-cli-"));
+    const callsPath = path.join(dir, "calls.json");
+    const fetchMockPath = path.join(dir, "mock-fetch.mjs");
+    await writeFile(
+      fetchMockPath,
+      `
+import { writeFileSync } from "node:fs";
+
+const calls = [];
+globalThis.fetch = async (_url, init) => {
+  const body = JSON.parse(String(init.body));
+  calls.push(body);
+  writeFileSync(${JSON.stringify(callsPath)}, JSON.stringify(calls, null, 2));
+
+  if (body.query.includes("query SymphonyIssueLabels")) {
+    return response({
+      issueLabels: {
+        nodes: [{ name: "repo:symphony" }],
+        pageInfo: { hasNextPage: false, endCursor: null }
+      }
+    });
+  }
+  if (body.query.includes("query SymphonyTeam")) {
+    return response({
+      teams: {
+        nodes: [{ id: "team-1", key: "ANM", name: "ANM" }]
+      }
+    });
+  }
+  if (body.query.includes("mutation SymphonyIssueLabelCreate")) {
+    return response({
+      issueLabelCreate: {
+        success: true,
+        issueLabel: { id: "label-auth", name: body.variables.input.name }
+      }
+    });
+  }
+  throw new Error("unexpected query: " + body.query);
+};
+
+function response(data) {
+  return new Response(JSON.stringify({ data }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  });
+}
+`
+    );
+
+    const workflowPath = path.join(dir, "WORKFLOW.md");
+    await writeFile(
+      workflowPath,
+      `---
+tracker:
+  api_key: lin_test
+  endpoint: https://linear.example/graphql
+  team_key: ANM
+workspace:
+  repo_path: .
+  repo_routes:
+    symphony: ./symphony
+    auth: ./auth
+---
+Prompt
+`
+    );
+
+    const result = await runCommand(
+      "node",
+      ["--import", "tsx", "--import", fetchMockPath, "src/index.ts", "labels", "sync", "--workflow", workflowPath],
+      {
+        cwd: repoRoot,
+        timeoutMs: 30000
+      }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Created Linear label repo:auth");
   });
 });

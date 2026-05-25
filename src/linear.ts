@@ -283,6 +283,44 @@ export async function fetchIssueLabelIds(
   return ids;
 }
 
+export async function createIssueLabel(
+  config: EffectiveWorkflowConfig,
+  input: { name: string; teamId: string }
+): Promise<{ id: string; name: string }> {
+  const data = await linearGraphql<{
+    issueLabelCreate?: {
+      success?: boolean;
+      issueLabel?: { id?: string; name?: string | null };
+    };
+  }>(
+    config,
+    `
+      mutation SymphonyIssueLabelCreate($input: IssueLabelCreateInput!) {
+        issueLabelCreate(input: $input) {
+          success
+          issueLabel { id name }
+        }
+      }
+    `,
+    {
+      input: {
+        name: input.name,
+        teamId: input.teamId,
+      },
+    }
+  );
+
+  const label = data.issueLabelCreate?.issueLabel;
+  if (!data.issueLabelCreate?.success || !label?.id || !label.name) {
+    throw new Error(`linear_issue_label_create_failed: ${input.name}`);
+  }
+
+  return {
+    id: label.id,
+    name: label.name,
+  };
+}
+
 export async function createLinearIssue(
   config: EffectiveWorkflowConfig,
   input: {

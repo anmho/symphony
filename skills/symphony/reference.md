@@ -59,4 +59,8 @@ tracker:
 
 ## Missing repo route label
 
-On `symphony validate-config` or start, Symphony warns when `WORKFLOW.md` lists a `repo_routes` key with no matching Linear label. Create the label in Linear before filing issues for that repo.
+On `symphony validate-config` or start, Symphony warns when `WORKFLOW.md` lists a `repo_routes` key with no matching Linear label. Run this before filing issues for newly configured repos:
+
+```bash
+symphony labels sync --workflow WORKFLOW.md
+```

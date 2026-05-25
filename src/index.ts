@@ -33,7 +33,7 @@ import {
 } from './status.js';
 import { StreamingEventDisplay, formatDisplayEvent } from './eventDisplay.js';
 import { runStatusWatch } from './watch.js';
-import { validateConfiguredRepoRouteLabels } from './validation.js';
+import { syncConfiguredRepoRouteLabels, validateConfiguredRepoRouteLabels } from './validation.js';
 import { createSymphonyTicket, installSymphonyIssueTemplate } from './ticket.js';
 
 interface CliOptions {
@@ -99,6 +99,24 @@ program
     const warnings = await validateConfiguredRepoRouteLabels(config);
     for (const warning of warnings) {
       console.warn(`Warning: ${warning.message}`);
+    }
+  });
+
+const labels = program.command('labels').description('Manage Linear labels used by Symphony dispatch.');
+
+labels
+  .command('sync')
+  .description('Create missing Linear repo route labels for configured workspace routes.')
+  .action(async () => {
+    const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const result = await syncConfiguredRepoRouteLabels(config);
+    if (result.createdLabels.length === 0) {
+      console.log('All configured repo route labels already exist.');
+      return;
+    }
+    for (const label of result.createdLabels) {
+      console.log(`Created Linear label ${label}`);
     }
   });
 
