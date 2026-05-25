@@ -1,9 +1,23 @@
 <svg width="720" height="192" viewBox="0 0 720 192" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony logo</title>
-  <desc id="desc">Symphony wordmark with the point-and-orbit mark scaled from the 256 grid.</desc>
-  <rect x="16" y="16" width="160" height="160" rx="26.25" fill="#18201F"/>
-  <circle cx="96" cy="96" r="50" stroke="#E8ECE4" stroke-opacity="0.17" stroke-width="0.9375"/>
-  <circle cx="101" cy="91" r="15" fill="#7B8FA3"/>
-  <text x="216" y="111" fill="#18201F" font-family="Avenir Next, Satoshi, Geist, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="650" letter-spacing="0">Symphony</text>
+  <desc id="desc">Symphony wordmark with the wave-and-note mark from main.</desc>
+  <rect x="16" y="16" width="160" height="160" rx="29" fill="#141A2E"/>
+  <path
+    d="M51 83 C61 59 71 107 81 83 C91 59 101 107 111 83 C118 74 125 78 135 83"
+    stroke="#59B8FF"
+    stroke-width="8"
+    stroke-linecap="round"
+    fill="none"
+  />
+  <path
+    d="M64 112 V68 L93 72 V116"
+    stroke="#59B8FF"
+    stroke-width="7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+  <ellipse cx="60" cy="116" rx="9" ry="8" fill="#59B8FF"/>
+  <text x="216" y="111" fill="#141A2E" font-family="Avenir Next, Satoshi, Geist, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="650" letter-spacing="0">Symphony</text>
   <text x="220" y="142" fill="#64706A" font-family="Geist Mono, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="500" letter-spacing="2.5">LOCAL AGENT ORCHESTRATION</text>
 </svg>

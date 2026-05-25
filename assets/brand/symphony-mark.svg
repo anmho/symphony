@@ -1,7 +1,21 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony mark</title>
-  <desc id="desc">Point-and-orbit mark on an 8px grid: centered field, ring at r=80, accent point on a 45-degree optical shift.</desc>
-  <rect width="256" height="256" rx="42" fill="#18201F"/>
-  <circle cx="128" cy="128" r="80" stroke="#E8ECE4" stroke-opacity="0.17" stroke-width="1.5"/>
-  <circle cx="136" cy="120" r="24" fill="#7B8FA3"/>
+  <desc id="desc">Wave and note mark on midnight blue — matches the main-branch app icon.</desc>
+  <rect width="256" height="256" rx="46" fill="#141A2E"/>
+  <path
+    d="M56 133 C72 95 92 171 108 133 C124 95 144 171 160 133 C172 118 184 125 199 133"
+    stroke="#59B8FF"
+    stroke-width="13"
+    stroke-linecap="round"
+    fill="none"
+  />
+  <path
+    d="M77 179 V108 L123 114 V185"
+    stroke="#59B8FF"
+    stroke-width="11"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+  <ellipse cx="72" cy="186" rx="15" ry="13" fill="#59B8FF"/>
 </svg>
