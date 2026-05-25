@@ -1,13 +1,13 @@
 {
   "name": "@anmho/symphony",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Local TypeScript Symphony runner for Linear-driven Codex app-server work orchestration.",
   "type": "module",
   "license": "UNLICENSED",
   "packageManager": "bun@1.3.14",
   "repository": {
     "type": "git",
-    "url": "https://github.com/anmho/symphony"
+    "url": "git+https://github.com/anmho/symphony.git"
   },
   "homepage": "https://www.npmjs.com/package/@anmho/symphony",
   "bugs": {

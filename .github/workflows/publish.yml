@@ -82,5 +82,8 @@ jobs:
       - name: Publish to npm with trusted publishing
         if: steps.package-version.outputs.published == 'false'
         run: |
+          npm_userconfig="$RUNNER_TEMP/npm-trusted-publishing.npmrc"
+          : > "$npm_userconfig"
+          export NPM_CONFIG_USERCONFIG="$npm_userconfig"
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag "$NPM_DIST_TAG"
