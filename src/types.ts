@@ -19,6 +19,7 @@ export interface NormalizedIssue {
   url: string | null;
   labels: string[];
   comments: string[];
+  attachments: string[];
   blockedBy: BlockerRef[];
   createdAt: string | null;
   updatedAt: string | null;
@@ -89,6 +90,17 @@ export interface PullRequestConfig {
   graphiteFallback: GraphiteFallback;
 }
 
+export interface GithubPrIdentityConfig {
+  kind: 'machine_user';
+  tokenCommand: string;
+  authorName: string;
+  authorEmail: string;
+}
+
+export interface GithubConfig {
+  prIdentity: GithubPrIdentityConfig | null;
+}
+
 export interface EffectiveWorkflowConfig {
   workflowPath: string;
   workflowDir: string;
@@ -99,6 +111,7 @@ export interface EffectiveWorkflowConfig {
   hooks: HooksConfig;
   agent: AgentConfig;
   codex: CodexConfig;
+  github: GithubConfig;
   pullRequest: PullRequestConfig;
 }
 
@@ -158,6 +171,15 @@ export interface IssueSummary {
   state: string | null;
   reviewKind: 'pr_review' | 'blocked' | 'completed';
   prUrl: string | null;
+}
+
+export interface PullRequestStatus {
+  url: string;
+  owner: string;
+  repo: string;
+  number: number;
+  state: 'open' | 'closed' | 'merged';
+  mergedAt: string | null;
 }
 
 export interface LiveSession {

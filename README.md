@@ -216,6 +216,27 @@ Recommended Graphite Inbox filter for Symphony PRs:
 author:@me (title:ANM- OR branch:symphony/)
 ```
 
+### GitHub PR identity
+
+Symphony can keep Codex execution local while opening PRs as a separate GitHub machine user. Configure a token command in `WORKFLOW.md` after storing the machine-user token in Vault:
+
+```yaml
+github:
+  pr_identity:
+    kind: machine_user
+    token_command: vault kv get -mount=secret -field=token prod/providers/github/symphony
+    author_name: Symphony
+    author_email: anmho-symphony@users.noreply.github.com
+```
+
+The token is only used during PR handoff. Agents are instructed to set `GH_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
+
+```sh
+symphony doctor github-pr-identity --workflow WORKFLOW.md
+```
+
+Graphite submit may still use the locally authenticated Graphite/GitHub identity; use the GitHub backend for machine-user PR authorship until Graphite bot identity support is verified.
+
 Stop it:
 
 ```sh

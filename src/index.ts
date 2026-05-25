@@ -26,6 +26,7 @@ import {
   fetchDaemonStatus,
   queueSteer,
   pauseOrchestrator,
+  requestChanges,
   resumeIssue,
   resumeOrchestrator,
   resumeRateLimitedRuns,
@@ -41,6 +42,7 @@ import {
   diagnoseDispatchIssues,
   renderDispatchDoctorReport,
 } from './doctor.js';
+import { diagnosePrIdentity } from './prIdentity.js';
 import {
   DEFAULT_CODEX_APP_SERVER_COMMAND,
   runCodexAppServerSmoke,
@@ -52,6 +54,9 @@ interface CliOptions {
 }
 
 const program = new Command();
+const PROCESS_TITLE = 'symphony';
+
+setProcessTitle(PROCESS_TITLE);
 
 program
   .name('symphony')
@@ -130,7 +135,7 @@ labels
     }
   });
 
-const review = program.command('review').description('Manual AI review controls for PR handoff issues.');
+const review = program.command('review').description('Review handoff controls for Symphony issues.');
 
 review
   .command('request')
@@ -149,6 +154,23 @@ review
     });
     const prefix = result.dryRun ? 'Would request' : 'Requested';
     console.log(`${prefix} Codex review for ${result.issue}: ${result.prUrl}`);
+  });
+
+review
+  .command('changes')
+  .description('Send a reviewed issue back to active Symphony work with feedback.')
+  .argument('<issue>', 'Linear issue identifier or id, for example ANM-123')
+  .argument('<feedback...>', 'review feedback for the next agent attempt')
+  .action(async (issue: string, feedback: string[]) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await requestChanges(port, issue, feedback.join(' '));
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support request changes.`,
+      );
+      return;
+    }
+    console.log(`Moved ${result.issue} to ${result.state} for rework.`);
   });
 
 const doctor = program
@@ -205,6 +227,18 @@ doctor
       }
     },
   );
+
+doctor
+  .command('github-pr-identity')
+  .description('Verify the configured GitHub machine-user PR identity.')
+  .action(async () => {
+    const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const lines = await diagnosePrIdentity(config);
+    for (const line of lines) {
+      console.log(line);
+    }
+  });
 
 program
   .command('status')
@@ -416,6 +450,7 @@ async function startBackground(options: CliOptions): Promise<void> {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env: process.env,
+    argv0: background.argv0,
   });
   child.unref();
   writeFileSync(pidPath(statusPort), `${child.pid}\n`);
@@ -433,7 +468,7 @@ async function startBackground(options: CliOptions): Promise<void> {
 function backgroundCommand(
   workflowPath: string,
   statusPort: number,
-): { command: string; args: string[] } {
+): { command: string; args: string[]; argv0: string } {
   const entrypoint = entrypointPath();
   const runArgs = [
     'run',
@@ -443,12 +478,17 @@ function backgroundCommand(
     String(statusPort),
   ];
   if (entrypoint.endsWith('.ts')) {
-    return { command: 'bun', args: ['run', 'tsx', entrypoint, ...runArgs] };
+    return {
+      command: 'bun',
+      args: ['run', 'tsx', entrypoint, ...runArgs],
+      argv0: PROCESS_TITLE,
+    };
   }
-  return { command: process.execPath, args: [entrypoint, ...runArgs] };
+  return { command: process.execPath, args: [entrypoint, ...runArgs], argv0: PROCESS_TITLE };
 }
 
 async function runForeground(options: CliOptions): Promise<void> {
+  setProcessTitle(PROCESS_TITLE);
   const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
   const orchestrator = createDefaultOrchestrator(workflowPath);
@@ -462,9 +502,11 @@ async function runForeground(options: CliOptions): Promise<void> {
           query.cursor,
           query.limit,
           query.visible,
-        ),
+      ),
       queueSteer: (issue, text) => orchestrator.queueSteer(issue, text),
       resumeIssue: (issue) => orchestrator.resumeIssue(issue),
+      requestChanges: (issue, feedback) =>
+        orchestrator.requestChanges(issue, feedback),
       resumeRateLimitedRuns: async () => {
         const resumed = orchestrator.resumeParkedRateLimitedRuns();
         await orchestrator.tick();
@@ -642,6 +684,7 @@ function reexecInteractiveWatchWithBun(): boolean {
     [entrypointPath(), ...process.argv.slice(2)],
     {
       stdio: 'inherit',
+      argv0: PROCESS_TITLE,
       env: {
         ...process.env,
         SYMPHONY_BUN_REEXEC: '1',
@@ -653,6 +696,14 @@ function reexecInteractiveWatchWithBun(): boolean {
   }
   process.exitCode = result.status ?? 0;
   return true;
+}
+
+function setProcessTitle(title: string): void {
+  try {
+    process.title = title;
+  } catch {
+    // Some runtimes ignore process title changes.
+  }
 }
 
 function packageRoot(): string {

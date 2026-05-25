@@ -102,6 +102,7 @@ public enum AgentKind {
     case running
     case retry
     case parked
+    case review
     case completed
 }
 
@@ -109,6 +110,7 @@ public struct AgentInventory: Equatable {
     public let running: Int
     public let waiting: Int
     public let parked: Int
+    public let review: Int
     public let completed: Int
     public let active: Int
 
@@ -118,6 +120,7 @@ public struct AgentInventory: Equatable {
 public enum AgentSection {
     case running
     case waiting
+    case review
     case done
 }
 
@@ -176,7 +179,7 @@ public extension OrchestratorSnapshot {
                 title: detail?.title,
                 status: statusLabel(for: detail?.reviewKind, fallback: "review"),
                 detail: handoffDetail(detail),
-                kind: .completed,
+                kind: .review,
                 repoKey: detail?.repoKey,
                 prUrl: detail?.prUrl
             )
@@ -204,14 +207,16 @@ public extension OrchestratorSnapshot {
         let runningCount = rows.filter { $0.kind == .running }.count
         let parkedCount = rows.filter { $0.kind == .parked }.count
         let waitingCount = rows.filter { $0.kind == .retry }.count
+        let reviewCount = rows.filter { $0.kind == .review }.count
         let completedCount = rows.filter { $0.kind == .completed }.count
         let activeIdentifiers = Set(
-            rows.filter { $0.kind != .completed }.map(\.identifier)
+            rows.filter { $0.kind != .completed && $0.kind != .review }.map(\.identifier)
         )
         return AgentInventory(
             running: runningCount,
             waiting: waitingCount,
             parked: parkedCount,
+            review: reviewCount,
             completed: completedCount,
             active: activeIdentifiers.count
         )
@@ -224,6 +229,8 @@ public extension OrchestratorSnapshot {
                 return row.kind == .running
             case .waiting:
                 return row.kind == .retry || row.kind == .parked
+            case .review:
+                return row.kind == .review
             case .done:
                 return row.kind == .completed
             }

@@ -13,6 +13,7 @@ struct AgentRowView: View {
     let onOpenLogs: () -> Void
     let onRetry: () -> Void
     let onRequestCodexReview: () -> Void
+    let onRequestChanges: () -> Void
 
     var body: some View {
         Button(action: canOpenPullRequest ? onOpenPullRequest : openIssue) {
@@ -63,6 +64,9 @@ struct AgentRowView: View {
                 Button("Follow Logs") { onOpenLogs() }
                 Button("Retry Now") { onRetry() }
             }
+            if row.kind == .review {
+                Button("Request Changes") { onRequestChanges() }
+            }
         }
     }
 
@@ -71,6 +75,7 @@ struct AgentRowView: View {
         case .running: return .green
         case .retry: return .orange
         case .parked: return .yellow
+        case .review: return .purple
         case .completed: return .blue
         }
     }

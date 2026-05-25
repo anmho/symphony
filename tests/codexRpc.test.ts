@@ -213,6 +213,9 @@ function makeConfig(command: string): EffectiveWorkflowConfig {
       stallTimeoutMs: 300000,
       model: null
     },
+    github: {
+      prIdentity: null
+    },
     pullRequest: {
       backend: "github",
       graphiteFallback: "fail"
@@ -232,6 +235,7 @@ function makeIssue(identifier: string, title: string): NormalizedIssue {
     url: null,
     labels: [],
     comments: [],
+    attachments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null

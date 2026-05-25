@@ -35,6 +35,10 @@ public enum StatusControl {
         try await postControl(path: "steer", body: ["issue": issue, "text": text], port: port)
     }
 
+    public static func requestChanges(_ issue: String, feedback: String, port: Int) async throws -> RequestChangesResult {
+        try await postControl(path: "request-changes", body: ["issue": issue, "feedback": feedback], port: port)
+    }
+
     private static func postControl<T: Decodable>(
         path: String,
         body: [String: String],
@@ -98,4 +102,9 @@ public struct ResumeDispatchResult: Codable {
 public struct SteerResult: Codable {
     public let queued: Bool
     public let issue: String
+}
+
+public struct RequestChangesResult: Codable {
+    public let issue: String
+    public let state: String
 }

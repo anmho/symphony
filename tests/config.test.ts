@@ -29,6 +29,7 @@ Hello {{ issue.identifier }}
     expect(config.agent.maxConcurrentAgents).toBe(5);
     expect(config.codex.command).toBe("codex app-server --listen stdio://");
     expect(config.codex.threadSandbox).toBe("workspace-write");
+    expect(config.github.prIdentity).toBeNull();
     expect(config.pullRequest).toEqual({ backend: "github", graphiteFallback: "fail" });
     expect(config.workspace.repoPath).toBe(path.resolve("/tmp/symphony"));
     expect(config.promptTemplate).toContain("Hello");
@@ -186,5 +187,47 @@ Prompt
     const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
 
     expect(config.pullRequest).toEqual({ backend: "graphite", graphiteFallback: "github" });
+  });
+
+  it("parses GitHub machine-user PR identity config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+github:
+  pr_identity:
+    kind: machine_user
+    token_command: vault kv get -mount=secret -field=token prod/providers/github/symphony
+    author_name: Symphony
+    author_email: anmho-symphony@users.noreply.github.com
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.github.prIdentity).toEqual({
+      kind: "machine_user",
+      tokenCommand: "vault kv get -mount=secret -field=token prod/providers/github/symphony",
+      authorName: "Symphony",
+      authorEmail: "anmho-symphony@users.noreply.github.com"
+    });
+  });
+
+  it("rejects incomplete GitHub machine-user PR identity config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+github:
+  pr_identity:
+    kind: machine_user
+    token_command: vault kv get -mount=secret -field=token prod/providers/github/symphony
+    author_name: Symphony
+---
+Prompt
+`);
+
+    expect(() => resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition)).toThrow();
   });
 });
