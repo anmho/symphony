@@ -9,6 +9,9 @@ let resources = root.appendingPathComponent("Resources")
 let iconset = resources.appendingPathComponent("AppIcon.iconset")
 let output = resources.appendingPathComponent("AppIcon.icns")
 
+if FileManager.default.fileExists(atPath: iconset.path) {
+    try FileManager.default.removeItem(at: iconset)
+}
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 
 func drawIcon(size: CGFloat) -> NSImage {
@@ -16,43 +19,43 @@ func drawIcon(size: CGFloat) -> NSImage {
     image.lockFocus()
 
     let rect = NSRect(x: 0, y: 0, width: size, height: size)
-    let background = NSColor(calibratedRed: 0.08, green: 0.10, blue: 0.18, alpha: 1)
+    let background = NSColor(calibratedRed: 0.094, green: 0.125, blue: 0.122, alpha: 1)
     background.setFill()
     NSBezierPath(roundedRect: rect, xRadius: size * 0.18, yRadius: size * 0.18).fill()
 
-    let accent = NSColor(calibratedRed: 0.35, green: 0.72, blue: 1.0, alpha: 1)
-    accent.setStroke()
+    let lane = NSColor(calibratedRed: 0.91, green: 0.925, blue: 0.895, alpha: 1)
+    let accent = NSColor(calibratedRed: 0.624, green: 0.702, blue: 0.553, alpha: 1)
 
-    let wave = NSBezierPath()
-    wave.lineWidth = max(size * 0.05, 2)
-    wave.lineCapStyle = .round
-    let midY = size * 0.52
-    wave.move(to: NSPoint(x: size * 0.22, y: midY))
-    wave.curve(
-        to: NSPoint(x: size * 0.42, y: midY),
-        controlPoint1: NSPoint(x: size * 0.28, y: midY + size * 0.18),
-        controlPoint2: NSPoint(x: size * 0.36, y: midY - size * 0.18)
-    )
-    wave.curve(
-        to: NSPoint(x: size * 0.62, y: midY),
-        controlPoint1: NSPoint(x: size * 0.48, y: midY + size * 0.18),
-        controlPoint2: NSPoint(x: size * 0.56, y: midY - size * 0.18)
-    )
-    wave.curve(
-        to: NSPoint(x: size * 0.78, y: midY),
-        controlPoint1: NSPoint(x: size * 0.68, y: midY + size * 0.12),
-        controlPoint2: NSPoint(x: size * 0.74, y: midY - size * 0.12)
-    )
-    wave.stroke()
+    func drawLine(from start: NSPoint, to end: NSPoint, color: NSColor, width: CGFloat) {
+        color.setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = width
+        path.lineCapStyle = .round
+        path.move(to: start)
+        path.line(to: end)
+        path.stroke()
+    }
 
-  let note = NSBezierPath()
-    note.lineWidth = max(size * 0.045, 2)
-    note.move(to: NSPoint(x: size * 0.30, y: size * 0.30))
-    note.line(to: NSPoint(x: size * 0.30, y: size * 0.58))
-    note.line(to: NSPoint(x: size * 0.48, y: size * 0.52))
-    note.line(to: NSPoint(x: size * 0.48, y: size * 0.24))
-    note.stroke()
-    NSBezierPath(ovalIn: NSRect(x: size * 0.22, y: size * 0.22, width: size * 0.12, height: size * 0.10)).fill()
+    let laneWidth = max(size * 0.0625, 2)
+    let railWidth = max(size * 0.07, 2.25)
+    let left = size * 0.258
+    let midLeft = size * 0.32
+    let laneRight = size * 0.68
+    let railX = size * 0.742
+    let topY = size * 0.695
+    let midY = size * 0.5
+    let bottomY = size * 0.305
+
+    drawLine(from: NSPoint(x: left, y: topY), to: NSPoint(x: laneRight, y: topY), color: lane, width: laneWidth)
+    drawLine(from: NSPoint(x: midLeft, y: midY), to: NSPoint(x: laneRight + size * 0.062, y: midY), color: lane, width: laneWidth)
+    drawLine(from: NSPoint(x: left, y: bottomY), to: NSPoint(x: laneRight, y: bottomY), color: lane, width: laneWidth)
+    drawLine(from: NSPoint(x: railX, y: size * 0.242), to: NSPoint(x: railX, y: size * 0.758), color: accent, width: railWidth)
+
+    accent.setFill()
+    let nodeSize = max(size * 0.117, 4)
+    for y in [topY, midY, bottomY] {
+        NSBezierPath(ovalIn: NSRect(x: railX - nodeSize / 2, y: y - nodeSize / 2, width: nodeSize, height: nodeSize)).fill()
+    }
 
     image.unlockFocus()
     return image
@@ -87,14 +90,57 @@ for (size, name) in sizes {
     try writePNG(image, to: iconset.appendingPathComponent(name))
 }
 
+func appendUInt32BE(_ value: UInt32, to data: inout Data) {
+    var bigEndian = value.bigEndian
+    withUnsafeBytes(of: &bigEndian) { data.append(contentsOf: $0) }
+}
+
+func appendOSType(_ value: String, to data: inout Data) {
+    data.append(contentsOf: value.utf8)
+}
+
+func writeICNSFallback(from iconset: URL, to output: URL) throws {
+    let entries: [(type: String, name: String)] = [
+        ("ic11", "icon_16x16@2x.png"),
+        ("ic12", "icon_32x32@2x.png"),
+        ("ic07", "icon_128x128.png"),
+        ("ic08", "icon_256x256.png"),
+        ("ic09", "icon_512x512.png"),
+        ("ic10", "icon_512x512@2x.png"),
+        ("ic13", "icon_128x128@2x.png"),
+        ("ic14", "icon_256x256@2x.png")
+    ]
+
+    var chunks: [(type: String, data: Data)] = []
+    for entry in entries {
+        let png = try Data(contentsOf: iconset.appendingPathComponent(entry.name))
+        chunks.append((entry.type, png))
+    }
+
+    let totalLength = chunks.reduce(UInt32(8)) { total, chunk in
+        total + UInt32(8 + chunk.data.count)
+    }
+
+    var icns = Data()
+    appendOSType("icns", to: &icns)
+    appendUInt32BE(totalLength, to: &icns)
+    for chunk in chunks {
+        appendOSType(chunk.type, to: &icns)
+        appendUInt32BE(UInt32(8 + chunk.data.count), to: &icns)
+        icns.append(chunk.data)
+    }
+
+    try icns.write(to: output)
+}
+
 let task = Process()
 task.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 task.arguments = ["-c", "icns", iconset.path, "-o", output.path]
 try task.run()
 task.waitUntilExit()
-guard task.terminationStatus == 0 else {
-    fputs("iconutil failed\n", stderr)
-    exit(1)
+if task.terminationStatus != 0 {
+    fputs("iconutil failed; writing fallback icns container\n", stderr)
+    try writeICNSFallback(from: iconset, to: output)
 }
 
 try FileManager.default.removeItem(at: iconset)

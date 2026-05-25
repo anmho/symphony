@@ -1,5 +1,9 @@
 # Symphony
 
+<p>
+  <img src="./assets/brand/symphony-logo.svg" alt="Symphony logo" width="360">
+</p>
+
 [GitHub: anmho/symphony](https://github.com/anmho/symphony) · [npm: @anmho/symphony](https://www.npmjs.com/package/@anmho/symphony)
 
 Local TypeScript Symphony runner for Linear-driven Codex app-server work orchestration.
@@ -18,6 +22,7 @@ The default posture is high-trust local execution. Symphony is intended for repo
 
 - [Symphony smoke](docs/symphony-smoke.md)
 - [Release process](docs/release.md)
+- [Logo design note](docs/brand/logo-design-note.md)
 - [Linear issue templates for Symphony dispatch](templates/README.md)
 - [Symphony agent skill](https://github.com/anmho/skills/tree/main/skills/symphony)
 

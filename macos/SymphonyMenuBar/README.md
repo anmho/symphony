@@ -78,6 +78,9 @@ Regenerate the app icon:
 swift scripts/generate-icon.swift
 ```
 
+The icon geometry matches the repo-owned source vector in
+[`../../assets/brand/symphony-mark.svg`](../../assets/brand/symphony-mark.svg).
+
 ## Settings
 
 Gear icon in the status panel:

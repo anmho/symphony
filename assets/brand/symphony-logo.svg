@@ -1,0 +1,12 @@
+<svg width="720" height="192" viewBox="0 0 720 192" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Symphony logo</title>
+  <desc id="desc">Symphony wordmark paired with a compact orchestration mark.</desc>
+  <rect x="16" y="16" width="160" height="160" rx="28" fill="#18201F"/>
+  <path d="M57.25 64.75H124.75M67.25 96H134.75M57.25 127.25H124.75" stroke="#E8ECE4" stroke-width="10" stroke-linecap="round"/>
+  <path d="M135 54.75V137.25" stroke="#9FB38D" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="135" cy="64.75" r="9.5" fill="#9FB38D"/>
+  <circle cx="135" cy="96" r="9.5" fill="#9FB38D"/>
+  <circle cx="135" cy="127.25" r="9.5" fill="#9FB38D"/>
+  <text x="216" y="111" fill="#18201F" font-family="Avenir Next, Satoshi, Geist, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="650" letter-spacing="0">Symphony</text>
+  <text x="220" y="142" fill="#64706A" font-family="Geist Mono, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="500" letter-spacing="2.5">LOCAL AGENT ORCHESTRATION</text>
+</svg>
