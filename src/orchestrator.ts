@@ -23,6 +23,7 @@ import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
 import { fetchPullRequestStatus } from './github.js';
+import { resolvePrIdentity } from './prIdentity.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
@@ -103,7 +104,7 @@ export interface OrchestratorDependencies {
   ) => Promise<string>;
   runCodexTurn: (
     input: CodexRunInput,
-    options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void },
+    options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void; env?: NodeJS.ProcessEnv },
   ) => Promise<CodexTurnResult>;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -842,6 +843,24 @@ export class Orchestrator {
       const prompt = queuedSteer
         ? `${basePrompt}\n\n## Operator Guidance\n\n${queuedSteer.text}`
         : basePrompt;
+      const prIdentity = await resolvePrIdentity(config);
+      if (prIdentity) {
+        this.appendRunnerEvent(
+          entry,
+          `GitHub PR identity ready: ${prIdentity.login ?? config.github.prIdentity?.kind ?? 'configured'}`,
+          {
+            kind: config.github.prIdentity?.kind ?? null,
+            login: prIdentity.login,
+          },
+        );
+      }
+      const codexOptions: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void; env?: NodeJS.ProcessEnv } = {
+        signal: entry.abortController.signal,
+        onEvent: (event) => this.recordCodexEvent(entry, event),
+      };
+      if (prIdentity) {
+        codexOptions.env = prIdentity.env;
+      }
       const result = await this.deps.runCodexTurn(
         {
           config,
@@ -850,10 +869,7 @@ export class Orchestrator {
           prompt,
           threadId,
         },
-        {
-          signal: entry.abortController.signal,
-          onEvent: (event) => this.recordCodexEvent(entry, event),
-        },
+        codexOptions,
       );
 
       threadId = result.threadId;

@@ -136,11 +136,11 @@ export function buildPrHandoffInstructions(
     return [
       "## PR Handoff Backend",
       "",
-      "Use the default GitHub PR flow for handoff.",
-      identityInstructions,
-      "Push the current branch, open or update the PR with GitHub tooling, keep the Linear and Graphite links in the PR body, and verify the PR author/head/base/body with `gh pr view --json url,author,baseRefName,headRefName,body` before leaving the handoff.",
-      issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
-      "Graphite: after the PR exists, add `https://app.graphite.dev/github/pr/<owner>/<repo>/<number>` to the PR body."
+    "Use the default GitHub PR flow for handoff.",
+    identityInstructions,
+    "Push the current branch, open or update the PR with GitHub tooling or the GitHub REST API, keep the Linear and Graphite links in the PR body, and verify the PR author/head/base/body with `gh pr view --json url,author,baseRefName,headRefName,body` before leaving the handoff.",
+    issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
+    "Graphite: after the PR exists, add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
     ].join("\n");
   }
 
@@ -163,7 +163,7 @@ export function buildPrHandoffInstructions(
     "After submit, verify the resulting GitHub PR metadata with `gh pr view --json url,author,baseRefName,headRefName,body`.",
     "The PR head must match the current branch, the PR base must match the expected parent stack branch, and the PR body must include the Linear and Graphite links.",
     issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
-    "Graphite: add `https://app.graphite.dev/github/pr/<owner>/<repo>/<number>` to the PR body."
+    "Graphite: add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
   ].filter(Boolean).join("\n");
 }
 
@@ -215,10 +215,20 @@ function buildIdentityInstructions(identity: GithubPrIdentityConfig | null): str
   if (!identity) {
     return "Use the currently authenticated local GitHub identity.";
   }
+  if (identity.kind === "github_app") {
+    return [
+      "Use the configured GitHub App PR identity for handoff commands, not the default local GitHub user.",
+      `Immediately before pushing or creating/updating the PR, mint a fresh installation token from the app private key command: \`${identity.privateKeyCommand}\`.`,
+      "GitHub App installation tokens expire. If `SYMPHONY_GITHUB_TOKEN_EXPIRES_AT` is present and still in the future, the injected `GH_TOKEN`/`GITHUB_TOKEN` is valid for handoff; otherwise mint a fresh token before PR handoff.",
+      "Use the installation token only in-process as `GH_TOKEN` and `GITHUB_TOKEN` for GitHub API calls and as the authenticated `x-access-token` HTTPS push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
+      "Create or update the PR through the GitHub REST API or `gh` with `GH_TOKEN` so the PR is authored by the app bot identity.",
+      `Use Git author and committer identity: ${identity.authorName} <${identity.authorEmail}>.`
+    ].join("\n");
+  }
   return [
     "Use the configured GitHub machine-user PR identity for handoff commands, not the default local GitHub user.",
     `Before PR handoff, resolve the token with: \`${identity.tokenCommand}\`.`,
-    "Use that token only in-process as `GH_TOKEN` for `gh` commands and for the authenticated push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
+    "Use that token only in-process as `GH_TOKEN` and `GITHUB_TOKEN` for `gh` commands and for the authenticated push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
     `Use Git author and committer identity: ${identity.authorName} <${identity.authorEmail}>.`
   ].join("\n");
 }

@@ -90,12 +90,25 @@ export interface PullRequestConfig {
   graphiteFallback: GraphiteFallback;
 }
 
-export interface GithubPrIdentityConfig {
+export interface GithubMachineUserPrIdentityConfig {
   kind: 'machine_user';
   tokenCommand: string;
   authorName: string;
   authorEmail: string;
 }
+
+export interface GithubAppPrIdentityConfig {
+  kind: 'github_app';
+  appId: string;
+  installationId: string;
+  privateKeyCommand: string;
+  appSlug: string | null;
+  authorName: string;
+  authorEmail: string;
+  apiBaseUrl: string;
+}
+
+export type GithubPrIdentityConfig = GithubMachineUserPrIdentityConfig | GithubAppPrIdentityConfig;
 
 export interface GithubConfig {
   prIdentity: GithubPrIdentityConfig | null;

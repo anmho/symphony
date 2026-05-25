@@ -92,14 +92,24 @@ const RawWorkflowConfigSchema = z
       .optional(),
     github: z
       .object({
-        pr_identity: z
-          .object({
+        pr_identity: z.discriminatedUnion("kind", [
+          z.object({
             kind: z.literal("machine_user"),
             token_command: z.string().min(1),
             author_name: z.string().min(1),
             author_email: z.string().min(1)
+          }),
+          z.object({
+            kind: z.literal("github_app"),
+            app_id: z.union([z.string().min(1), z.number().int().positive()]),
+            installation_id: z.union([z.string().min(1), z.number().int().positive()]),
+            private_key_command: z.string().min(1),
+            app_slug: z.string().min(1).optional(),
+            author_name: z.string().min(1),
+            author_email: z.string().min(1),
+            api_base_url: z.string().url().optional()
           })
-          .optional()
+        ]).optional()
       })
       .optional(),
     pull_request: z
@@ -282,12 +292,23 @@ export function resolveWorkflowConfig(
     },
     github: {
       prIdentity: github.pr_identity
-        ? {
-            kind: github.pr_identity.kind,
-            tokenCommand: github.pr_identity.token_command,
-            authorName: github.pr_identity.author_name,
-            authorEmail: github.pr_identity.author_email
-          }
+        ? github.pr_identity.kind === "machine_user"
+          ? {
+              kind: github.pr_identity.kind,
+              tokenCommand: github.pr_identity.token_command,
+              authorName: github.pr_identity.author_name,
+              authorEmail: github.pr_identity.author_email
+            }
+          : {
+              kind: github.pr_identity.kind,
+              appId: resolveRequiredEnvLikeValue(String(github.pr_identity.app_id), "github_pr_identity_app_id", userConfig),
+              installationId: resolveRequiredEnvLikeValue(String(github.pr_identity.installation_id), "github_pr_identity_installation_id", userConfig),
+              privateKeyCommand: github.pr_identity.private_key_command,
+              appSlug: github.pr_identity.app_slug ?? null,
+              authorName: github.pr_identity.author_name,
+              authorEmail: github.pr_identity.author_email,
+              apiBaseUrl: github.pr_identity.api_base_url ?? "https://api.github.com"
+            }
         : null
     },
     pullRequest: {
@@ -347,6 +368,14 @@ function resolveEnvValue(value: string, userConfig: SymphonyUserConfig): string 
     return resolveConfiguredValue(key, userConfig) ?? "";
   }
   return value;
+}
+
+function resolveRequiredEnvLikeValue(value: string, label: string, userConfig: SymphonyUserConfig): string {
+  const resolved = resolveEnvValue(value, userConfig).trim();
+  if (!resolved) {
+    throw new Error(`missing_${label}`);
+  }
+  return resolved;
 }
 
 function resolvePath(value: string, baseDir: string, userConfig: SymphonyUserConfig): string {

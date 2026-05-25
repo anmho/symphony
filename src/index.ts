@@ -230,7 +230,7 @@ doctor
 
 doctor
   .command('github-pr-identity')
-  .description('Verify the configured GitHub machine-user PR identity.')
+  .description('Verify the configured GitHub PR identity.')
   .action(async () => {
     const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
     const config = await loadWorkflowConfig(workflowPath);

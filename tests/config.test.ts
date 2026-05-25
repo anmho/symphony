@@ -214,6 +214,62 @@ Prompt
     });
   });
 
+  it("parses GitHub App PR identity config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("SYMPHONY_GITHUB_APP_ID", "123");
+    vi.stubEnv("SYMPHONY_GITHUB_APP_INSTALLATION_ID", "456");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+github:
+  pr_identity:
+    kind: github_app
+    app_id: $SYMPHONY_GITHUB_APP_ID
+    installation_id: $SYMPHONY_GITHUB_APP_INSTALLATION_ID
+    private_key_command: vault kv get -mount=secret -field=private_key prod/providers/github/symphony
+    app_slug: symphony
+    author_name: Symphony
+    author_email: symphony[bot]@users.noreply.github.com
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.github.prIdentity).toEqual({
+      kind: "github_app",
+      appId: "123",
+      installationId: "456",
+      privateKeyCommand: "vault kv get -mount=secret -field=private_key prod/providers/github/symphony",
+      appSlug: "symphony",
+      authorName: "Symphony",
+      authorEmail: "symphony[bot]@users.noreply.github.com",
+      apiBaseUrl: "https://api.github.com"
+    });
+  });
+
+  it("rejects unresolved GitHub App PR identity placeholders", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+github:
+  pr_identity:
+    kind: github_app
+    app_id: $SYMPHONY_GITHUB_APP_ID
+    installation_id: $SYMPHONY_GITHUB_APP_INSTALLATION_ID
+    private_key_command: vault kv get -mount=secret -field=private_key prod/providers/github/symphony
+    author_name: Symphony
+    author_email: symphony[bot]@users.noreply.github.com
+---
+Prompt
+`);
+
+    expect(() => resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition)).toThrow(
+      "missing_github_pr_identity_app_id"
+    );
+  });
+
   it("rejects incomplete GitHub machine-user PR identity config", () => {
     vi.stubEnv("LINEAR_API_KEY", "lin_test");
     const definition = parseWorkflowMarkdown(`---

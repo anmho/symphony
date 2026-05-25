@@ -1,4 +1,5 @@
 import { runShellCommand, type CommandResult } from './process.js';
+import { createSign } from 'node:crypto';
 import type { EffectiveWorkflowConfig, GithubPrIdentityConfig } from './types.js';
 
 export type IdentityCommandRunner = (
@@ -9,8 +10,11 @@ export type IdentityCommandRunner = (
 export interface ResolvedPrIdentity {
   login: string | null;
   token: string;
+  expiresAt: string | null;
   env: NodeJS.ProcessEnv;
 }
+
+export type IdentityFetch = typeof fetch;
 
 export function hasPrIdentity(config: Pick<EffectiveWorkflowConfig, 'github'>): boolean {
   return config.github.prIdentity !== null;
@@ -19,10 +23,14 @@ export function hasPrIdentity(config: Pick<EffectiveWorkflowConfig, 'github'>): 
 export async function resolvePrIdentity(
   config: Pick<EffectiveWorkflowConfig, 'github'>,
   runner: IdentityCommandRunner = runShellCommand,
+  fetcher: IdentityFetch = fetch,
 ): Promise<ResolvedPrIdentity | null> {
   const identity = config.github.prIdentity;
   if (!identity) {
     return null;
+  }
+  if (identity.kind === 'github_app') {
+    return resolveGithubAppIdentity(identity, runner, fetcher);
   }
   const result = await runner(identity.tokenCommand, { timeoutMs: 30000 });
   if (result.exitCode !== 0) {
@@ -37,6 +45,7 @@ export async function resolvePrIdentity(
   return {
     login: null,
     token,
+    expiresAt: null,
     env: prIdentityEnv(identity, token),
   };
 }
@@ -44,15 +53,21 @@ export async function resolvePrIdentity(
 export async function diagnosePrIdentity(
   config: Pick<EffectiveWorkflowConfig, 'github' | 'workspace'>,
   runner: IdentityCommandRunner = runShellCommand,
+  fetcher: IdentityFetch = fetch,
 ): Promise<string[]> {
   if (!config.github.prIdentity) {
     return ['GitHub PR identity is not configured.'];
   }
-  const resolved = await resolvePrIdentity(config, runner);
+  const resolved = await resolvePrIdentity(config, runner, fetcher);
   if (!resolved) {
     return ['GitHub PR identity is not configured.'];
   }
-  const user = await runner('gh api user --jq .login', {
+  const identity = config.github.prIdentity;
+  const authProbe =
+    identity?.kind === 'github_app'
+      ? 'gh api installation/repositories --jq .total_count'
+      : 'gh api user --jq .login';
+  const user = await runner(authProbe, {
     env: resolved.env,
     timeoutMs: 30000,
   });
@@ -61,11 +76,28 @@ export async function diagnosePrIdentity(
       `github_pr_identity_auth_failed: ${redactSecretLikeText(user.stderr || user.stdout)}`,
     );
   }
-  const login = user.stdout.trim();
-  const lines = [`GitHub PR identity authenticated as ${login}.`];
+  const login = identity?.kind === 'github_app'
+    ? (identity.appSlug ? `${identity.appSlug}[bot]` : 'configured GitHub App installation')
+    : user.stdout.trim();
+  const lines = identity?.kind === 'github_app'
+    ? [`GitHub PR identity authenticated as ${login}; installation repositories visible: ${user.stdout.trim()}.`]
+    : [`GitHub PR identity authenticated as ${login}.`];
   for (const repoPath of Object.values(config.workspace.repoRoutes)) {
     const repo = await gitHubRepoFromRemote(repoPath, runner, resolved.env);
     if (!repo) {
+      continue;
+    }
+    if (identity?.kind === 'github_app') {
+      const visibility = await runner(`gh api repos/${repo} --jq .full_name`, {
+        env: resolved.env,
+        timeoutMs: 30000,
+      });
+      if (visibility.exitCode !== 0) {
+        throw new Error(
+          `github_pr_identity_repo_access_failed: ${repo}: ${redactSecretLikeText(visibility.stderr || visibility.stdout)}`,
+        );
+      }
+      lines.push(`Repo ${repo} installation access: ${visibility.stdout.trim() === repo}.`);
       continue;
     }
     const access = await runner(`gh api repos/${repo} --jq .permissions.push`, {
@@ -86,15 +118,87 @@ export function prIdentityEnv(
   identity: GithubPrIdentityConfig,
   token: string,
   baseEnv: NodeJS.ProcessEnv = process.env,
+  expiresAt: string | null = null,
 ): NodeJS.ProcessEnv {
   return {
     ...baseEnv,
     GH_TOKEN: token,
+    GITHUB_TOKEN: token,
+    ...(expiresAt ? { SYMPHONY_GITHUB_TOKEN_EXPIRES_AT: expiresAt } : {}),
     GIT_AUTHOR_NAME: identity.authorName,
     GIT_AUTHOR_EMAIL: identity.authorEmail,
     GIT_COMMITTER_NAME: identity.authorName,
     GIT_COMMITTER_EMAIL: identity.authorEmail,
   };
+}
+
+async function resolveGithubAppIdentity(
+  identity: Extract<GithubPrIdentityConfig, { kind: 'github_app' }>,
+  runner: IdentityCommandRunner,
+  fetcher: IdentityFetch,
+): Promise<ResolvedPrIdentity> {
+  const result = await runner(identity.privateKeyCommand, { timeoutMs: 30000 });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `github_pr_identity_private_key_command_failed: ${redactSecretLikeText(result.stderr || result.stdout)}`,
+    );
+  }
+  const privateKey = normalizePrivateKey(result.stdout);
+  if (!privateKey) {
+    throw new Error('github_pr_identity_private_key_empty');
+  }
+  const jwt = createGithubAppJwt(identity.appId, privateKey);
+  const response = await fetcher(
+    `${identity.apiBaseUrl.replace(/\/$/, '')}/app/installations/${identity.installationId}/access_tokens`,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/vnd.github+json',
+        authorization: `Bearer ${jwt}`,
+        'x-github-api-version': '2022-11-28',
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `github_pr_identity_installation_token_failed: ${response.status} ${redactSecretLikeText(await response.text())}`,
+    );
+  }
+  const parsed = await response.json() as { token?: unknown; expires_at?: unknown };
+  const token = typeof parsed.token === 'string' ? parsed.token.trim() : '';
+  if (!token) {
+    throw new Error('github_pr_identity_installation_token_empty');
+  }
+  const expiresAt = typeof parsed.expires_at === 'string' && parsed.expires_at.trim()
+    ? parsed.expires_at.trim()
+    : null;
+  return {
+    login: identity.appSlug ? `${identity.appSlug}[bot]` : null,
+    token,
+    expiresAt,
+    env: prIdentityEnv(identity, token, process.env, expiresAt),
+  };
+}
+
+function createGithubAppJwt(appId: string, privateKey: string, nowMs = Date.now()): string {
+  const issuedAt = Math.floor(nowMs / 1000) - 60;
+  const expiresAt = issuedAt + 540;
+  const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const payload = base64Url(JSON.stringify({ iat: issuedAt, exp: expiresAt, iss: appId }));
+  const unsigned = `${header}.${payload}`;
+  const signer = createSign('RSA-SHA256');
+  signer.update(unsigned);
+  signer.end();
+  const signature = signer.sign(privateKey);
+  return `${unsigned}.${base64Url(signature)}`;
+}
+
+function normalizePrivateKey(value: string): string {
+  return value.trim().replace(/\\n/g, '\n');
+}
+
+function base64Url(value: string | Buffer): string {
+  return Buffer.from(value).toString('base64url');
 }
 
 export function githubTokenRemoteUrl(input: {

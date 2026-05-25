@@ -61,8 +61,9 @@ agent:
 codex:
   command: codex app-server --listen stdio://
   approval_policy: never
-  thread_sandbox: workspace-write
+  thread_sandbox: danger-full-access
   turn_sandbox_policy:
+    type: dangerFullAccess
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 300000
@@ -72,6 +73,16 @@ pull_request:
   backend: github
   graphite:
     fallback: fail
+
+github:
+  pr_identity:
+    kind: github_app
+    app_id: $SYMPHONY_GITHUB_APP_ID
+    installation_id: $SYMPHONY_GITHUB_APP_INSTALLATION_ID
+    private_key_command: vault kv get -mount=secret -field=private_key prod/providers/github/symphony
+    app_slug: a-m-house-symphony
+    author_name: A&M House Symphony
+    author_email: 3862765+a-m-house-symphony[bot]@users.noreply.github.com
 ---
 You are Symphony working on Linear issue {{ issue.identifier }}: {{ issue.title }}.
 

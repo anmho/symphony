@@ -56,6 +56,22 @@ describe("codex app-server RPC", () => {
     expect(result.status).toBe("completed");
     expect(result.turnId).toBe("turn-1");
   });
+
+  it("passes configured environment to the app-server subprocess", async () => {
+    const envLogPath = path.join(await mkdtemp(path.join(os.tmpdir(), "symphony-fake-env-")), "env.txt");
+    const { command, workspacePath } = await createFakeAppServer({ envLogPath });
+    const issue = makeIssue("ANM-126", "Use GitHub App identity");
+
+    await runCodexTurn(makeInput({ command, issue, threadId: null, workspacePath }), {
+      env: {
+        ...process.env,
+        GH_TOKEN: "ghs_installation_token",
+        GIT_AUTHOR_NAME: "Symphony",
+      },
+    });
+
+    expect(await readFile(envLogPath, "utf8")).toBe("ghs_installation_token\nSymphony\n");
+  });
 });
 
 interface RecordedRequest {
@@ -64,7 +80,7 @@ interface RecordedRequest {
 }
 
 async function createFakeAppServer(
-  options: { completedTurnId?: string } = {}
+  options: { completedTurnId?: string; envLogPath?: string } = {}
 ): Promise<{ command: string; requestLogPath: string; workspacePath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-fake-app-server-"));
   const serverPath = path.join(dir, "server.mjs");
@@ -72,8 +88,11 @@ async function createFakeAppServer(
   const workspacePath = path.join(dir, "workspace");
   await mkdir(workspacePath);
   await writeFile(serverPath, fakeAppServerSource(options));
+  const envPrefix = options.envLogPath
+    ? `SYMPHONY_FAKE_ENV_LOG=${shellQuote(options.envLogPath)} `
+    : "";
   return {
-    command: `SYMPHONY_FAKE_REQUEST_LOG=${shellQuote(requestLogPath)} node ${shellQuote(serverPath)}`,
+    command: `${envPrefix}SYMPHONY_FAKE_REQUEST_LOG=${shellQuote(requestLogPath)} node ${shellQuote(serverPath)}`,
     requestLogPath,
     workspacePath
   };
@@ -83,8 +102,9 @@ async function readRequests(requestLogPath: string): Promise<RecordedRequest[]> 
   return JSON.parse(await readFile(requestLogPath, "utf8")) as RecordedRequest[];
 }
 
-function fakeAppServerSource(options: { completedTurnId?: string }): string {
+function fakeAppServerSource(options: { completedTurnId?: string; envLogPath?: string }): string {
   const completedTurnId = JSON.stringify(options.completedTurnId ?? "turn-1");
+  const envLogEnabled = JSON.stringify(Boolean(options.envLogPath));
   return `
 import { writeFileSync } from "node:fs";
 import readline from "node:readline";
@@ -92,6 +112,9 @@ import readline from "node:readline";
 const requestLogPath = process.env.SYMPHONY_FAKE_REQUEST_LOG;
 if (!requestLogPath) {
   throw new Error("missing SYMPHONY_FAKE_REQUEST_LOG");
+}
+if (${envLogEnabled}) {
+  writeFileSync(process.env.SYMPHONY_FAKE_ENV_LOG, (process.env.GH_TOKEN ?? "") + "\\n" + (process.env.GIT_AUTHOR_NAME ?? "") + "\\n");
 }
 const requests = [];
 

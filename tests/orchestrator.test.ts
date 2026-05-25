@@ -883,6 +883,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
       _options: {
         signal: AbortSignal;
         onEvent: (event: CodexRunEvent) => void;
+        env?: NodeJS.ProcessEnv;
       },
     ) => completedTurn('thread', 'turn'),
     now: () => 1000,

@@ -24,19 +24,7 @@ public struct SymphonyCLIResult {
 
 public enum SymphonyCLI {
     public static func isAvailable() -> Bool {
-        let task = Process()
-        let pipe = Pipe()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["sh", "-lc", "command -v symphony"]
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-            task.waitUntilExit()
-            return task.terminationStatus == 0
-        } catch {
-            return false
-        }
+        executableURL() != nil
     }
 
     @discardableResult
@@ -54,13 +42,13 @@ public enum SymphonyCLI {
     }
 
     private static func launch(_ arguments: [String], statusPort: Int, wait: Bool) throws -> Process {
-        guard isAvailable() else {
+        guard let executable = executableURL() else {
             throw SymphonyCLIError.notOnPath
         }
 
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["symphony"] + arguments + ["--status-port", String(statusPort)]
+        task.executableURL = executable
+        task.arguments = arguments + ["--status-port", String(statusPort)]
         if wait {
             let pipe = Pipe()
             task.standardOutput = pipe
@@ -74,6 +62,33 @@ public enum SymphonyCLI {
             task.waitUntilExit()
         }
         return task
+    }
+
+    static func executableURL(fileManager: FileManager = .default) -> URL? {
+        let home = fileManager.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "\(home)/.bun/bin/symphony",
+            "\(home)/.local/bin/symphony",
+            "/opt/homebrew/bin/symphony",
+            "/usr/local/bin/symphony"
+        ] + nvmCandidates(home: home, fileManager: fileManager)
+
+        return candidates
+            .map(URL.init(fileURLWithPath:))
+            .first { fileManager.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func nvmCandidates(home: String, fileManager: FileManager) -> [String] {
+        let versionsURL = URL(fileURLWithPath: "\(home)/.nvm/versions/node")
+        let versions = (try? fileManager.contentsOfDirectory(
+            at: versionsURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        return versions
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
+            .map { $0.appendingPathComponent("bin/symphony").path }
     }
 
     private static func readPipe(_ pipe: Pipe?) -> String {
