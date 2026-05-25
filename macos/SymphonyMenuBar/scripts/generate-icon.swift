@@ -21,30 +21,23 @@ func drawIcon(size: CGFloat) -> NSImage {
     let rect = NSRect(x: 0, y: 0, width: size, height: size)
     let background = NSColor(calibratedRed: 0.094, green: 0.125, blue: 0.122, alpha: 1)
     background.setFill()
-    NSBezierPath(roundedRect: rect, xRadius: size * 0.172, yRadius: size * 0.172).fill()
+    NSBezierPath(roundedRect: rect, xRadius: size * 0.164, yRadius: size * 0.164).fill()
 
-    let ring = NSColor(calibratedRed: 0.91, green: 0.925, blue: 0.895, alpha: 0.14)
+    let ring = NSColor(calibratedRed: 0.91, green: 0.925, blue: 0.895, alpha: 0.17)
     let point = NSColor(calibratedRed: 0.482, green: 0.561, blue: 0.639, alpha: 1)
 
+    func rectOnGrid(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat) -> NSRect {
+        NSRect(x: size * x, y: size * y, width: size * w, height: size * h)
+    }
+
     ring.setStroke()
-    let orbit = NSBezierPath(ovalIn: NSRect(
-        x: size * 0.156,
-        y: size * 0.156,
-        width: size * 0.688,
-        height: size * 0.688
-    ))
-    orbit.lineWidth = max(size * 0.0078, 1)
+    let orbit = NSBezierPath(ovalIn: rectOnGrid(x: 48 / 256, y: 48 / 256, w: 160 / 256, h: 160 / 256))
+    orbit.lineWidth = max(size * (1.5 / 256), 1)
     orbit.stroke()
 
-    let pointRadius = size * 0.1015
-    let pointCenter = NSPoint(x: size * 0.523, y: size * 0.523)
+    let pointRect = rectOnGrid(x: 112 / 256, y: 112 / 256, w: 48 / 256, h: 48 / 256)
     point.setFill()
-    NSBezierPath(ovalIn: NSRect(
-        x: pointCenter.x - pointRadius,
-        y: pointCenter.y - pointRadius,
-        width: pointRadius * 2,
-        height: pointRadius * 2
-    )).fill()
+    NSBezierPath(ovalIn: pointRect).fill()
 
     image.unlockFocus()
     return image

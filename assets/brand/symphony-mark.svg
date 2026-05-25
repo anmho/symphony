@@ -1,7 +1,7 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony mark</title>
-  <desc id="desc">A restrained point-and-orbit mark: one accent dot with a thin circular field on charcoal.</desc>
-  <rect width="256" height="256" rx="44" fill="#18201F"/>
-  <circle cx="128" cy="128" r="88" stroke="#E8ECE4" stroke-opacity="0.14" stroke-width="2"/>
-  <circle cx="134" cy="122" r="26" fill="#7B8FA3"/>
+  <desc id="desc">Point-and-orbit mark on an 8px grid: centered field, ring at r=80, accent point on a 45-degree optical shift.</desc>
+  <rect width="256" height="256" rx="42" fill="#18201F"/>
+  <circle cx="128" cy="128" r="80" stroke="#E8ECE4" stroke-opacity="0.17" stroke-width="1.5"/>
+  <circle cx="136" cy="120" r="24" fill="#7B8FA3"/>
 </svg>

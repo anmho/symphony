@@ -5,9 +5,10 @@
 **Emotive point** — inspired by restrained research-tool identity (single dot, circular
 field, open space), not OpenAI branding and not generic AI chrome.
 
-- **Primary motif:** one muted blue-gray point (`#7B8FA3`), slightly off-center for
-  humanized precision.
-- **Secondary motif:** thin circular orbit at low contrast (`#E8ECE4` @ 14% opacity).
+- **Primary motif:** one muted blue-gray point (`#7B8FA3`), r=24 on the 256 grid.
+- **Secondary motif:** centered orbit ring (r=80, 1.5px stroke @ 17% opacity).
+- **Layout:** 8px grid — ring centered at (128,128); point at (136,120), an 8px
+  diagonal shift (45°) so the accent reads deliberate, not accidental.
 - **Surface:** Control Charcoal (`#18201F`) with generous negative space.
 - **Posture:** Symphony mark first; no third-party logos or endorsement cues.
 

@@ -1,9 +1,9 @@
 <svg width="720" height="192" viewBox="0 0 720 192" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Symphony logo</title>
-  <desc id="desc">Symphony wordmark with a compact point-and-orbit mark.</desc>
-  <rect x="16" y="16" width="160" height="160" rx="28" fill="#18201F"/>
-  <circle cx="96" cy="96" r="55" stroke="#E8ECE4" stroke-opacity="0.14" stroke-width="1.25"/>
-  <circle cx="100" cy="92" r="16.25" fill="#7B8FA3"/>
+  <desc id="desc">Symphony wordmark with the point-and-orbit mark scaled from the 256 grid.</desc>
+  <rect x="16" y="16" width="160" height="160" rx="26.25" fill="#18201F"/>
+  <circle cx="96" cy="96" r="50" stroke="#E8ECE4" stroke-opacity="0.17" stroke-width="0.9375"/>
+  <circle cx="101" cy="91" r="15" fill="#7B8FA3"/>
   <text x="216" y="111" fill="#18201F" font-family="Avenir Next, Satoshi, Geist, Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="650" letter-spacing="0">Symphony</text>
   <text x="220" y="142" fill="#64706A" font-family="Geist Mono, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="500" letter-spacing="2.5">LOCAL AGENT ORCHESTRATION</text>
 </svg>
