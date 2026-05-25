@@ -22,6 +22,7 @@ describe("cli", () => {
     expect(result.stdout).toContain("steer");
     expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("validate-config");
+    expect(result.stdout).toContain("doctor");
     expect(result.stdout).toContain("ticket");
   });
 

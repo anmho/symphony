@@ -40,6 +40,10 @@ import {
   diagnoseDispatchIssues,
   renderDispatchDoctorReport,
 } from './doctor.js';
+import {
+  DEFAULT_CODEX_APP_SERVER_COMMAND,
+  runCodexAppServerSmoke,
+} from './codexAppServerSmoke.js';
 
 interface CliOptions {
   workflow?: string;
@@ -124,6 +128,61 @@ labels
       console.log(`Created Linear label ${label}`);
     }
   });
+
+const doctor = program
+  .command('doctor')
+  .description('Run local Symphony diagnostics.')
+  .option('--json', 'print JSON diagnostics')
+  .action(async (options: { json?: boolean }) => {
+    const cliOptions = program.opts<CliOptions>();
+    const workflowPath = await resolveWorkflowPath(cliOptions.workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const status = await fetchDaemonStatus(readStatusPort(cliOptions));
+    const diagnostics = diagnoseDispatchIssues(
+      await fetchRelevantIssues(config),
+      config,
+      {
+        nowMs: Date.now(),
+        codexRateLimit: status?.codexRateLimit ?? null,
+        runningCount: status?.running.length ?? 0,
+        runningIssueIds: new Set(
+          status?.running.map((session) => session.issueId) ?? [],
+        ),
+      },
+    );
+    if (options.json) {
+      console.log(JSON.stringify({ diagnostics }, null, 2));
+      return;
+    }
+    console.log(renderDispatchDoctorReport(diagnostics));
+  });
+
+doctor
+  .command('codex-app-server')
+  .description('Smoke test Codex app-server file edits, command execution, and event capture.')
+  .option('--command <command>', 'Codex app-server command to run', DEFAULT_CODEX_APP_SERVER_COMMAND)
+  .option('--timeout-ms <ms>', 'smoke turn timeout in milliseconds', '120000')
+  .option('--keep-temp', 'keep the temporary smoke workspace for inspection')
+  .action(
+    async (options: {
+      command: string;
+      timeoutMs: string;
+      keepTemp?: boolean;
+    }) => {
+      const result = await runCodexAppServerSmoke({
+        command: options.command,
+        timeoutMs: readPositiveInteger(options.timeoutMs, 'timeout_ms'),
+        keepTemp: options.keepTemp === true,
+      });
+      console.log('Codex app-server smoke passed.');
+      console.log(`Command/tool events: ${result.commandOrToolEventCount}`);
+      if (result.cleanedUp) {
+        console.log('Temporary workspace cleaned up.');
+      } else {
+        console.log(`Temporary workspace kept: ${result.workspacePath}`);
+      }
+    },
+  );
 
 program
   .command('status')
@@ -212,34 +271,6 @@ program
     console.log(
       `Resumed ${result.resumed} rate-limited run${result.resumed === 1 ? '' : 's'}.`,
     );
-  });
-
-program
-  .command('doctor')
-  .description('Explain why currently relevant Linear issues are not dispatching.')
-  .option('--json', 'print JSON diagnostics')
-  .action(async (options: { json?: boolean }) => {
-    const cliOptions = program.opts<CliOptions>();
-    const workflowPath = await resolveWorkflowPath(cliOptions.workflow);
-    const config = await loadWorkflowConfig(workflowPath);
-    const status = await fetchDaemonStatus(readStatusPort(cliOptions));
-    const diagnostics = diagnoseDispatchIssues(
-      await fetchRelevantIssues(config),
-      config,
-      {
-        nowMs: Date.now(),
-        codexRateLimit: status?.codexRateLimit ?? null,
-        runningCount: status?.running.length ?? 0,
-        runningIssueIds: new Set(
-          status?.running.map((session) => session.issueId) ?? [],
-        ),
-      },
-    );
-    if (options.json) {
-      console.log(JSON.stringify({ diagnostics }, null, 2));
-      return;
-    }
-    console.log(renderDispatchDoctorReport(diagnostics));
   });
 
 program
@@ -338,7 +369,9 @@ ticketTemplate
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
-  logger.error({ error }, 'symphony command failed');
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${message}\n`);
+  logger.error({ err: error, errorMessage: message }, 'symphony command failed');
   process.exitCode = 1;
 });
 
