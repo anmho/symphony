@@ -355,6 +355,8 @@ struct SymphonyPanelView: View {
                             service.openLogs(for: row.identifier)
                         } onRetry: {
                             service.resumeIssue(row.identifier)
+                        } onRequestCodexReview: {
+                            service.requestCodexReview(row.identifier, prUrl: row.prUrl)
                         }
                     }
                 }

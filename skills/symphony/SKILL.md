@@ -142,6 +142,24 @@ symphony stop
 
 Worktrees: `.symphony/workspaces/<repo-key>/<issue-id>`. Event logs: `.symphony/events/`.
 
+## Request Codex PR Review
+
+Use manual review requests instead of a background auto-review job. For a Symphony issue in `In Review`, request a Codex GitHub PR review from the CLI:
+
+```bash
+symphony review request ANM-123 --workflow WORKFLOW.md
+```
+
+This posts `@codex review` on the linked GitHub PR and writes a Linear comment so Symphony state shows that AI review was requested. If the PR URL is not present in the Linear handoff yet, pass it explicitly:
+
+```bash
+symphony review request ANM-123 \
+  --workflow WORKFLOW.md \
+  --pr https://github.com/anmho/symphony/pull/41
+```
+
+In the macOS menu bar app, use the PR row context menu action **Request Codex Review** for the same flow.
+
 ## Agent execution expectations
 
 When Symphony (or you simulating an AFK run) works an issue:
