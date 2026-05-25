@@ -174,6 +174,17 @@ final class StatusService: ObservableObject {
         }
     }
 
+    func requestCodexReview(_ identifier: String, prUrl: String?) {
+        var arguments = ["review", "request", identifier]
+        if let prUrl {
+            arguments.append(contentsOf: ["--pr", prUrl])
+        }
+        performCLI(
+            arguments,
+            success: "Requested Codex review for \(identifier)."
+        )
+    }
+
     private func performCLI(
         _ arguments: [String],
         success: String,

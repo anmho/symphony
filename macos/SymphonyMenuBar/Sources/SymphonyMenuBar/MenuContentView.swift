@@ -12,6 +12,7 @@ struct AgentRowView: View {
     let onOpenPullRequest: () -> Void
     let onOpenLogs: () -> Void
     let onRetry: () -> Void
+    let onRequestCodexReview: () -> Void
 
     var body: some View {
         Button(action: canOpenPullRequest ? onOpenPullRequest : openIssue) {
@@ -53,6 +54,7 @@ struct AgentRowView: View {
             }
             if canOpenPullRequest {
                 Button("Open GitHub PR") { onOpenPullRequest() }
+                Button("Request Codex Review") { onRequestCodexReview() }
             }
             if canOpenGitHub {
                 Button("Open GitHub Repo") { onOpenGitHub() }

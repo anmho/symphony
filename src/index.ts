@@ -36,6 +36,7 @@ import { runStatusWatch } from './watch.js';
 import { syncConfiguredRepoRouteLabels, validateConfiguredRepoRouteLabels } from './validation.js';
 import { createSymphonyTicket, installSymphonyIssueTemplate } from './ticket.js';
 import { fetchRelevantIssues } from './linear.js';
+import { requestCodexReviewForIssue } from './codexReviewRequest.js';
 import {
   diagnoseDispatchIssues,
   renderDispatchDoctorReport,
@@ -127,6 +128,27 @@ labels
     for (const label of result.createdLabels) {
       console.log(`Created Linear label ${label}`);
     }
+  });
+
+const review = program.command('review').description('Manual AI review controls for PR handoff issues.');
+
+review
+  .command('request')
+  .description('Post @codex review on a linked GitHub PR and sync the request back to Linear.')
+  .argument('<issue>', 'Linear issue identifier or id, for example ANM-123')
+  .option('--pr <url>', 'GitHub PR URL when the Linear issue does not yet contain one')
+  .option('--body <comment>', 'GitHub comment to post', '@codex review')
+  .option('--dry-run', 'resolve the issue and PR without posting comments')
+  .action(async (issue: string, options: { pr?: string; body: string; dryRun?: boolean }) => {
+    const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
+    const config = await loadWorkflowConfig(workflowPath);
+    const result = await requestCodexReviewForIssue(config, issue, {
+      prUrl: options.pr ?? null,
+      githubComment: options.body,
+      dryRun: options.dryRun === true,
+    });
+    const prefix = result.dryRun ? 'Would request' : 'Requested';
+    console.log(`${prefix} Codex review for ${result.issue}: ${result.prUrl}`);
   });
 
 const doctor = program
