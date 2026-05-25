@@ -339,9 +339,18 @@ struct SymphonyPanelView: View {
                             canOpenLinear: linearIssueURL(
                                 for: row.identifier,
                                 orgSlug: service.settings.linearOrgSlug
-                            ) != nil
+                            ) != nil,
+                            canOpenGitHub: githubRepositoryURL(
+                                for: row.repoKey,
+                                ownerSlug: service.settings.linearOrgSlug
+                            ) != nil,
+                            canOpenPullRequest: row.prUrl != nil
                         ) {
                             service.openIssue(row.identifier)
+                        } onOpenGitHub: {
+                            service.openGitHubRepo(row.repoKey)
+                        } onOpenPullRequest: {
+                            service.openPullRequest(row.prUrl)
                         } onOpenLogs: {
                             service.openLogs(for: row.identifier)
                         } onRetry: {

@@ -90,6 +90,22 @@ final class StatusService: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func openGitHubRepo(_ repoKey: String?) {
+        guard let url = githubRepositoryURL(for: repoKey, ownerSlug: settings.linearOrgSlug) else {
+            actionError = "No GitHub repo link for this row."
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openPullRequest(_ prUrl: String?) {
+        guard let prUrl, let url = URL(string: prUrl) else {
+            actionError = "No GitHub PR link for this row."
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     func openWatch() {
         openInTerminal(["watch"])
     }

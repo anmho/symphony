@@ -27,14 +27,20 @@ workspace:
   base_branch: main
   repo_routes:
     symphony: symphony
-    x: x
     auth: auth
     agent: agent
     terraform: terraform
     create-svc: create-svc
     create-app-saas: create-app-saas
     create-app-consumer: create-app-consumer
-    linear-ticket-sidepanel: linear-ticket-sidepanel
+    .github: .github
+    skills: skills
+    website: website
+    desktop: desktop
+    bluebubbles-cli: bluebubbles-cli
+    bluebubbles-sdk: bluebubbles-sdk
+    kalshi-cli: kalshi-cli
+    revenuecat-cli: revenuecat-cli
 
 hooks:
   after_create:
@@ -47,7 +53,7 @@ agent:
   max_concurrent_agents: 5
   max_turns: 20
   max_retry_backoff_ms: 300000
-  rate_limit_probe_interval_ms: 300000
+  rate_limit_probe_interval_ms: 15000
 
 codex:
   command: codex app-server --listen stdio://

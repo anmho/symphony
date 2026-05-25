@@ -22,6 +22,13 @@ export interface DisplayEvent {
   sourceCount: number;
 }
 
+export interface CurrentWorkSummary {
+  kind: DisplayEventKind;
+  text: string;
+  updatedAtMs: number;
+  cursor: number;
+}
+
 const HIDDEN_NOTIFICATIONS = [
   "hook/completed",
   "hook/started",
@@ -100,6 +107,27 @@ export function formatDisplayEvent(event: DisplayEvent, options: { includeIssue?
   return `${time} ${prefix}${label} ${event.text}`;
 }
 
+export function summarizeCurrentWork(events: AgentWorkEvent[]): CurrentWorkSummary | null {
+  const compacted = compactAgentWorkEvents(events);
+  for (let index = compacted.length - 1; index >= 0; index -= 1) {
+    const event = compacted[index]!;
+    if (event.kind === "runner" || event.kind === "other") {
+      continue;
+    }
+    const text = currentWorkText(event);
+    if (!text) {
+      continue;
+    }
+    return {
+      kind: event.kind,
+      text,
+      updatedAtMs: event.timestampMs,
+      cursor: event.cursor
+    };
+  }
+  return null;
+}
+
 
 interface PendingAssistantStream {
   key: string;
@@ -152,6 +180,58 @@ function pendingToDisplay(pending: PendingAssistantStream): DisplayEvent {
     text: pending.parts.join("").trim() || "(empty assistant message)",
     sourceCount: pending.sourceCount
   };
+}
+
+function currentWorkText(event: DisplayEvent): string | null {
+  const text = squashWhitespace(event.text);
+  if (!text) {
+    return null;
+  }
+  if (event.kind === "command") {
+    if (text.startsWith("inProgress: ")) {
+      return `Running command: ${text.slice("inProgress: ".length)}`;
+    }
+    if (text.startsWith("completed: ")) {
+      return `Completed command: ${text.slice("completed: ".length)}`;
+    }
+    if (text.startsWith("failed: ")) {
+      return `Command failed: ${text.slice("failed: ".length)}`;
+    }
+  }
+  if (event.kind === "assistant") {
+    return text === "assistant message" ? null : clipText(text, 220);
+  }
+  if (event.kind === "reasoning") {
+    return text === "reasoning summary event" ? null : clipText(text, 220);
+  }
+  if (event.kind === "goal") {
+    return summarizeGoalText(text);
+  }
+  return clipText(text, 220);
+}
+
+function summarizeGoalText(text: string): string {
+  const match = text.match(/^goal\s+([^:]+):\s+(.+?)(?:\.\s+Satisfy the issue.*)?(?:\s+\(tokens=.*)?$/i);
+  if (!match) {
+    return clipText(text, 180);
+  }
+  const status = match[1]?.trim() || "updated";
+  const objective = squashWhitespace(match[2] ?? "");
+  if (status.toLowerCase() === "active") {
+    return "Goal active";
+  }
+  return clipText(`Goal ${status}: ${objective}`, 180);
+}
+
+function squashWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function clipText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(maxLength - 3, 0)).trimEnd()}...`;
 }
 
 function eventToDisplay(event: AgentWorkEvent): DisplayEvent {

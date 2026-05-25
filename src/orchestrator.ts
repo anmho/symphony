@@ -1,6 +1,7 @@
 import { loadWorkflowConfig } from './config.js';
 import {
   fetchCandidateIssues,
+  fetchHandoffIssues,
   fetchIssueById,
   fetchTerminalIssues,
   moveIssueToState,
@@ -17,9 +18,10 @@ import {
   sortIssuesForDispatch,
 } from './policy.js';
 import { renderIssuePrompt } from './prompt.js';
-import { isGateParked } from './rateLimit.js';
+import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
+import { summarizeCurrentWork } from './eventDisplay.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
@@ -35,6 +37,7 @@ import type {
   CodexUsageTotals,
   EffectiveWorkflowConfig,
   AgentWorkEvent,
+  IssueSummary,
   LiveSession,
   NormalizedIssue,
   OrchestratorSnapshot,
@@ -54,6 +57,9 @@ export interface OrchestratorDependencies {
     issueId: string,
   ) => Promise<NormalizedIssue | null>;
   fetchTerminalIssues: (
+    config: EffectiveWorkflowConfig,
+  ) => Promise<NormalizedIssue[]>;
+  fetchHandoffIssues: (
     config: EffectiveWorkflowConfig,
   ) => Promise<NormalizedIssue[]>;
   writeRunnerComment: (
@@ -100,6 +106,63 @@ export interface OrchestratorDependencies {
   eventStore: AgentWorkEventStore;
 }
 
+function isHandoffState(
+  state: string,
+  config: EffectiveWorkflowConfig,
+): boolean {
+  return Boolean(
+    config.tracker.handoffState &&
+      state.toLowerCase() === config.tracker.handoffState.toLowerCase(),
+  );
+}
+
+function issueSummary(
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue,
+): IssueSummary {
+  return {
+    identifier: issue.identifier,
+    title: issue.title,
+    repoKey: repoKeyFromIssue(config, issue),
+    state: issue.state,
+    reviewKind: reviewKindFromIssue(config, issue),
+    prUrl: githubPullRequestUrlFromIssue(issue),
+  };
+}
+
+function reviewKindFromIssue(
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue,
+): IssueSummary['reviewKind'] {
+  if (isTerminalState(issue.state, config)) {
+    return 'completed';
+  }
+  if (issue.state.toLowerCase().includes('block')) {
+    return 'blocked';
+  }
+  return 'pr_review';
+}
+
+function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
+  const haystack = [issue.description ?? '', ...issue.comments].join('\n');
+  return haystack.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/)?.[0] ?? null;
+}
+
+function repoKeyFromIssue(
+  config: EffectiveWorkflowConfig,
+  issue: NormalizedIssue,
+): string | null {
+  const prefix = config.tracker.repoLabelPrefix.toLowerCase();
+  for (const label of issue.labels) {
+    const normalized = label.toLowerCase();
+    if (normalized.startsWith(prefix)) {
+      const repoKey = normalized.slice(prefix.length).trim();
+      return repoKey || null;
+    }
+  }
+  return null;
+}
+
 export interface OrchestratorOptions {
   workflowPath: string;
   pollOnce?: boolean;
@@ -132,7 +195,8 @@ export class Orchestrator {
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
   private readonly retryAttempts = new Map<string, RunAttempt>();
-  private readonly completed = new Set<string>();
+  private readonly handoff = new Map<string, IssueSummary>();
+  private readonly completed = new Map<string, IssueSummary>();
   private readonly codexTotals: CodexUsageTotals = {
     inputTokens: 0,
     outputTokens: 0,
@@ -155,6 +219,7 @@ export class Orchestrator {
     this.deps = {
       loadWorkflowConfig,
       fetchCandidateIssues,
+      fetchHandoffIssues,
       fetchIssueById,
       fetchTerminalIssues,
       writeRunnerComment,
@@ -222,7 +287,10 @@ export class Orchestrator {
       retryAttempts: [...this.retryAttempts.values()].map((attempt) => ({
         ...attempt,
       })),
-      completed: [...this.completed],
+      handoff: [...this.handoff.keys()],
+      handoffDetails: [...this.handoff.values()],
+      completed: [...this.completed.keys()],
+      completedDetails: [...this.completed.values()],
       codexTotals: { ...this.codexTotals },
       codexRateLimit: { ...this.codexRateLimit },
       lastTickAtMs: this.lastTickAtMs,
@@ -311,7 +379,7 @@ export class Orchestrator {
     };
 
     for (const attempt of this.retryAttempts.values()) {
-      if (attempt.error === 'codex_rate_limited') {
+      if (isRateLimitError(attempt.error)) {
         attempt.dueAtMs = now;
         resumed += 1;
       }
@@ -324,6 +392,7 @@ export class Orchestrator {
     const config = await this.reloadConfig(false);
     this.lastTickAtMs = this.deps.now();
     const terminalIssues = await this.refreshCompletedFromLinear(config);
+    await this.refreshHandoffFromLinear(config);
 
     if (!this.startupCleanupDone) {
       await this.cleanupTerminalWorkspaces(config, terminalIssues);
@@ -422,11 +491,28 @@ export class Orchestrator {
   ): Promise<NormalizedIssue[]> {
     const terminalIssues = await this.deps.fetchTerminalIssues(config);
     for (const issue of terminalIssues) {
-      this.completed.add(issue.identifier);
+      this.completed.set(issue.identifier, issueSummary(config, issue));
+      this.handoff.delete(issue.identifier);
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
     }
     return terminalIssues;
+  }
+
+  private async refreshHandoffFromLinear(
+    config: EffectiveWorkflowConfig,
+  ): Promise<NormalizedIssue[]> {
+    const handoffIssues = await this.deps.fetchHandoffIssues(config);
+    this.handoff.clear();
+    for (const issue of handoffIssues) {
+      if (this.completed.has(issue.identifier)) {
+        continue;
+      }
+      this.handoff.set(issue.identifier, issueSummary(config, issue));
+      this.retryAttempts.delete(issue.id);
+      this.claimed.delete(issue.id);
+    }
+    return handoffIssues;
   }
 
   private async reconcileRunning(
@@ -444,13 +530,16 @@ export class Orchestrator {
         });
 
       if (latestIssue && isTerminalState(latestIssue.state, config)) {
-        this.completed.add(latestIssue.identifier);
+        this.completed.set(latestIssue.identifier, issueSummary(config, latestIssue));
         entry.cancelReason = `state_${latestIssue.state}`;
         entry.abortController.abort();
         continue;
       }
 
       if (!latestIssue || !isActiveState(latestIssue.state, config)) {
+        if (latestIssue && isHandoffState(latestIssue.state, config)) {
+          this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        }
         entry.cancelReason = latestIssue
           ? `state_${latestIssue.state}`
           : 'issue_not_found';
@@ -486,7 +575,7 @@ export class Orchestrator {
         config,
         issue,
         attempt.attempt,
-        attempt.error === 'codex_rate_limited',
+        isRateLimitError(attempt.error),
       );
     }
   }
@@ -514,6 +603,9 @@ export class Orchestrator {
       lastCodexEvent: null,
       lastCodexTimestamp: null,
       lastCodexMessage: null,
+      currentWork: null,
+      currentWorkKind: null,
+      currentWorkUpdatedAtMs: null,
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
@@ -606,11 +698,14 @@ export class Orchestrator {
       entry.session.title = issue.title;
       if (isTerminalState(issue.state, config)) {
         await this.cleanupIssueWorkspace(config, issue);
-        this.completed.add(issue.identifier);
+        this.completed.set(issue.identifier, issueSummary(config, issue));
         this.releaseIssue(issue.id);
         return;
       }
       if (!isActiveState(issue.state, config)) {
+        if (isHandoffState(issue.state, config)) {
+          this.handoff.set(issue.identifier, issueSummary(config, issue));
+        }
         this.releaseIssue(issue.id);
         return;
       }
@@ -724,6 +819,7 @@ export class Orchestrator {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
+        this.handoff.set(issue.identifier, issueSummary(config, issue));
         this.releaseIssue(issue.id);
         return;
       }
@@ -880,6 +976,7 @@ export class Orchestrator {
       timestampMs,
     });
     entry.session.latestEventCursor = workEvent.cursor;
+    this.refreshCurrentWork(entry);
   }
 
   private appendRunnerEvent(
@@ -904,6 +1001,23 @@ export class Orchestrator {
     entry.session.lastCodexTimestamp = event.timestampMs;
     entry.session.lastCodexMessage = event.summary;
     entry.session.latestEventCursor = event.cursor;
+    this.refreshCurrentWork(entry);
+  }
+
+  private refreshCurrentWork(entry: RunningEntry): void {
+    const summary = summarizeCurrentWork(
+      this.eventStore.query({
+        issue: entry.issue.identifier,
+        cursor: 0,
+        limit: 80,
+      }),
+    );
+    if (!summary) {
+      return;
+    }
+    entry.session.currentWork = summary.text;
+    entry.session.currentWorkKind = summary.kind;
+    entry.session.currentWorkUpdatedAtMs = summary.updatedAtMs;
   }
 
   private scheduleNextTick(intervalMs: number): void {

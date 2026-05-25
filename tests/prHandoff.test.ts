@@ -179,6 +179,7 @@ function makeIssue(): NormalizedIssue {
     branchName: null,
     url: "https://linear.app/anmho/issue/ANM-295/x",
     labels: ["symphony"],
+    comments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null

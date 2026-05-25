@@ -4,16 +4,41 @@
     {
       "identifier": "ANM-1",
       "title": "Example Symphony issue",
+      "repoKey": "symphony",
       "turnCount": 1,
       "lastCodexEvent": "notification",
       "lastCodexTimestamp": 19000,
       "lastCodexMessage": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"text\":\"Working on the ticket\"}}}",
+      "currentWork": "Running command: bun test",
+      "currentWorkKind": "command",
+      "currentWorkUpdatedAtMs": 19500,
       "startedAtMs": 12000,
       "workspacePath": "/tmp/workspaces/ANM-1"
     }
   ],
   "retryAttempts": [],
+  "handoff": ["ANM-98"],
+  "handoffDetails": [
+    {
+      "identifier": "ANM-98",
+      "title": "Ready for review",
+      "repoKey": ".github",
+      "state": "In Review",
+      "reviewKind": "pr_review",
+      "prUrl": "https://github.com/anmho/.github/pull/1"
+    }
+  ],
   "completed": ["ANM-99"],
+  "completedDetails": [
+    {
+      "identifier": "ANM-99",
+      "title": "Finished task",
+      "repoKey": "symphony",
+      "state": "Done",
+      "reviewKind": "completed",
+      "prUrl": "https://github.com/anmho/symphony/pull/1"
+    }
+  ],
   "codexRateLimit": {
     "resumeAfterMs": null,
     "reason": null

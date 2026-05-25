@@ -13,6 +13,7 @@ import {
   queueSteer,
   resumeIssue,
 } from './status.js';
+import { isRateLimitError } from './rateLimit.js';
 import {
   computeWatchLayout,
   fillTerminalScreen,
@@ -494,7 +495,7 @@ export function renderStatusScreen(
     });
 
   const headerLine = padLineToWidth(
-    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(String(snapshot.running.length))}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('completed=')}${snapshot.completed.length}`,
+    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(String(snapshot.running.length))}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('handoff=')}${snapshot.handoff.length}  ${theme.dim('completed=')}${snapshot.completed.length}`,
     terminalWidth,
   );
   const workflowLine = padLineToWidth(
@@ -669,9 +670,9 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       issueKey: session.identifier,
       age: formatDuration(nowMs - session.startedAtMs),
       turn: String(session.turnCount),
-      event: session.lastCodexEvent ?? '-',
-      updated: session.lastCodexTimestamp
-        ? formatDuration(nowMs - session.lastCodexTimestamp)
+      event: session.currentWorkKind ?? session.lastCodexEvent ?? '-',
+      updated: (session.currentWorkUpdatedAtMs ?? session.lastCodexTimestamp)
+        ? formatDuration(nowMs - (session.currentWorkUpdatedAtMs ?? session.lastCodexTimestamp ?? nowMs))
         : '-',
       workspace: shortenPath(session.workspacePath ?? '-'),
       detail: [
@@ -685,6 +686,8 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
         `Goal updated: ${session.goalUpdatedAtMs ? `${formatDuration(nowMs - session.goalUpdatedAtMs)} ago` : '-'}`,
         `Goal objective: ${session.goalObjective ?? '-'}`,
         `Codex PID: ${session.codexAppServerPid ?? '-'}`,
+        `Current work: ${session.currentWork ?? '-'}`,
+        `Current work updated: ${session.currentWorkUpdatedAtMs ? `${formatDuration(nowMs - session.currentWorkUpdatedAtMs)} ago` : '-'}`,
         `Latest event cursor: ${session.latestEventCursor ?? '-'}`,
         `Queued steering: ${session.queuedSteerCount}`,
         `Last event: ${session.lastCodexEvent ?? '-'}`,
@@ -695,42 +698,77 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
   );
 
   const retries = snapshot.retryAttempts.map(
-    (attempt): WatchRow => ({
-      kind: attempt.error === 'codex_rate_limited' ? 'parked' : 'retry',
-      issue: attempt.title
-        ? `${attempt.identifier} · ${attempt.title}`
-        : attempt.identifier,
-      issueKey: attempt.identifier,
-      age: `in ${formatDuration(attempt.dueAtMs - nowMs)}`,
-      turn: String(attempt.attempt),
-      event: 'retry',
-      updated: '-',
-      workspace: '-',
-      detail: [
-        `Issue: ${attempt.identifier}`,
-        `State: ${attempt.error === 'codex_rate_limited' ? 'parked' : 'retry'}`,
-        `Attempt: ${attempt.attempt}`,
-        `Due: ${formatTime(attempt.dueAtMs)}`,
-        `Error: ${attempt.error ?? '-'}`,
-      ],
-    }),
+    (attempt): WatchRow => {
+      const parked = isRateLimitError(attempt.error);
+      return {
+        kind: parked ? 'parked' : 'retry',
+        issue: attempt.title
+          ? `${attempt.identifier} · ${attempt.title}`
+          : attempt.identifier,
+        issueKey: attempt.identifier,
+        age: `in ${formatDuration(attempt.dueAtMs - nowMs)}`,
+        turn: String(attempt.attempt),
+        event: 'retry',
+        updated: '-',
+        workspace: '-',
+        detail: [
+          `Issue: ${attempt.identifier}`,
+          `State: ${parked ? 'parked' : 'retry'}`,
+          `Attempt: ${attempt.attempt}`,
+          `Due: ${formatTime(attempt.dueAtMs)}`,
+          `Error: ${attempt.error ?? '-'}`,
+        ],
+      };
+    },
   );
 
   const completed = snapshot.completed.map(
-    (issueId): WatchRow => ({
+    (issueId): WatchRow => {
+      const detail = snapshot.completedDetails.find((issue) => issue.identifier === issueId);
+      return {
       kind: 'completed',
-      issue: issueId,
+      issue: detail?.title ? `${issueId} · ${detail.title}` : issueId,
       issueKey: issueId,
       age: '-',
       turn: '-',
       event: 'completed',
       updated: '-',
       workspace: '-',
-      detail: [`Issue id: ${issueId}`, 'State: completed'],
-    }),
+      detail: [
+        `Issue id: ${issueId}`,
+        `State: ${detail?.state ?? 'completed'}`,
+        `Review type: ${detail?.reviewKind ?? 'completed'}`,
+        `PR: ${detail?.prUrl ?? '-'}`,
+        `Repo: ${detail?.repoKey ?? '-'}`,
+      ],
+      };
+    },
   );
 
-  return [...running, ...retries, ...completed];
+  const handoff = snapshot.handoff.map(
+    (issueId): WatchRow => {
+      const detail = snapshot.handoffDetails.find((issue) => issue.identifier === issueId);
+      return {
+      kind: 'completed',
+      issue: detail?.title ? `${issueId} · ${detail.title}` : issueId,
+      issueKey: issueId,
+      age: '-',
+      turn: '-',
+      event: detail?.reviewKind === 'blocked' ? 'blocked' : 'pr-review',
+      updated: '-',
+      workspace: '-',
+      detail: [
+        `Issue id: ${issueId}`,
+        `State: ${detail?.state ?? 'ready for human review'}`,
+        `Review type: ${detail?.reviewKind ?? 'pr_review'}`,
+        `PR: ${detail?.prUrl ?? '-'}`,
+        `Repo: ${detail?.repoKey ?? '-'}`,
+      ],
+      };
+    },
+  );
+
+  return [...running, ...retries, ...handoff, ...completed];
 }
 
 function renderTable(

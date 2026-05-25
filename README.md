@@ -19,7 +19,7 @@ The default posture is high-trust local execution. Symphony is intended for repo
 - [Symphony smoke](docs/symphony-smoke.md)
 - [Release process](docs/release.md)
 - [Linear issue templates for Symphony dispatch](templates/README.md)
-- [Cursor agent skill](skills/symphony/SKILL.md) — install with `npx skills add anmho/skills --skill symphony --global -y`
+- [Symphony agent skill](https://github.com/anmho/skills/tree/main/skills/symphony)
 
 ## Requirements
 
@@ -81,6 +81,17 @@ Install the `symphony` command globally:
 bun run install:global
 ```
 
+Install the Symphony agent skill from the canonical `anmho/skills` repo:
+
+```sh
+npx skills add anmho/skills --skill symphony --global --agent '*' -y
+```
+
+The skill is intentionally not vendored in this repo. The canonical source is
+[`anmho/skills/skills/symphony`](https://github.com/anmho/skills/tree/main/skills/symphony);
+the installer places it into the supported agent skill directories, including
+`~/.agents/skills/symphony`.
+
 Start the runner:
 
 ```sh
@@ -105,10 +116,22 @@ symphony watch
 
 Native **Swift/SwiftUI** app (not Electron) — lightweight menu bar popover with clickable Linear ticket links.
 
-**Install:**
+**Install the latest packaged release:**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/anmho/symphony/main/macos/SymphonyMenuBar/install.sh | bash
+curl -fsSL https://github.com/anmho/symphony/releases/latest/download/install.sh | bash
+open -a Symphony
+```
+
+The installer places the app at `/Applications/Symphony.app`. The app is menu
+bar only, so it will not appear in the Dock after onboarding.
+
+**Install from source for local development:**
+
+```sh
+cd macos/SymphonyMenuBar
+./install-local.sh
+open -a Symphony
 ```
 
 Or download a `.dmg` from [GitHub Releases](https://github.com/anmho/symphony/releases) (`menubar-v*` tags).
@@ -211,7 +234,7 @@ Runtime state is intentionally in-memory to match the OpenAI Symphony spec. Rest
 
 `symphony status`, `symphony watch`, and `symphony logs` expose the runner's observability surface: active issue runs, retry queue, Codex thread and turn IDs, app-server PIDs, event cursors, per-issue work-log paths, rate-limit parking, and config reload errors. Daemon process logs remain available under `~/.symphony/symphony-<port>.log`.
 
-Rate-limit handling is intentionally different from ordinary failure retry. Symphony parks new launches until Codex's reported reset time, but also probes parked runs every `agent.rate_limit_probe_interval_ms` with per-issue jitter so work can resume if access returns earlier than the reported reset. The default probe interval is five minutes.
+Rate-limit handling is intentionally different from ordinary failure retry. Symphony parks new launches until Codex's reported reset time, but also probes parked runs every `agent.rate_limit_probe_interval_ms` with per-issue jitter so work can resume if access returns earlier than the reported reset. The default probe interval is 15 seconds.
 
 The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. Per-issue public work streams are stored as JSONL under `.symphony/events/`, and queued steering state is stored under `.symphony/state/`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
 

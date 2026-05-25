@@ -231,6 +231,7 @@ function makeIssue(identifier: string, title: string): NormalizedIssue {
     branchName: null,
     url: null,
     labels: [],
+    comments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null

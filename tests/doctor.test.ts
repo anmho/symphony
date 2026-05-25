@@ -242,6 +242,7 @@ function makeIssue(
     branchName: overrides.branchName ?? null,
     url: overrides.url ?? null,
     labels: overrides.labels ?? [],
+    comments: overrides.comments ?? [],
     blockedBy: overrides.blockedBy ?? [],
     createdAt: overrides.createdAt ?? null,
     updatedAt: overrides.updatedAt ?? null,

@@ -64,3 +64,10 @@ export function mergeGateState(
 export function isGateParked(state: RateLimitGateState, nowMs = Date.now()): boolean {
   return typeof state.resumeAfterMs === "number" && state.resumeAfterMs > nowMs;
 }
+
+export function isRateLimitError(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return value === "codex_rate_limited" || /usageLimitExceeded|usage limit|rate[_ ]?limit/i.test(value);
+}

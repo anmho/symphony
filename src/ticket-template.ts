@@ -28,13 +28,13 @@ const SECTION_KEYS: Array<[keyof IssueTemplateSections, string]> = [
 ];
 
 export function defaultIssueTemplatePath(): string {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(moduleDir, "../templates/symphony-issue.md"),
-    path.resolve(moduleDir, "../../templates/symphony-issue.md"),
-  ];
-  const fallback = path.resolve(moduleDir, "../templates/symphony-issue.md");
-  return candidates.find((candidate) => existsSync(candidate)) ?? fallback;
+  return resolveDefaultIssueTemplatePath(path.dirname(fileURLToPath(import.meta.url)));
+}
+
+export function resolveDefaultIssueTemplatePath(moduleDir: string): string {
+  const sourceTemplatePath = path.resolve(moduleDir, "../templates/symphony-issue.md");
+  const packageTemplatePath = path.resolve(moduleDir, "../../templates/symphony-issue.md");
+  return [sourceTemplatePath, packageTemplatePath].find((candidate) => existsSync(candidate)) ?? sourceTemplatePath;
 }
 
 export async function loadIssueTemplate(templatePath = defaultIssueTemplatePath()): Promise<string> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isGateParked, mergeGateState, rateLimitUntilFromSnapshot } from "../src/rateLimit.js";
+import { isGateParked, isRateLimitError, mergeGateState, rateLimitUntilFromSnapshot } from "../src/rateLimit.js";
 
 describe("rate limits", () => {
   it("extracts the farthest reset from exhausted windows", () => {
@@ -25,5 +25,12 @@ describe("rate limits", () => {
   it("detects parked and unparked gate states", () => {
     expect(isGateParked({ resumeAfterMs: 2000, reason: null, updatedAtMs: null }, 1000)).toBe(true);
     expect(isGateParked({ resumeAfterMs: 2000, reason: null, updatedAtMs: null }, 3000)).toBe(false);
+  });
+
+  it("detects structured Codex usage-limit errors", () => {
+    expect(isRateLimitError("codex_rate_limited")).toBe(true);
+    expect(isRateLimitError("{\"codexErrorInfo\":\"usageLimitExceeded\"}")).toBe(true);
+    expect(isRateLimitError("You've hit your usage limit.")).toBe(true);
+    expect(isRateLimitError("ordinary failure")).toBe(false);
   });
 });

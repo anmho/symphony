@@ -1,11 +1,12 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
 
         if terminateDuplicateInstance() {
             return
@@ -15,12 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             showOnboarding()
+        } else {
+            StatusPanelController.shared.show()
         }
     }
 
-  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if onboardingWindow == nil, !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             showOnboarding()
+        } else {
+            StatusPanelController.shared.show()
         }
         return true
     }
@@ -50,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
                 self.onboardingWindow?.close()
                 self.onboardingWindow = nil
+                StatusPanelController.shared.show()
             }
         )
 
@@ -78,9 +84,9 @@ struct OnboardingView: View {
                     .font(.system(size: 36))
                     .foregroundStyle(.blue)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Symphony lives in your menu bar")
+                    Text("Symphony opens as a Mac app")
                         .font(.title3.weight(.semibold))
-                    Text("There is no Dock icon or main window.")
+                    Text("The menu bar icon is still available as a quick status shortcut.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -88,18 +94,18 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 onboardingStep(
                     number: 1,
-                    title: "Find the icon",
-                    detail: "Look for the blue waveform icon on the right side of the menu bar."
+                    title: "Open the app",
+                    detail: "Launch Symphony from Applications, Spotlight, the Dock, or `open -a Symphony` to show the monitor window."
                 )
                 onboardingStep(
                     number: 2,
-                    title: "Check the overflow menu",
-                    detail: "On macOS 15+, new menu bar items may start hidden behind the Control Center chevron (›). Open System Settings → Menu Bar and set Symphony to Show in Menu Bar."
+                    title: "Use the menu bar shortcut",
+                    detail: "The blue waveform icon remains in the menu bar for glanceable status and quick access."
                 )
                 onboardingStep(
                     number: 3,
-                    title: "Click to open the panel",
-                    detail: "The panel shows running agents, waiting retries, Codex rate limits, and lets you pause or resume dispatch."
+                    title: "Monitor work",
+                    detail: "The window shows running agents, waiting retries, Codex rate limits, and lets you pause or resume dispatch."
                 )
             }
 

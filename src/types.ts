@@ -18,6 +18,7 @@ export interface NormalizedIssue {
   branchName: string | null;
   url: string | null;
   labels: string[];
+  comments: string[];
   blockedBy: BlockerRef[];
   createdAt: string | null;
   updatedAt: string | null;
@@ -150,6 +151,15 @@ export interface RunAttempt {
   error: string | null;
 }
 
+export interface IssueSummary {
+  identifier: string;
+  title: string | null;
+  repoKey: string | null;
+  state: string | null;
+  reviewKind: 'pr_review' | 'blocked' | 'completed';
+  prUrl: string | null;
+}
+
 export interface LiveSession {
   issueId: string;
   identifier: string;
@@ -165,6 +175,9 @@ export interface LiveSession {
   lastCodexEvent: string | null;
   lastCodexTimestamp: number | null;
   lastCodexMessage: string | null;
+  currentWork: string | null;
+  currentWorkKind: string | null;
+  currentWorkUpdatedAtMs: number | null;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -181,7 +194,10 @@ export interface OrchestratorSnapshot {
   running: LiveSession[];
   claimed: string[];
   retryAttempts: RunAttempt[];
+  handoff: string[];
+  handoffDetails: IssueSummary[];
   completed: string[];
+  completedDetails: IssueSummary[];
   codexTotals: CodexUsageTotals;
   codexRateLimit: CodexRateLimitSnapshot;
   lastTickAtMs: number | null;

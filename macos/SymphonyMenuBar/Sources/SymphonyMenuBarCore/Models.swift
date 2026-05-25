@@ -4,7 +4,10 @@ public struct OrchestratorSnapshot: Codable {
     public let startedAtMs: Int
     public let running: [LiveSession]
     public let retryAttempts: [RunAttempt]
+    public let handoff: [String]
+    public let handoffDetails: [IssueSummary]
     public let completed: [String]
+    public let completedDetails: [IssueSummary]
     public let codexRateLimit: CodexRateLimitSnapshot
     public let lastConfigError: String?
     public let paused: Bool
@@ -14,7 +17,10 @@ public struct OrchestratorSnapshot: Codable {
         case startedAtMs
         case running
         case retryAttempts
+        case handoff
+        case handoffDetails
         case completed
+        case completedDetails
         case codexRateLimit
         case lastConfigError
         case paused
@@ -26,7 +32,10 @@ public struct OrchestratorSnapshot: Codable {
         startedAtMs = try container.decode(Int.self, forKey: .startedAtMs)
         running = try container.decode([LiveSession].self, forKey: .running)
         retryAttempts = try container.decode([RunAttempt].self, forKey: .retryAttempts)
+        handoff = try container.decodeIfPresent([String].self, forKey: .handoff) ?? []
+        handoffDetails = try container.decodeIfPresent([IssueSummary].self, forKey: .handoffDetails) ?? []
         completed = try container.decode([String].self, forKey: .completed)
+        completedDetails = try container.decodeIfPresent([IssueSummary].self, forKey: .completedDetails) ?? []
         codexRateLimit = try container.decode(CodexRateLimitSnapshot.self, forKey: .codexRateLimit)
         lastConfigError = try container.decodeIfPresent(String.self, forKey: .lastConfigError)
         paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false
@@ -38,12 +47,26 @@ public struct LiveSession: Codable, Identifiable {
     public var id: String { identifier }
     public let identifier: String
     public let title: String?
+    public let repoKey: String?
     public let turnCount: Int
     public let lastCodexEvent: String?
     public let lastCodexTimestamp: Int?
     public let lastCodexMessage: String?
+    public let currentWork: String?
+    public let currentWorkKind: String?
+    public let currentWorkUpdatedAtMs: Int?
     public let startedAtMs: Int
     public let workspacePath: String?
+}
+
+public struct IssueSummary: Codable, Identifiable {
+    public var id: String { identifier }
+    public let identifier: String
+    public let title: String?
+    public let repoKey: String?
+    public let state: String?
+    public let reviewKind: String?
+    public let prUrl: String?
 }
 
 public struct RunAttempt: Codable, Identifiable {
@@ -67,6 +90,8 @@ public struct AgentRow: Identifiable {
     public let status: String
     public let detail: String
     public let kind: AgentKind
+    public let repoKey: String?
+    public let prUrl: String?
 
     public var headline: String {
         issueHeadline(identifier: identifier, title: title)
@@ -123,7 +148,9 @@ public extension OrchestratorSnapshot {
                 title: session.title,
                 status: "running",
                 detail: sessionDetail(session, nowMs: nowMs),
-                kind: .running
+                kind: .running,
+                repoKey: session.repoKey,
+                prUrl: nil
             )
         }
 
@@ -135,18 +162,37 @@ public extension OrchestratorSnapshot {
                 title: attempt.title,
                 status: parked ? "parked" : "retry",
                 detail: retryDetail(attempt, parked: parked, nowMs: nowMs),
-                kind: parked ? .parked : .retry
+                kind: parked ? .parked : .retry,
+                repoKey: nil,
+                prUrl: nil
+            )
+        }
+
+        rows += handoff.map { issueId in
+            let detail = handoffDetails.first { $0.identifier == issueId }
+            return AgentRow(
+                id: "handoff-\(issueId)",
+                identifier: issueId,
+                title: detail?.title,
+                status: statusLabel(for: detail?.reviewKind, fallback: "review"),
+                detail: handoffDetail(detail),
+                kind: .completed,
+                repoKey: detail?.repoKey,
+                prUrl: detail?.prUrl
             )
         }
 
         rows += completed.map { issueId in
-            AgentRow(
+            let detail = completedDetails.first { $0.identifier == issueId }
+            return AgentRow(
                 id: "completed-\(issueId)",
                 identifier: issueId,
-                title: nil,
+                title: detail?.title,
                 status: "completed",
-                detail: "Finished",
-                kind: .completed
+                detail: terminalDetail(detail),
+                kind: .completed,
+                repoKey: detail?.repoKey,
+                prUrl: detail?.prUrl
             )
         }
 
@@ -206,9 +252,42 @@ public extension OrchestratorSnapshot {
 
     private func sessionDetail(_ session: LiveSession, nowMs: Int) -> String {
         let age = formatDuration(max(nowMs - session.startedAtMs, 0))
-        let event = session.lastCodexEvent ?? "-"
-        let message = summarizeCodexMessage(session.lastCodexMessage)
+        let event = session.currentWorkKind ?? session.lastCodexEvent ?? "-"
+        let message = session.currentWork ?? summarizeCodexMessage(session.lastCodexMessage)
         return "Turn \(session.turnCount) · \(event) · \(message) · \(age)"
+    }
+
+    private func statusLabel(for reviewKind: String?, fallback: String) -> String {
+        switch reviewKind {
+        case "pr_review": return "PR review"
+        case "blocked": return "blocked"
+        case "completed": return "completed"
+        default: return fallback
+        }
+    }
+
+    private func handoffDetail(_ detail: IssueSummary?) -> String {
+        let state = detail?.state ?? "In Review"
+        let label = statusLabel(for: detail?.reviewKind, fallback: "review")
+        var parts = ["\(state) · \(label)"]
+        if let repoKey = detail?.repoKey {
+            parts.append(repoKey)
+        }
+        if detail?.prUrl != nil {
+            parts.append("GitHub PR linked")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func terminalDetail(_ detail: IssueSummary?) -> String {
+        var parts = [detail?.state ?? "Done"]
+        if let repoKey = detail?.repoKey {
+            parts.append(repoKey)
+        }
+        if detail?.prUrl != nil {
+            parts.append("GitHub PR linked")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -294,4 +373,15 @@ public func linearIssueURL(for identifier: String, orgSlug: String) -> URL? {
     let slug = orgSlug.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     guard !slug.isEmpty else { return nil }
     return URL(string: "https://linear.app/\(slug)/issue/\(identifier)")
+}
+
+public func githubRepositoryURL(for repoKey: String?, ownerSlug: String) -> URL? {
+    guard let repoKey, !repoKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return nil
+    }
+    let owner = ownerSlug.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard !owner.isEmpty else { return nil }
+    let repo = repoKey.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard !repo.isEmpty else { return nil }
+    return URL(string: "https://github.com/\(owner)/\(repo)")
 }
