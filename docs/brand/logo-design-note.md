@@ -2,18 +2,32 @@
 
 ## Direction (current)
 
-**Emotive point** — inspired by restrained research-tool identity (single dot, circular
-field, open space), not OpenAI branding and not generic AI chrome.
+**Emotive point** — calm control-plane mark with a quiet musical undertone. The scheme
+should read as research tooling first; the name *Symphony* supplies a secondary, tasteful
+music association without staff lines or literal instruments.
 
-- **Primary motif:** one muted blue-gray point (`#7B8FA3`), r=24 on the 256 grid.
+### Dual reading (intentional)
+
+| Layer | Reads as | In the mark |
+|-------|----------|-------------|
+| **Primary** | Agent orchestration | Point = cursor / cue; ring = cycle or coordinated field |
+| **Secondary** | Musical harmony | Orbit suggests phrase or measure; single accent note on the field |
+| **Product** | Local runner | Charcoal stage, lots of rest (negative space), one clear tone |
+
+That is why the palette stays muted and circular rather than lane-heavy: it evokes
+*ensemble coordination* and *one clear downbeat*, not a music app.
+
+### Geometry
+
+- **Primary motif:** muted blue-gray point (`#7B8FA3`), r=24 on the 256 grid.
 - **Secondary motif:** centered orbit ring (r=80, 1.5px stroke @ 17% opacity).
-- **Layout:** 8px grid — ring centered at (128,128); point at (136,120), an 8px
-  diagonal shift (45°) so the accent reads deliberate, not accidental.
+- **Layout:** 8px grid — ring at (128,128); point at (136,120) on an 8px diagonal
+  (45° optical shift).
 - **Surface:** Control Charcoal (`#18201F`) with generous negative space.
-- **Posture:** Symphony mark first; no third-party logos or endorsement cues.
 
 This replaces the earlier **Conductor Rail** lanes (three bars + rail), which read busy
-and mechanical at menu-bar scale.
+and mechanical at menu-bar scale. Literal staff notation was rejected; the current
+mark keeps the music hint abstract.
 
 ## Stitch exploration (historical)
 
@@ -37,10 +51,13 @@ emojis, circuit-board clichés. Neutral base, at most one muted accent. Legible 
 
 | Name | Hex | Role |
 |------|-----|------|
-| Control Charcoal | `#18201F` | Icon background, wordmark ink |
-| Panel White | `#E8ECE4` | Low-contrast orbit ring |
-| Muted Blue-Gray | `#7B8FA3` | Accent point (cursor / control primitive) |
-| Status Steel | `#64706A` | Secondary lockup text |
+| Control Charcoal | `#18201F` | Stage / app background — dark, concert-hall calm |
+| Panel White | `#E8ECE4` | Orbit ring, high-contrast structure on dark |
+| Cadence Blue-Gray | `#7B8FA3` | Accent point — the active tone (cue, note, cursor) |
+| Status Steel | `#64706A` | Secondary copy, metadata, subdued UI chrome |
+
+Use **at most one accent** in UI surfaces; keep charcoal + off-white structure dominant so
+the music hint stays atmospheric, not decorative.
 
 ## Rejected
 
