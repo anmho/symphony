@@ -1,6 +1,6 @@
 {
   "name": "@anmho/symphony",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local TypeScript Symphony runner for Linear-driven Codex app-server work orchestration.",
   "type": "module",
   "license": "UNLICENSED",
