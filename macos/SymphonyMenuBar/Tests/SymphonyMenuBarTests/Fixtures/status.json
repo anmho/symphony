@@ -9,6 +9,9 @@
       "lastCodexEvent": "notification",
       "lastCodexTimestamp": 19000,
       "lastCodexMessage": "{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"text\":\"Working on the ticket\"}}}",
+      "currentWork": "Running command: bun test",
+      "currentWorkKind": "command",
+      "currentWorkUpdatedAtMs": 19500,
       "startedAtMs": 12000,
       "workspacePath": "/tmp/workspaces/ANM-1"
     }

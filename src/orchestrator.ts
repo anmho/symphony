@@ -21,6 +21,7 @@ import { renderIssuePrompt } from './prompt.js';
 import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
+import { summarizeCurrentWork } from './eventDisplay.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
@@ -602,6 +603,9 @@ export class Orchestrator {
       lastCodexEvent: null,
       lastCodexTimestamp: null,
       lastCodexMessage: null,
+      currentWork: null,
+      currentWorkKind: null,
+      currentWorkUpdatedAtMs: null,
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
@@ -972,6 +976,7 @@ export class Orchestrator {
       timestampMs,
     });
     entry.session.latestEventCursor = workEvent.cursor;
+    this.refreshCurrentWork(entry);
   }
 
   private appendRunnerEvent(
@@ -996,6 +1001,23 @@ export class Orchestrator {
     entry.session.lastCodexTimestamp = event.timestampMs;
     entry.session.lastCodexMessage = event.summary;
     entry.session.latestEventCursor = event.cursor;
+    this.refreshCurrentWork(entry);
+  }
+
+  private refreshCurrentWork(entry: RunningEntry): void {
+    const summary = summarizeCurrentWork(
+      this.eventStore.query({
+        issue: entry.issue.identifier,
+        cursor: 0,
+        limit: 80,
+      }),
+    );
+    if (!summary) {
+      return;
+    }
+    entry.session.currentWork = summary.text;
+    entry.session.currentWorkKind = summary.kind;
+    entry.session.currentWorkUpdatedAtMs = summary.updatedAtMs;
   }
 
   private scheduleNextTick(intervalMs: number): void {

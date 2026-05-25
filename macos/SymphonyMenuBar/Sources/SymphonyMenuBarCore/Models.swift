@@ -52,6 +52,9 @@ public struct LiveSession: Codable, Identifiable {
     public let lastCodexEvent: String?
     public let lastCodexTimestamp: Int?
     public let lastCodexMessage: String?
+    public let currentWork: String?
+    public let currentWorkKind: String?
+    public let currentWorkUpdatedAtMs: Int?
     public let startedAtMs: Int
     public let workspacePath: String?
 }
@@ -249,8 +252,8 @@ public extension OrchestratorSnapshot {
 
     private func sessionDetail(_ session: LiveSession, nowMs: Int) -> String {
         let age = formatDuration(max(nowMs - session.startedAtMs, 0))
-        let event = session.lastCodexEvent ?? "-"
-        let message = summarizeCodexMessage(session.lastCodexMessage)
+        let event = session.currentWorkKind ?? session.lastCodexEvent ?? "-"
+        let message = session.currentWork ?? summarizeCodexMessage(session.lastCodexMessage)
         return "Turn \(session.turnCount) · \(event) · \(message) · \(age)"
     }
 

@@ -670,9 +670,9 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       issueKey: session.identifier,
       age: formatDuration(nowMs - session.startedAtMs),
       turn: String(session.turnCount),
-      event: session.lastCodexEvent ?? '-',
-      updated: session.lastCodexTimestamp
-        ? formatDuration(nowMs - session.lastCodexTimestamp)
+      event: session.currentWorkKind ?? session.lastCodexEvent ?? '-',
+      updated: (session.currentWorkUpdatedAtMs ?? session.lastCodexTimestamp)
+        ? formatDuration(nowMs - (session.currentWorkUpdatedAtMs ?? session.lastCodexTimestamp ?? nowMs))
         : '-',
       workspace: shortenPath(session.workspacePath ?? '-'),
       detail: [
@@ -686,6 +686,8 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
         `Goal updated: ${session.goalUpdatedAtMs ? `${formatDuration(nowMs - session.goalUpdatedAtMs)} ago` : '-'}`,
         `Goal objective: ${session.goalObjective ?? '-'}`,
         `Codex PID: ${session.codexAppServerPid ?? '-'}`,
+        `Current work: ${session.currentWork ?? '-'}`,
+        `Current work updated: ${session.currentWorkUpdatedAtMs ? `${formatDuration(nowMs - session.currentWorkUpdatedAtMs)} ago` : '-'}`,
         `Latest event cursor: ${session.latestEventCursor ?? '-'}`,
         `Queued steering: ${session.queuedSteerCount}`,
         `Last event: ${session.lastCodexEvent ?? '-'}`,

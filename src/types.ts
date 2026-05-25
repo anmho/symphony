@@ -175,6 +175,9 @@ export interface LiveSession {
   lastCodexEvent: string | null;
   lastCodexTimestamp: number | null;
   lastCodexMessage: string | null;
+  currentWork: string | null;
+  currentWorkKind: string | null;
+  currentWorkUpdatedAtMs: number | null;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;

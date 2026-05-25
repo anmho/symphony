@@ -35,7 +35,7 @@ final class ModelsTests: XCTestCase {
         let rows = snapshot.agentRows(nowMs: 20_000)
         XCTAssertEqual(rows.count, 3)
         XCTAssertEqual(rows[0].headline, "ANM-1 · Example Symphony issue")
-        XCTAssertTrue(rows[0].detail.contains("Working on the ticket"))
+        XCTAssertTrue(rows[0].detail.contains("Running command: bun test"))
         XCTAssertEqual(rows[1].status, "PR review")
         XCTAssertEqual(rows[2].status, "completed")
     }

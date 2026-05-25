@@ -5,7 +5,8 @@ import {
   buildLogLines,
   compactAgentWorkEvents,
   formatDisplayEvent,
-  isHiddenFromHumanView
+  isHiddenFromHumanView,
+  summarizeCurrentWork
 } from "../src/eventDisplay.js";
 import type { AgentWorkEvent } from "../src/types.js";
 
@@ -128,6 +129,47 @@ describe("event display compaction", () => {
     });
 
     expect(line).toMatch(/^15:04:46 +assistant +Working on it$/);
+  });
+
+  it("summarizes current work from useful public events", () => {
+    const events = [
+      makeEvent({ cursor: 1, type: "notification", summary: "mcpServer/startupStatus/updated" }),
+      makeEvent({ cursor: 2, type: "stderr", summary: "codex app-server wrote 182 stderr bytes" }),
+      makeEvent({ cursor: 3, type: "command", summary: "inProgress: bun test" })
+    ];
+
+    expect(summarizeCurrentWork(events)).toEqual({
+      kind: "command",
+      text: "Running command: bun test",
+      updatedAtMs: 1_000,
+      cursor: 3
+    });
+  });
+
+  it("returns no current work for only hidden transport noise", () => {
+    const events = [
+      makeEvent({ cursor: 1, type: "notification", summary: "item/completed" }),
+      makeEvent({ cursor: 2, type: "stderr", summary: "codex app-server wrote 182 stderr bytes" })
+    ];
+
+    expect(summarizeCurrentWork(events)).toBeNull();
+  });
+
+  it("keeps goal summaries compact for status rows", () => {
+    const events = [
+      makeEvent({
+        cursor: 1,
+        type: "goal",
+        summary: "goal active: Complete Linear issue ANM-1: Fix the thing. Satisfy the issue, commit, push, open or update a PR, and prepare a Linear handoff. (tokens=0 time=0s)"
+      })
+    ];
+
+    expect(summarizeCurrentWork(events)).toEqual({
+      kind: "goal",
+      text: "Goal active",
+      updatedAtMs: 1_000,
+      cursor: 1
+    });
   });
 });
 
