@@ -80,6 +80,14 @@ export interface CodexConfig {
   model: string | null;
 }
 
+export type PullRequestBackend = 'github' | 'graphite';
+export type GraphiteFallback = 'fail' | 'github';
+
+export interface PullRequestConfig {
+  backend: PullRequestBackend;
+  graphiteFallback: GraphiteFallback;
+}
+
 export interface EffectiveWorkflowConfig {
   workflowPath: string;
   workflowDir: string;
@@ -90,6 +98,7 @@ export interface EffectiveWorkflowConfig {
   hooks: HooksConfig;
   agent: AgentConfig;
   codex: CodexConfig;
+  pullRequest: PullRequestConfig;
 }
 
 export interface WorkspaceInfo {
