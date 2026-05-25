@@ -6,12 +6,18 @@ final class StatusPanelController {
     static let shared = StatusPanelController()
 
     private var panel: NSPanel?
+    private let launchService = StatusService()
     private weak var service: StatusService?
 
     private init() {}
 
+    func show() {
+        show(statusService: launchService)
+    }
+
     func show(statusService: StatusService) {
         service = statusService
+        statusService.start()
 
         if let panel {
             panel.makeKeyAndOrderFront(nil)
@@ -27,8 +33,8 @@ final class StatusPanelController {
             defer: false
         )
         panel.title = "Symphony"
-        panel.isFloatingPanel = true
-        panel.level = .floating
+        panel.isFloatingPanel = false
+        panel.level = .normal
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.contentView = content
         panel.isReleasedWhenClosed = false

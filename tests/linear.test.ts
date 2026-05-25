@@ -1,15 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-<<<<<<< HEAD
 import {
   fetchCandidateIssues,
+  fetchHandoffIssues,
   fetchIssueLabelNames,
   fetchRelevantIssues,
   fetchTerminalIssues,
   moveIssueToState,
 } from "../src/linear.js";
-=======
-import { fetchCandidateIssues, fetchHandoffIssues, fetchIssueLabelNames, fetchTerminalIssues, moveIssueToState } from "../src/linear.js";
->>>>>>> ae2f184 (fix: track handoff issues in status)
 import type { EffectiveWorkflowConfig } from "../src/types.js";
 
 describe("linear client", () => {

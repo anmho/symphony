@@ -178,6 +178,7 @@ function makeSmokeIssue(): NormalizedIssue {
     branchName: null,
     url: null,
     labels: [],
+    comments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null

@@ -4,13 +4,13 @@ Native macOS menu bar app for monitoring local Symphony agents, opening Linear t
 
 ## Stack
 
-**Swift + SwiftUI** native app using `MenuBarExtra`. Not Electron, not Tauri — a small signed `.app` bundle distributed as DMG and tarball releases.
+**Swift + SwiftUI** native app with a regular macOS window plus a `MenuBarExtra` status shortcut. Not Electron, not Tauri — a small signed `.app` bundle distributed as DMG and tarball releases.
 
 Source lives here in the symphony repo; **users install the packaged release**, not the source tree.
 
 ## Features
 
-- **OpenUsage-style panel** — click the menu bar icon for a sidebar + detail layout (Overview, Running, Waiting, Done, Settings)
+- **OpenUsage-style monitor** — launch the app or click the menu bar icon for a sidebar + detail layout (Overview, Running, Waiting, Done, Settings)
 - Metric cards with progress bars, rate-limit countdown, and agent rows with Linear links
 - Live status from Symphony `GET /status`
 - CLI controls via `symphony start`, `stop`, `watch`, and HTTP resume/steer endpoints
@@ -94,11 +94,17 @@ Gear icon in the status panel:
 
 ## Troubleshooting
 
-Symphony is a **menu bar only** app (`LSUIElement`). It does not appear in the Dock and has no main window after onboarding.
+Symphony opens as a regular Mac app and also keeps a menu bar status shortcut. If the menu bar is crowded, use Spotlight, the Dock, or:
+
+```bash
+open -a Symphony
+```
+
+Launching the app force-opens the monitor window.
 
 If you do not see the icon:
 
-1. Look on the **right side of the menu bar** for a blue waveform icon.
+1. Launch **Symphony** from Applications or Spotlight to open the monitor window directly.
 2. On macOS 15+, check the **menu bar overflow** (Control Center chevron) — new items may be hidden until you enable them in **System Settings → Menu Bar → Symphony → Show in Menu Bar**.
 3. Quit duplicate copies: `pkill -x Symphony; pkill -x SymphonyMenuBar`, then run `open -a Symphony` once.
 4. Re-run the installer if Gatekeeper blocked launch.
