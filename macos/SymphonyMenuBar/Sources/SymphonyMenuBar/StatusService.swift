@@ -185,6 +185,49 @@ final class StatusService: ObservableObject {
         )
     }
 
+    func requestChanges(_ identifier: String) {
+        guard let feedback = promptForReviewFeedback(identifier: identifier) else {
+            return
+        }
+        performControl(success: "Sent \(identifier) back for rework.") {
+            let result = try await StatusControl.requestChanges(
+                identifier,
+                feedback: feedback,
+                port: self.settings.statusPort
+            )
+            return "Moved \(result.issue) to \(result.state) for rework."
+        }
+    }
+
+    private func promptForReviewFeedback(identifier: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Request changes for \(identifier)"
+        alert.informativeText = "This writes the feedback to Linear and moves the issue back to active Symphony work."
+        alert.addButton(withTitle: "Send Back")
+        alert.addButton(withTitle: "Cancel")
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 420, height: 140))
+        scrollView.hasVerticalScroller = true
+        let textView = NSTextView(frame: scrollView.bounds)
+        textView.string = ""
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.isRichText = false
+        textView.autoresizingMask = [.width, .height]
+        scrollView.documentView = textView
+        alert.accessoryView = scrollView
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            return nil
+        }
+        let feedback = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if feedback.isEmpty {
+            actionError = "Feedback is required to request changes."
+            return nil
+        }
+        return feedback
+    }
+
     private func performCLI(
         _ arguments: [String],
         success: String,

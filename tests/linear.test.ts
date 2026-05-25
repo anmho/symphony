@@ -151,6 +151,47 @@ describe("linear client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("normalizes Linear attachment URLs onto issues", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { query: string };
+      expect(body.query).toContain("attachments(first: 25)");
+      return response({
+        issues: {
+          nodes: [
+            {
+              ...terminalIssueNode("issue-1", "ANM-1", ["symphony"], "In Review"),
+              attachments: {
+                nodes: [
+                  {
+                    title: "GitHub PR",
+                    url: "https://github.com/anmho/symphony/pull/41"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchHandoffIssues(
+        makeConfig({
+          projectSlug: null,
+          teamKey: "ANM",
+          requiredLabels: ["symphony"],
+          handoffState: "In Review"
+        })
+      )
+    ).resolves.toMatchObject([
+      {
+        identifier: "ANM-1",
+        attachments: ["https://github.com/anmho/symphony/pull/41", "GitHub PR"]
+      }
+    ]);
+  });
+
   it("moves an issue to a named workflow state", async () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
@@ -219,6 +260,7 @@ function terminalIssueNode(id: string, identifier: string, labels: string[], sta
     title: `Issue ${identifier}`,
     state: { name: state },
     labels: { nodes: labels.map((name) => ({ name })) },
+    attachments: { nodes: [] },
     relations: { nodes: [] }
   };
 }

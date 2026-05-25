@@ -21,6 +21,10 @@ export interface StatusServerControls {
     text: string,
   ) => { queued: boolean; issue: string };
   resumeIssue?: (issue: string) => { resumed: boolean; issue: string };
+  requestChanges?: (
+    issue: string,
+    feedback: string,
+  ) => Promise<{ issue: string; state: string }> | { issue: string; state: string };
 }
 
 export function startStatusServer(
@@ -87,6 +91,27 @@ export function startStatusServer(
         return;
       }
       const result = controls.resumeIssue(issue);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ ...result, snapshot: getSnapshot() }, null, 2),
+      );
+      return;
+    }
+
+    if (
+      url.pathname === '/control/request-changes' &&
+      request.method === 'POST' &&
+      controls.requestChanges
+    ) {
+      const body = await readJsonBody(request);
+      const issue = typeof body.issue === 'string' ? body.issue : '';
+      const feedback = typeof body.feedback === 'string' ? body.feedback : '';
+      if (!issue || !feedback.trim()) {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: 'issue_and_feedback_required' }));
+        return;
+      }
+      const result = await controls.requestChanges(issue, feedback);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
         JSON.stringify({ ...result, snapshot: getSnapshot() }, null, 2),
@@ -302,6 +327,29 @@ export async function resumeIssue(
       return null;
     }
     return (await response.json()) as { resumed: boolean; issue: string };
+  } catch {
+    return null;
+  }
+}
+
+export async function requestChanges(
+  port = DEFAULT_STATUS_PORT,
+  issue: string,
+  feedback: string,
+): Promise<{ issue: string; state: string } | null> {
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/control/request-changes`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ issue, feedback }),
+      },
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as { issue: string; state: string };
   } catch {
     return null;
   }

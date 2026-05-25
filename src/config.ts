@@ -90,6 +90,18 @@ const RawWorkflowConfigSchema = z
         model: z.string().nullable().optional()
       })
       .optional(),
+    github: z
+      .object({
+        pr_identity: z
+          .object({
+            kind: z.literal("machine_user"),
+            token_command: z.string().min(1),
+            author_name: z.string().min(1),
+            author_email: z.string().min(1)
+          })
+          .optional()
+      })
+      .optional(),
     pull_request: z
       .object({
         backend: z.enum(["github", "graphite"]).optional(),
@@ -196,6 +208,7 @@ export function resolveWorkflowConfig(
   const agent = raw.agent ?? {};
   const hooks = raw.hooks ?? {};
   const codex = raw.codex ?? {};
+  const github = raw.github ?? {};
   const pullRequest = raw.pull_request ?? {};
 
   const apiKey = resolveEnvValue(tracker.api_key ?? "$LINEAR_API_KEY", userConfig);
@@ -267,6 +280,16 @@ export function resolveWorkflowConfig(
       stallTimeoutMs: codex.stall_timeout_ms ?? 300000,
       model: codex.model ?? null
     },
+    github: {
+      prIdentity: github.pr_identity
+        ? {
+            kind: github.pr_identity.kind,
+            tokenCommand: github.pr_identity.token_command,
+            authorName: github.pr_identity.author_name,
+            authorEmail: github.pr_identity.author_email
+          }
+        : null
+    },
     pullRequest: {
       backend: pullRequest.backend ?? "github",
       graphiteFallback: pullRequest.graphite?.fallback ?? "fail"
@@ -283,6 +306,7 @@ export function renderConfigSummary(config: EffectiveWorkflowConfig): string {
     `repo=${config.workspace.repoPath}`,
     `concurrency=${config.agent.maxConcurrentAgents}`,
     `prBackend=${config.pullRequest.backend}`,
+    `githubPrIdentity=${config.github.prIdentity?.kind ?? ""}`,
     `taskCodex="${config.codex.command}"`
   ].join(" ");
 }

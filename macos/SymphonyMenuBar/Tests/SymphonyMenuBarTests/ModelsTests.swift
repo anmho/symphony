@@ -69,18 +69,23 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.rows(for: .waiting, nowMs: 1_000_000_000).count, inventory.queued)
     }
 
-    func testDoneSectionUsesCompletedIdentifiers() throws {
+    func testReviewAndDoneSectionsStaySeparate() throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "status", withExtension: "json"))
         let data = try Data(contentsOf: url)
         let snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: data)
 
+        let reviewRows = snapshot.rows(for: .review, nowMs: 20_000)
+        XCTAssertEqual(reviewRows.map(\.identifier), ["ANM-98"])
+        XCTAssertEqual(reviewRows.first?.status, "PR review")
+        XCTAssertEqual(reviewRows.first?.repoKey, ".github")
+        XCTAssertEqual(reviewRows.first?.prUrl, "https://github.com/anmho/.github/pull/1")
+        XCTAssertTrue(reviewRows.first?.detail.contains("In Review") == true)
+
         let doneRows = snapshot.rows(for: .done, nowMs: 20_000)
-        XCTAssertEqual(doneRows.map(\.identifier), ["ANM-98", "ANM-99"])
-        XCTAssertEqual(doneRows.first?.status, "PR review")
-        XCTAssertEqual(doneRows.first?.repoKey, ".github")
-        XCTAssertEqual(doneRows.first?.prUrl, "https://github.com/anmho/.github/pull/1")
-        XCTAssertTrue(doneRows.first?.detail.contains("In Review") == true)
-        XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 2)
+        XCTAssertEqual(doneRows.map(\.identifier), ["ANM-99"])
+        XCTAssertEqual(doneRows.first?.status, "completed")
+        XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).review, 1)
+        XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 1)
     }
 
     func testGitHubRepositoryURLUsesRepoKey() {

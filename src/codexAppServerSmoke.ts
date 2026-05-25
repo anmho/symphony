@@ -179,6 +179,7 @@ function makeSmokeIssue(): NormalizedIssue {
     url: null,
     labels: [],
     comments: [],
+    attachments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null
@@ -233,6 +234,9 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null
+    },
+    github: {
+      prIdentity: null
     },
     pullRequest: {
       backend: "github",

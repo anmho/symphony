@@ -69,13 +69,14 @@ describe("PR handoff backend", () => {
 
   it("enforces PR base/head metadata and the Linear Ticket link", async () => {
     const runner = fakeRunner({
-      "gh pr view symphony/ANM-295 --json url,baseRefName,headRefName,body": {
+      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body": {
         exitCode: 0,
         stdout: JSON.stringify({
           url: "https://github.com/anmho/symphony/pull/295",
+          author: { login: "anmho" },
           baseRefName: "symphony/ANM-294",
           headRefName: "symphony/ANM-295",
-          body: "## Linear Ticket\nhttps://linear.app/anmho/issue/ANM-295/x"
+          body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.dev/github/pr/anmho/symphony/295"
         })
       }
     });
@@ -86,13 +87,16 @@ describe("PR handoff backend", () => {
         branch: "symphony/ANM-295",
         expectedBaseBranch: "symphony/ANM-294",
         linearTicketUrl: "https://linear.app/anmho/issue/ANM-295/x",
+        graphitePrUrl: "https://app.graphite.dev/github/pr/anmho/symphony/295",
+        expectedAuthorLogin: "anmho",
         runner
       })
     ).resolves.toEqual({
       url: "https://github.com/anmho/symphony/pull/295",
       baseRefName: "symphony/ANM-294",
       headRefName: "symphony/ANM-295",
-      body: "## Linear Ticket\nhttps://linear.app/anmho/issue/ANM-295/x"
+      authorLogin: "anmho",
+      body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.dev/github/pr/anmho/symphony/295"
     });
   });
 
@@ -103,10 +107,11 @@ describe("PR handoff backend", () => {
         exitCode: 0,
         stdout: "Submitted stack\n"
       },
-      "gh pr view symphony/ANM-295 --json url,baseRefName,headRefName,body": {
+      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body": {
         exitCode: 0,
         stdout: JSON.stringify({
           url: "https://github.com/anmho/symphony/pull/295",
+          author: { login: "anmho" },
           baseRefName: "symphony/ANM-294",
           headRefName: "symphony/ANM-295",
           body: "Linear Ticket: https://linear.app/anmho/issue/ANM-295/x"
@@ -124,7 +129,7 @@ describe("PR handoff backend", () => {
 
     expect(calls).toEqual([
       "gt submit --stack --no-interactive --no-edit --no-ai",
-      "gh pr view symphony/ANM-295 --json url,baseRefName,headRefName,body"
+      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body"
     ]);
   });
 
@@ -137,6 +142,27 @@ describe("PR handoff backend", () => {
     expect(instructions).toContain("gt submit --stack --no-interactive --no-edit --no-ai");
     expect(instructions).toContain("fall back to the GitHub PR flow");
     expect(instructions).toContain("https://linear.app/anmho/issue/ANM-295/x");
+  });
+
+  it("adds machine-user handoff instructions to GitHub prompts", () => {
+    const instructions = buildPrHandoffInstructions(
+      makeConfig({ backend: "github", fallback: "fail", identity: true }),
+      makeIssue()
+    );
+
+    expect(instructions).toContain("configured GitHub machine-user PR identity");
+    expect(instructions).toContain("vault kv get -mount=secret -field=token prod/providers/github/symphony");
+    expect(instructions).toContain("Graphite: after the PR exists");
+    expect(instructions).toContain("gh pr view --json url,author,baseRefName,headRefName,body");
+  });
+
+  it("warns that Graphite may use the local identity when service account is configured", () => {
+    const instructions = buildPrHandoffInstructions(
+      makeConfig({ backend: "graphite", fallback: "fail", identity: true }),
+      makeIssue()
+    );
+
+    expect(instructions).toContain("Graphite submit may still use the local Graphite/GitHub identity");
   });
 });
 
@@ -159,8 +185,19 @@ function fakeRunner(
 function makeConfig(pr: {
   backend: "github" | "graphite";
   fallback: "fail" | "github";
+  identity?: boolean;
 }): EffectiveWorkflowConfig {
   return {
+    github: {
+      prIdentity: pr.identity
+        ? {
+            kind: "machine_user",
+            tokenCommand: "vault kv get -mount=secret -field=token prod/providers/github/symphony",
+            authorName: "Symphony",
+            authorEmail: "anmho-symphony@users.noreply.github.com"
+          }
+        : null
+    },
     pullRequest: {
       backend: pr.backend,
       graphiteFallback: pr.fallback
@@ -180,6 +217,7 @@ function makeIssue(): NormalizedIssue {
     url: "https://linear.app/anmho/issue/ANM-295/x",
     labels: ["symphony"],
     comments: [],
+    attachments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null

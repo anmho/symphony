@@ -4,6 +4,7 @@ import {
   fetchDaemonEvents,
   latestVisibleWorkEvents,
   queueSteer,
+  requestChanges,
   resumeIssue,
   startStatusServer,
 } from '../src/status.js';
@@ -43,6 +44,7 @@ describe('status server', () => {
       ],
       queueSteer: (issue) => ({ queued: true, issue }),
       resumeIssue: (issue) => ({ resumed: true, issue }),
+      requestChanges: (issue) => ({ issue, state: 'In Progress' }),
     });
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : 0;
@@ -56,6 +58,12 @@ describe('status server', () => {
     await expect(resumeIssue(port, 'ANM-1')).resolves.toMatchObject({
       resumed: true,
       issue: 'ANM-1',
+    });
+    await expect(
+      requestChanges(port, 'ANM-1', 'Fix the failing test'),
+    ).resolves.toMatchObject({
+      issue: 'ANM-1',
+      state: 'In Progress',
     });
   });
 

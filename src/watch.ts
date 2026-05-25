@@ -36,7 +36,7 @@ export interface WatchOptions {
 }
 
 interface WatchRow {
-  kind: 'running' | 'parked' | 'retry' | 'completed';
+  kind: 'running' | 'parked' | 'retry' | 'review' | 'completed';
   issue: string;
   issueKey: string;
   age: string;
@@ -749,7 +749,7 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
     (issueId): WatchRow => {
       const detail = snapshot.handoffDetails.find((issue) => issue.identifier === issueId);
       return {
-      kind: 'completed',
+      kind: 'review',
       issue: detail?.title ? `${issueId} · ${detail.title}` : issueId,
       issueKey: issueId,
       age: '-',
@@ -1039,6 +1039,9 @@ function createTheme(enabled: boolean): Theme {
     status: (kind, value) => {
       if (kind === 'retry' || kind === 'parked') {
         return paint('33', value);
+      }
+      if (kind === 'review') {
+        return paint('35', value);
       }
       if (kind === 'completed') {
         return paint('32', value);

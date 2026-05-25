@@ -76,6 +76,7 @@ function makeIssue(overrides: Partial<NormalizedIssue> = {}): NormalizedIssue {
     url: "https://linear.app/anmho/issue/ANM-123/review-the-pr",
     labels: ["symphony", "repo:symphony"],
     comments: [],
+    attachments: [],
     blockedBy: [],
     createdAt: null,
     updatedAt: null,
@@ -131,6 +132,9 @@ function makeConfig(): EffectiveWorkflowConfig {
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null
+    },
+    github: {
+      prIdentity: null
     },
     pullRequest: {
       backend: "github",

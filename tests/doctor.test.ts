@@ -210,6 +210,9 @@ function makeConfig(
       stallTimeoutMs: 300000,
       model: null,
     },
+    github: {
+      prIdentity: null,
+    },
     pullRequest: {
       backend: 'github',
       graphiteFallback: 'fail',
@@ -243,6 +246,7 @@ function makeIssue(
     url: overrides.url ?? null,
     labels: overrides.labels ?? [],
     comments: overrides.comments ?? [],
+    attachments: overrides.attachments ?? [],
     blockedBy: overrides.blockedBy ?? [],
     createdAt: overrides.createdAt ?? null,
     updatedAt: overrides.updatedAt ?? null,

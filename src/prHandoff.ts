@@ -1,10 +1,10 @@
 import { runCommand, type CommandResult } from "./process.js";
-import type { EffectiveWorkflowConfig, NormalizedIssue, PullRequestConfig } from "./types.js";
+import type { EffectiveWorkflowConfig, GithubPrIdentityConfig, NormalizedIssue, PullRequestConfig } from "./types.js";
 
 export type CommandRunner = (
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number }
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }
 ) => Promise<CommandResult>;
 
 export type PreparedPrBackend =
@@ -16,6 +16,7 @@ export interface VerifiedPullRequestMetadata {
   baseRefName: string;
   headRefName: string;
   body: string;
+  authorLogin: string | null;
 }
 
 export async function preparePrHandoffBackend(
@@ -93,10 +94,12 @@ export async function verifyPullRequestMetadata(input: {
   branch: string;
   expectedBaseBranch: string;
   linearTicketUrl: string;
+  graphitePrUrl?: string | null;
+  expectedAuthorLogin?: string | null;
   runner?: CommandRunner;
 }): Promise<VerifiedPullRequestMetadata> {
   const runner = input.runner ?? runCommand;
-  const result = await runner("gh", ["pr", "view", input.branch, "--json", "url,baseRefName,headRefName,body"], {
+  const result = await runner("gh", ["pr", "view", input.branch, "--json", "url,author,baseRefName,headRefName,body"], {
     cwd: input.cwd,
     timeoutMs: 60000
   });
@@ -114,19 +117,30 @@ export async function verifyPullRequestMetadata(input: {
   if (!metadata.body.includes(input.linearTicketUrl)) {
     throw new Error("github_pr_body_missing_linear_ticket_link");
   }
+  if (input.graphitePrUrl && !metadata.body.includes(input.graphitePrUrl)) {
+    throw new Error("github_pr_body_missing_graphite_link");
+  }
+  if (input.expectedAuthorLogin && metadata.authorLogin !== input.expectedAuthorLogin) {
+    throw new Error(`github_pr_author_mismatch: expected ${input.expectedAuthorLogin}, got ${metadata.authorLogin ?? ""}`);
+  }
 
   return metadata;
 }
 
 export function buildPrHandoffInstructions(
-  config: Pick<EffectiveWorkflowConfig, "pullRequest">,
+  config: Pick<EffectiveWorkflowConfig, "github" | "pullRequest">,
   issue: Pick<NormalizedIssue, "url">
 ): string {
+  const identityInstructions = buildIdentityInstructions(config.github.prIdentity);
   if (config.pullRequest.backend === "github") {
     return [
       "## PR Handoff Backend",
       "",
-      "Use the default GitHub PR flow for handoff. Push the current branch, open or update the PR with GitHub tooling, keep the Linear Ticket link in the PR body, and verify the PR head/base with `gh pr view --json url,baseRefName,headRefName,body` before leaving the handoff."
+      "Use the default GitHub PR flow for handoff.",
+      identityInstructions,
+      "Push the current branch, open or update the PR with GitHub tooling, keep the Linear and Graphite links in the PR body, and verify the PR author/head/base/body with `gh pr view --json url,author,baseRefName,headRefName,body` before leaving the handoff.",
+      issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
+      "Graphite: after the PR exists, add `https://app.graphite.dev/github/pr/<owner>/<repo>/<number>` to the PR body."
     ].join("\n");
   }
 
@@ -139,13 +153,18 @@ export function buildPrHandoffInstructions(
     "## PR Handoff Backend",
     "",
     "This workflow is configured for Graphite stacked PR handoff.",
+    identityInstructions,
     "Before submitting, verify Graphite is usable with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`.",
+    config.github.prIdentity
+      ? "Warning: a GitHub service-account PR identity is configured, but Graphite submit may still use the local Graphite/GitHub identity. If the submitted PR author is not the service account, leave a clear Linear blocker."
+      : "",
     fallbackSentence,
     "Submit the stack with `gt submit --stack --no-interactive --no-edit --no-ai`.",
-    "After submit, verify the resulting GitHub PR metadata with `gh pr view --json url,baseRefName,headRefName,body`.",
-    "The PR head must match the current branch, the PR base must match the expected parent stack branch, and the PR body must include the Linear Ticket link.",
-    issue.url ? `Linear Ticket: ${issue.url}` : "Linear Ticket: use the issue URL from this prompt."
-  ].join("\n");
+    "After submit, verify the resulting GitHub PR metadata with `gh pr view --json url,author,baseRefName,headRefName,body`.",
+    "The PR head must match the current branch, the PR base must match the expected parent stack branch, and the PR body must include the Linear and Graphite links.",
+    issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
+    "Graphite: add `https://app.graphite.dev/github/pr/<owner>/<repo>/<number>` to the PR body."
+  ].filter(Boolean).join("\n");
 }
 
 function graphiteUnavailable(config: PullRequestConfig, reason: string): PreparedPrBackend {
@@ -173,18 +192,33 @@ async function runBackendProbe(
 }
 
 function parsePullRequestMetadata(raw: string): VerifiedPullRequestMetadata {
-  const parsed = JSON.parse(raw) as Partial<VerifiedPullRequestMetadata>;
+  const parsed = JSON.parse(raw) as Partial<VerifiedPullRequestMetadata> & {
+    author?: { login?: string | null } | null;
+  };
   const url = typeof parsed.url === "string" ? parsed.url : "";
   const baseRefName = typeof parsed.baseRefName === "string" ? parsed.baseRefName : "";
   const headRefName = typeof parsed.headRefName === "string" ? parsed.headRefName : "";
   const body = typeof parsed.body === "string" ? parsed.body : "";
+  const authorLogin = typeof parsed.author?.login === "string" ? parsed.author.login : null;
   if (!url || !baseRefName || !headRefName) {
     throw new Error("github_pr_metadata_incomplete");
   }
-  return { url, baseRefName, headRefName, body };
+  return { url, baseRefName, headRefName, body, authorLogin };
 }
 
 function commandFailure(code: string, command: string, result: CommandResult): string {
   const detail = (result.stderr || result.stdout).trim();
   return detail ? `${code}: ${command} failed: ${detail}` : `${code}: ${command} failed`;
+}
+
+function buildIdentityInstructions(identity: GithubPrIdentityConfig | null): string {
+  if (!identity) {
+    return "Use the currently authenticated local GitHub identity.";
+  }
+  return [
+    "Use the configured GitHub machine-user PR identity for handoff commands, not the default local GitHub user.",
+    `Before PR handoff, resolve the token with: \`${identity.tokenCommand}\`.`,
+    "Use that token only in-process as `GH_TOKEN` for `gh` commands and for the authenticated push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
+    `Use Git author and committer identity: ${identity.authorName} <${identity.authorEmail}>.`
+  ].join("\n");
 }

@@ -6,6 +6,9 @@ describe("prompt rendering", () => {
   it("renders Liquid issue fields", async () => {
     const config = {
       promptTemplate: "Implement {{ issue.identifier }}: {{ issue.title }} on attempt {{ attempt }}.",
+      github: {
+        prIdentity: null
+      },
       pullRequest: {
         backend: "github",
         graphiteFallback: "fail"
@@ -22,6 +25,7 @@ describe("prompt rendering", () => {
       url: null,
       labels: [],
       comments: [],
+      attachments: [],
       blockedBy: [],
       createdAt: null,
       updatedAt: null

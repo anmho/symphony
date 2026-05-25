@@ -315,7 +315,13 @@ describe('orchestrator', () => {
         handoffState: 'Human Review',
       },
     });
-    const moved = vi.fn(async () => undefined);
+    const moved = vi.fn(
+      async (
+        _config: EffectiveWorkflowConfig,
+        _issueId: string,
+        _state: string,
+      ) => undefined,
+    );
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => [issue],
@@ -556,6 +562,60 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().completed).toEqual([]);
   });
 
+  it('moves handoff issues with merged GitHub PRs to terminal Linear state', async () => {
+    const issue = makeIssue('ANM-324', {
+      id: 'issue-324',
+      title: 'agent: add concrete MCP auth checks for optional connectors',
+      state: 'In Review',
+      labels: ['symphony', 'repo:agent'],
+      attachments: ['https://github.com/anmho/agent/pull/9'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        terminalStates: ['Done'],
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestStatus: async () => ({
+        url: 'https://github.com/anmho/agent/pull/9',
+        owner: 'anmho',
+        repo: 'agent',
+        number: 9,
+        state: 'merged',
+        mergedAt: '2026-05-08T10:19:30Z',
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Done');
+    expect(comments[0]).toContain('https://github.com/anmho/agent/pull/9');
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+    expect(orchestrator.snapshot().completed).toEqual(['ANM-324']);
+    expect(orchestrator.snapshot().completedDetails).toMatchObject([
+      {
+        identifier: 'ANM-324',
+        state: 'Done',
+        reviewKind: 'completed',
+        prUrl: 'https://github.com/anmho/agent/pull/9',
+      },
+    ]);
+  });
+
   it('moves externally handed-off running issues into the handoff snapshot', async () => {
     const issue = makeIssue('APP-1');
     const config = makeConfig({
@@ -586,6 +646,124 @@ describe('orchestrator', () => {
 
     expect(orchestrator.snapshot().running).toHaveLength(0);
     expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
+  });
+
+  it('moves active PR-linked running issues into the handoff state', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    let fetches = 0;
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => {
+        fetches += 1;
+        return fetches === 1
+          ? issue
+          : {
+              ...issue,
+              attachments: ['https://github.com/anmho/symphony/pull/41'],
+            };
+      },
+      moveIssueToState: moved,
+      runCodexTurn: async (_input, options) => abortableTurn(options.signal),
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+    expect(orchestrator.snapshot().running).toHaveLength(1);
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
+    expect(orchestrator.snapshot().handoffDetails).toMatchObject([
+      {
+        identifier: 'APP-1',
+        state: 'In Review',
+        prUrl: 'https://github.com/anmho/symphony/pull/41',
+      },
+    ]);
+  });
+
+  it('does not dispatch active PR-linked candidate issues', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      moveIssueToState: moved,
+      runCodexTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(runCodexTurn).not.toHaveBeenCalled();
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
+  });
+
+  it('moves active candidate issues with already-merged PRs directly to terminal state', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        terminalStates: ['Done'],
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestStatus: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/41',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 41,
+        state: 'merged',
+        mergedAt: '2026-05-24T01:00:00Z',
+      }),
+      moveIssueToState: moved,
+      runCodexTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Done');
+    expect(runCodexTurn).not.toHaveBeenCalled();
+    expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+    expect(orchestrator.snapshot().completed).toEqual(['APP-1']);
   });
 
   it('holds retries while paused and resumes dispatch after unpause', async () => {
@@ -625,6 +803,60 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().paused).toBe(false);
     expect(codexCalls).toBeGreaterThan(1);
   });
+
+  it('moves reviewed issues back to In Progress with feedback', async () => {
+    const issue = makeIssue('APP-1', {
+      state: 'In Review',
+      attachments: ['https://github.com/anmho/example/pull/1'],
+    });
+    const comments: string[] = [];
+    const moved = vi.fn(
+      async (
+        _config: EffectiveWorkflowConfig,
+        _issueId: string,
+        _state: string,
+      ) => undefined,
+    );
+    let currentIssue = issue;
+    let codexCalls = 0;
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchIssueById: async () => currentIssue,
+      fetchCandidateIssues: async () =>
+        currentIssue.state === 'In Progress' ? [currentIssue] : [],
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+      moveIssueToState: async (moveConfig, issueId, state) => {
+        moved(moveConfig, issueId, state);
+        currentIssue = { ...currentIssue, state };
+      },
+      runCodexTurn: async (_input, options) => {
+        codexCalls += 1;
+        return abortableTurn(options.signal);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    const result = await orchestrator.requestChanges('APP-1', 'Please simplify the implementation.');
+
+    expect(result).toEqual({ issue: 'APP-1', state: 'In Progress' });
+    expect(comments[0]).toContain('Please simplify the implementation.');
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    await flushPromises();
+    expect(codexCalls).toBe(1);
+    expect(orchestrator.snapshot().running).toHaveLength(1);
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
 });
 
 type TestDeps = Partial<OrchestratorDependencies>;
@@ -639,6 +871,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     fetchHandoffIssues: async () => [],
     writeRunnerComment: async () => undefined,
     moveIssueToState: async () => undefined,
+    fetchPullRequestStatus: async () => null,
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),
     removeWorkspace: async () => undefined,
     workspaceInfoForIssue: (_config, issue) => makeWorkspace(issue),
@@ -718,6 +951,9 @@ function makeConfig(
       stallTimeoutMs: 300000,
       model: null,
     },
+    github: {
+      prIdentity: null,
+    },
     pullRequest: {
       backend: 'github',
       graphiteFallback: 'fail',
@@ -751,6 +987,7 @@ function makeIssue(
     url: overrides.url ?? null,
     labels: overrides.labels ?? [],
     comments: overrides.comments ?? [],
+    attachments: overrides.attachments ?? [],
     blockedBy: overrides.blockedBy ?? [],
     createdAt: overrides.createdAt ?? null,
     updatedAt: overrides.updatedAt ?? null,

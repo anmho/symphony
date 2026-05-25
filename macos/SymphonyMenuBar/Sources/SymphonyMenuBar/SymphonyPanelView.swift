@@ -6,6 +6,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
     case overview
     case running
     case waiting
+    case review
     case done
     case settings
 
@@ -16,6 +17,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .overview: return "Overview"
         case .running: return "Running"
         case .waiting: return "Waiting"
+        case .review: return "Review"
         case .done: return "Done"
         case .settings: return "Settings"
         }
@@ -26,6 +28,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .overview: return "waveform.circle.fill"
         case .running: return "play.circle.fill"
         case .waiting: return "clock.fill"
+        case .review: return "text.badge.checkmark"
         case .done: return "checkmark.circle.fill"
         case .settings: return "gearshape.fill"
         }
@@ -113,6 +116,8 @@ struct SymphonyPanelView: View {
         case .waiting:
             let queued = inventory.queued
             return queued > 0 ? queued : nil
+        case .review:
+            return inventory.review > 0 ? inventory.review : nil
         case .done:
             return inventory.completed > 0 ? inventory.completed : nil
         default:
@@ -130,7 +135,7 @@ struct SymphonyPanelView: View {
                     switch section {
                     case .overview:
                         overviewContent
-                    case .running, .waiting, .done:
+                    case .running, .waiting, .review, .done:
                         agentSectionContent
                     case .settings:
                         settingsContent
@@ -155,6 +160,8 @@ struct SymphonyPanelView: View {
             return inventory.running > 0 ? "Running · \(inventory.running)" : section.title
         case .waiting:
             return inventory.queued > 0 ? "Waiting · \(inventory.queued)" : section.title
+        case .review:
+            return inventory.review > 0 ? "Review · \(inventory.review)" : section.title
         case .done:
             return inventory.completed > 0 ? "Done · \(inventory.completed)" : section.title
         case .settings:
@@ -286,10 +293,18 @@ struct SymphonyPanelView: View {
                 )
 
                 metricCard(
-                    title: "Completed",
+                    title: "In review",
+                    value: "\(inventory.review)",
+                    subtitle: inventory.review == 0 ? "No human review needed" : "Needs PR review or feedback",
+                    progress: progressFraction(active: inventory.review, total: max(inventory.review + inventory.completed, 1)),
+                    tint: .purple
+                )
+
+                metricCard(
+                    title: "Done",
                     value: "\(inventory.completed)",
-                    subtitle: "Finished this session",
-                    progress: progressFraction(active: inventory.completed, total: max(inventory.active + inventory.completed, 1)),
+                    subtitle: "Terminal Linear states",
+                    progress: progressFraction(active: inventory.completed, total: max(inventory.review + inventory.completed, 1)),
                     tint: .blue
                 )
 
@@ -334,29 +349,43 @@ struct SymphonyPanelView: View {
                     )
                 } else {
                     ForEach(rows) { row in
-                        AgentRowView(
-                            row: row,
-                            canOpenLinear: linearIssueURL(
-                                for: row.identifier,
-                                orgSlug: service.settings.linearOrgSlug
-                            ) != nil,
-                            canOpenGitHub: githubRepositoryURL(
-                                for: row.repoKey,
-                                ownerSlug: service.settings.linearOrgSlug
-                            ) != nil,
-                            canOpenPullRequest: row.prUrl != nil
-                        ) {
-                            service.openIssue(row.identifier)
-                        } onOpenGitHub: {
-                            service.openGitHubRepo(row.repoKey)
-                        } onOpenPullRequest: {
-                            service.openPullRequest(row.prUrl)
-                        } onOpenLogs: {
-                            service.openLogs(for: row.identifier)
-                        } onRetry: {
-                            service.resumeIssue(row.identifier)
-                        } onRequestCodexReview: {
-                            service.requestCodexReview(row.identifier, prUrl: row.prUrl)
+                        VStack(alignment: .leading, spacing: 6) {
+                            AgentRowView(
+                                row: row,
+                                canOpenLinear: linearIssueURL(
+                                    for: row.identifier,
+                                    orgSlug: service.settings.linearOrgSlug
+                                ) != nil,
+                                canOpenGitHub: githubRepositoryURL(
+                                    for: row.repoKey,
+                                    ownerSlug: service.settings.linearOrgSlug
+                                ) != nil,
+                                canOpenPullRequest: row.prUrl != nil
+                            ) {
+                                service.openIssue(row.identifier)
+                            } onOpenGitHub: {
+                                service.openGitHubRepo(row.repoKey)
+                            } onOpenPullRequest: {
+                                service.openPullRequest(row.prUrl)
+                            } onOpenLogs: {
+                                service.openLogs(for: row.identifier)
+                            } onRetry: {
+                                service.resumeIssue(row.identifier)
+                            } onRequestCodexReview: {
+                                service.requestCodexReview(row.identifier, prUrl: row.prUrl)
+                            } onRequestChanges: {
+                                service.requestChanges(row.identifier)
+                            }
+                            if row.kind == .review {
+                                Button {
+                                    service.requestChanges(row.identifier)
+                                } label: {
+                                    Label("Request Changes", systemImage: "arrow.uturn.backward")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(service.isBusy)
+                            }
                         }
                     }
                 }
@@ -415,6 +444,8 @@ struct SymphonyPanelView: View {
             return snapshot.rows(for: .running)
         case .waiting:
             return snapshot.rows(for: .waiting)
+        case .review:
+            return snapshot.rows(for: .review)
         case .done:
             return snapshot.rows(for: .done)
         default:
@@ -576,6 +607,7 @@ struct SymphonyPanelView: View {
         case .running: return .green
         case .retry: return .orange
         case .parked: return .yellow
+        case .review: return .purple
         case .completed: return .blue
         }
     }

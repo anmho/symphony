@@ -22,6 +22,7 @@ import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
+import { fetchPullRequestStatus } from './github.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
@@ -41,6 +42,7 @@ import type {
   LiveSession,
   NormalizedIssue,
   OrchestratorSnapshot,
+  PullRequestStatus,
   RunAttempt,
   WorkspaceInfo,
 } from './types.js';
@@ -72,6 +74,9 @@ export interface OrchestratorDependencies {
     issueId: string,
     stateName: string,
   ) => Promise<void>;
+  fetchPullRequestStatus: (
+    url: string,
+  ) => Promise<PullRequestStatus | null>;
   prepareWorkspace: (
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
@@ -144,8 +149,16 @@ function reviewKindFromIssue(
 }
 
 function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
-  const haystack = [issue.description ?? '', ...issue.comments].join('\n');
-  return haystack.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/)?.[0] ?? null;
+  const haystack = [
+    issue.description ?? '',
+    ...issue.comments,
+    ...issue.attachments,
+  ].join('\n');
+  return (
+    haystack.match(
+      /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+/,
+    )?.[0] ?? null
+  );
 }
 
 function repoKeyFromIssue(
@@ -161,6 +174,18 @@ function repoKeyFromIssue(
     }
   }
   return null;
+}
+
+function preferredTerminalState(
+  config: EffectiveWorkflowConfig,
+): string | null {
+  return (
+    config.tracker.terminalStates.find(
+      (state) => state.toLowerCase() === 'done',
+    ) ??
+    config.tracker.terminalStates[0] ??
+    null
+  );
 }
 
 export interface OrchestratorOptions {
@@ -197,6 +222,7 @@ export class Orchestrator {
   private readonly retryAttempts = new Map<string, RunAttempt>();
   private readonly handoff = new Map<string, IssueSummary>();
   private readonly completed = new Map<string, IssueSummary>();
+  private readonly reworkIssues = new Set<string>();
   private readonly codexTotals: CodexUsageTotals = {
     inputTokens: 0,
     outputTokens: 0,
@@ -224,6 +250,7 @@ export class Orchestrator {
       fetchTerminalIssues,
       writeRunnerComment,
       moveIssueToState,
+      fetchPullRequestStatus,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
       workspaceInfoForIssue,
@@ -369,6 +396,48 @@ export class Orchestrator {
     return { resumed: false, issue };
   }
 
+  async requestChanges(
+    issueReference: string,
+    feedback: string,
+  ): Promise<{ issue: string; state: string }> {
+    const trimmed = feedback.trim();
+    if (!trimmed) {
+      throw new Error('feedback_required');
+    }
+    const config = await this.reloadConfig(false);
+    const issue = await this.deps.fetchIssueById(config, issueReference);
+    if (!issue) {
+      throw new Error(`issue_not_found: ${issueReference}`);
+    }
+    const targetState =
+      config.tracker.activeStates.find(
+        (state) => state.toLowerCase() === 'in progress',
+      ) ?? config.tracker.activeStates[0];
+    if (!targetState) {
+      throw new Error('no_active_state_configured');
+    }
+
+    await this.deps.writeRunnerComment(
+      config,
+      issue.id,
+      [
+        'Changes requested by human reviewer.',
+        '',
+        trimmed,
+        '',
+        `Symphony moved this issue back to ${targetState} for agent rework.`,
+      ].join('\n'),
+    );
+    await this.deps.moveIssueToState(config, issue.id, targetState);
+    this.reworkIssues.add(issue.id);
+    this.handoff.delete(issue.identifier);
+    this.completed.delete(issue.identifier);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+    await this.tick();
+    return { issue: issue.identifier, state: targetState };
+  }
+
   resumeParkedRateLimitedRuns(): number {
     const now = this.deps.now();
     let resumed = 0;
@@ -424,6 +493,9 @@ export class Orchestrator {
         break;
       }
       if (this.claimed.has(issue.id)) {
+        continue;
+      }
+      if (await this.syncPrLinkedIssueToHandoff(config, issue)) {
         continue;
       }
       this.dispatchIssue(config, issue, 0);
@@ -508,6 +580,9 @@ export class Orchestrator {
       if (this.completed.has(issue.identifier)) {
         continue;
       }
+      if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
+        continue;
+      }
       this.handoff.set(issue.identifier, issueSummary(config, issue));
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
@@ -531,14 +606,20 @@ export class Orchestrator {
 
       if (latestIssue && isTerminalState(latestIssue.state, config)) {
         this.completed.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        this.reworkIssues.delete(latestIssue.id);
         entry.cancelReason = `state_${latestIssue.state}`;
         entry.abortController.abort();
+        continue;
+      }
+
+      if (latestIssue && await this.syncPrLinkedIssueToHandoff(config, latestIssue, entry)) {
         continue;
       }
 
       if (!latestIssue || !isActiveState(latestIssue.state, config)) {
         if (latestIssue && isHandoffState(latestIssue.state, config)) {
           this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+          this.reworkIssues.delete(latestIssue.id);
         }
         entry.cancelReason = latestIssue
           ? `state_${latestIssue.state}`
@@ -565,6 +646,12 @@ export class Orchestrator {
 
       const issue = await this.deps.fetchIssueById(config, attempt.issueId);
       if (!issue || !isIssueEligible(issue, config)) {
+        this.retryAttempts.delete(attempt.issueId);
+        this.claimed.delete(attempt.issueId);
+        continue;
+      }
+
+      if (await this.syncPrLinkedIssueToHandoff(config, issue)) {
         this.retryAttempts.delete(attempt.issueId);
         this.claimed.delete(attempt.issueId);
         continue;
@@ -699,12 +786,18 @@ export class Orchestrator {
       if (isTerminalState(issue.state, config)) {
         await this.cleanupIssueWorkspace(config, issue);
         this.completed.set(issue.identifier, issueSummary(config, issue));
+        this.reworkIssues.delete(issue.id);
+        this.releaseIssue(issue.id);
+        return;
+      }
+      if (await this.syncPrLinkedIssueToHandoff(config, issue, entry)) {
         this.releaseIssue(issue.id);
         return;
       }
       if (!isActiveState(issue.state, config)) {
         if (isHandoffState(issue.state, config)) {
           this.handoff.set(issue.identifier, issueSummary(config, issue));
+          this.reworkIssues.delete(issue.id);
         }
         this.releaseIssue(issue.id);
         return;
@@ -820,6 +913,7 @@ export class Orchestrator {
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
         this.handoff.set(issue.identifier, issueSummary(config, issue));
+        this.reworkIssues.delete(issue.id);
         this.releaseIssue(issue.id);
         return;
       }
@@ -874,6 +968,115 @@ export class Orchestrator {
     }
     const status = entry.session.goalStatus?.toLowerCase();
     return status === 'complete' || status === 'completed' || status === 'blocked';
+  }
+
+  private async syncPrLinkedIssueToHandoff(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    entry: RunningEntry | null = null,
+  ): Promise<boolean> {
+    const handoffState = config.tracker.handoffState;
+    if (!handoffState || isActiveState(handoffState, config)) {
+      return false;
+    }
+    if (!isActiveState(issue.state, config)) {
+      return false;
+    }
+    if (this.reworkIssues.has(issue.id)) {
+      return false;
+    }
+    const prUrl = githubPullRequestUrlFromIssue(issue);
+    if (!prUrl) {
+      return false;
+    }
+    if (await this.syncMergedPrLinkedIssueToTerminal(config, issue, entry)) {
+      return true;
+    }
+
+    await this.deps.moveIssueToState(config, issue.id, handoffState);
+    const handedOffIssue = { ...issue, state: handoffState };
+    this.handoff.set(issue.identifier, issueSummary(config, handedOffIssue));
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+    if (entry) {
+      this.appendRunnerEvent(entry, 'issue moved to handoff state from linked PR', {
+        state: handoffState,
+        prUrl,
+      });
+      entry.cancelReason = `state_${handoffState}`;
+      entry.abortController.abort();
+    }
+    this.deps.logger.info(
+      { issue: issue.identifier, prUrl, state: handoffState },
+      'moved PR-linked issue to handoff state',
+    );
+    return true;
+  }
+
+  private async syncMergedPrLinkedIssueToTerminal(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    entry: RunningEntry | null = null,
+  ): Promise<boolean> {
+    const prUrl = githubPullRequestUrlFromIssue(issue);
+    if (!prUrl) {
+      return false;
+    }
+
+    let prStatus: PullRequestStatus | null;
+    try {
+      prStatus = await this.deps.fetchPullRequestStatus(prUrl);
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'failed to fetch linked GitHub PR status',
+      );
+      return false;
+    }
+    if (prStatus?.state !== 'merged') {
+      return false;
+    }
+
+    const terminalState = preferredTerminalState(config);
+    if (!terminalState) {
+      this.deps.logger.warn(
+        { issue: issue.identifier, prUrl },
+        'merged PR found but no terminal state is configured',
+      );
+      return false;
+    }
+
+    await this.deps.moveIssueToState(config, issue.id, terminalState);
+    await this.deps.writeRunnerComment(
+      config,
+      issue.id,
+      [
+        `Symphony observed merged GitHub PR: ${prStatus.url}.`,
+        '',
+        `Moved this issue to ${terminalState}.`,
+      ].join('\n'),
+    );
+
+    const completedIssue = { ...issue, state: terminalState };
+    this.completed.set(issue.identifier, issueSummary(config, completedIssue));
+    this.handoff.delete(issue.identifier);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+    this.reworkIssues.delete(issue.id);
+
+    if (entry) {
+      this.appendRunnerEvent(entry, 'issue moved to terminal state from merged PR', {
+        state: terminalState,
+        prUrl: prStatus.url,
+      });
+      entry.cancelReason = `state_${terminalState}`;
+      entry.abortController.abort();
+    }
+    this.deps.logger.info(
+      { issue: issue.identifier, prUrl: prStatus.url, state: terminalState },
+      'moved merged-PR issue to terminal state',
+    );
+    return true;
   }
 
   private scheduleRateLimitProbe(
