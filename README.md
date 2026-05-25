@@ -23,7 +23,6 @@ The default posture is high-trust local execution. Symphony is intended for repo
 - [Symphony smoke](docs/symphony-smoke.md)
 - [Release process](docs/release.md)
 - [Logo design note](docs/brand/logo-design-note.md)
-- [Stitch design system](.stitch/DESIGN.md) (project `16155015830023786079`)
 - [Linear issue templates for Symphony dispatch](templates/README.md)
 - [Symphony agent skill](https://github.com/anmho/skills/tree/main/skills/symphony)
 

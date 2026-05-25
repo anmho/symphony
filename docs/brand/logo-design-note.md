@@ -1,15 +1,5 @@
 # Symphony Logo Design Note
 
-## Stitch Design System
-
-Registered in Google Stitch as project **Symphony** (`16155015830023786079`).
-
-- Repo tokens: `.stitch/DESIGN.md`, `.stitch/metadata.json`
-- Stitch design system: **Symphony Control Plane** (`assets/7c555940bd5b49a3a406a75163857c4f`)
-
-Use this project when generating new Symphony UI in Stitch; tokens are project-level
-and do not need to be repeated in every prompt.
-
 ## Stitch Direction
 
 Prepared with the local Stitch design taste guidance for a calm, operator-grade
