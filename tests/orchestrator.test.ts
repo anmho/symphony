@@ -556,6 +556,39 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().completed).toEqual([]);
   });
 
+  it('extracts clean PR URLs from malformed Markdown handoff links', async () => {
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [
+        makeIssue('ANM-312', {
+          id: 'issue-312',
+          title: 'Repair PR link',
+          state: 'In Review',
+          labels: ['symphony'],
+          comments: [
+            'PR: https://github.com/anmho/terraform/pull/78](<https://github.com/anmho/terraform/pull/78>)',
+          ],
+        }),
+      ],
+      fetchCandidateIssues: async () => [],
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot().handoffDetails[0]?.prUrl).toBe(
+      'https://github.com/anmho/terraform/pull/78',
+    );
+  });
+
   it('moves externally handed-off running issues into the handoff snapshot', async () => {
     const issue = makeIssue('APP-1');
     const config = makeConfig({

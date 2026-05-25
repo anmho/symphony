@@ -24,6 +24,7 @@ import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
+import { githubPullRequestUrlFromIssue } from './githubPrUrl.js';
 import {
   ensureWorkspace,
   removeWorkspace,
@@ -141,11 +142,6 @@ function reviewKindFromIssue(
     return 'blocked';
   }
   return 'pr_review';
-}
-
-function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
-  const haystack = [issue.description ?? '', ...issue.comments].join('\n');
-  return haystack.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/)?.[0] ?? null;
 }
 
 function repoKeyFromIssue(
