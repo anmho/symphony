@@ -1,0 +1,25 @@
+{
+  "projectId": "16155015830023786079",
+  "projectName": "projects/16155015830023786079",
+  "title": "Symphony",
+  "designSystem": {
+    "assetId": "7c555940bd5b49a3a406a75163857c4f",
+    "name": "assets/7c555940bd5b49a3a406a75163857c4f",
+    "displayName": "Symphony Control Plane"
+  },
+  "screens": [
+    {
+      "id": "6024461814119006180",
+      "sourceScreen": "projects/16155015830023786079/screens/6024461814119006180",
+      "title": "Symphony Design System",
+      "type": "DESIGN_MD"
+    }
+  ],
+  "palette": {
+    "controlCharcoal": "#18201F",
+    "panelWhite": "#E8ECE4",
+    "sageSignal": "#9FB38D",
+    "statusSteel": "#64706A"
+  },
+  "stitchUrl": "https://stitch.withgoogle.com/"
+}
