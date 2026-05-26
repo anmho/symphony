@@ -10,6 +10,7 @@ tracker:
     - Todo
     - In Progress
   handoff_state: In Review
+  merge_state: Eligible for Merging
   terminal_states:
     - Done
     - Closed

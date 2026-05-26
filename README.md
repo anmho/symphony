@@ -248,7 +248,7 @@ symphony doctor github-pr-identity --workflow WORKFLOW.md
 
 Graphite submit may still use the locally authenticated Graphite/GitHub identity. When `github.pr_identity` is configured, Symphony prompts agents to use Graphite only for stack inspection/dry-run proof and to create, edit, comment on, and review-request PRs through GitHub tooling with the app token.
 
-While an issue is in the handoff state, Symphony polls linked PR feedback. New human review threads, top-level PR comments, or `CHANGES_REQUESTED`/`COMMENTED` reviews move the Linear issue back to active work with the feedback copied into a runner comment.
+While an issue is in the handoff state, Symphony polls linked PR feedback. New human review threads, top-level PR comments, or `CHANGES_REQUESTED`/`COMMENTED` reviews move the Linear issue back to active work with the feedback copied into a runner comment. If `tracker.merge_state` is configured, an approved PR with no unresolved human feedback moves from the handoff state into that merge-eligible state. Symphony then rechecks feedback, approval, mergeability, and PR identity before merging with the configured GitHub identity; late comments, requested changes, conflicts, or merge failures move the issue back to active work for the agent to address.
 
 GitHub App display names and icons are managed in GitHub's app settings UI. The production app uses display name `anmho Symphony` with PR author login `app/anmho-symphony`; upload `assets/anmho-symphony-github-app-icon.png` as the app logo.
 

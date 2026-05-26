@@ -190,6 +190,33 @@ export async function fetchHandoffIssues(config: EffectiveWorkflowConfig): Promi
     .filter((issue) => hasRequiredLabels(issue, config.tracker.requiredLabels));
 }
 
+export async function fetchMergeEligibleIssues(config: EffectiveWorkflowConfig): Promise<NormalizedIssue[]> {
+  if (!config.tracker.mergeState) {
+    return [];
+  }
+  const { filter, variableDefinitions, variables } = issueScopeFilter(config, [config.tracker.mergeState], {
+    includeRequiredLabels: true
+  });
+  const data = await linearGraphql<IssuesQueryData>(
+    config,
+    `
+      query SymphonyMergeEligibleIssues(${variableDefinitions}) {
+        issues(
+          first: 100,
+          filter: ${filter}
+        ) {
+          nodes { ${ISSUE_FIELDS} }
+        }
+      }
+    `,
+    variables
+  );
+
+  return (data.issues?.nodes ?? [])
+    .map(normalizeLinearIssue)
+    .filter((issue) => hasRequiredLabels(issue, config.tracker.requiredLabels));
+}
+
 export async function writeRunnerComment(
   config: EffectiveWorkflowConfig,
   issueId: string,

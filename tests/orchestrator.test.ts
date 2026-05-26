@@ -691,6 +691,69 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().completed).toEqual([]);
   });
 
+  it('reprocesses handoff issues that were previously cached completed', async () => {
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+        terminalStates: ['Done'],
+      },
+    });
+    const completedIssue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'Done',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const handoffIssue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/55'],
+    });
+    let terminalIssues = [completedIssue];
+    let handoffIssues: NormalizedIssue[] = [];
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchTerminalIssues: async () => terminalIssues,
+      fetchHandoffIssues: async () => handoffIssues,
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/55',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 55,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'what is merge state',
+            path: 'src/codexAppServerSmoke.ts',
+            line: 205,
+            url: 'https://github.com/anmho/symphony/pull/55#discussion_r3301733260',
+            createdAt: '2026-05-26T06:42:01Z',
+          },
+        ],
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    expect(orchestrator.snapshot().completed).toEqual(['ANM-391']);
+
+    terminalIssues = [];
+    handoffIssues = [handoffIssue];
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, handoffIssue.id, 'In Progress');
+    expect(orchestrator.snapshot().completed).toEqual([]);
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
   it('moves handoff issues with merged GitHub PRs to terminal Linear state', async () => {
     const issue = makeIssue('ANM-324', {
       id: 'issue-324',
@@ -858,6 +921,301 @@ describe('orchestrator', () => {
 
     expect(comments[0]).toContain('Review state: CHANGES_REQUESTED.');
     expect(comments[0]).toContain('Can you also update the docs?');
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('moves approved handoff PRs into the merge-eligible state', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: null,
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Eligible for Merging');
+    expect(comments[0]).toContain('approved GitHub PR');
+    expect(orchestrator.snapshot().handoffDetails).toMatchObject([
+      {
+        identifier: 'ANM-391',
+        state: 'Eligible for Merging',
+      },
+    ]);
+  });
+
+  it('moves conflicted handoff PRs back to active work', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: null,
+        latestReviewDecision: null,
+        mergeStateStatus: 'DIRTY',
+        mergeable: 'CONFLICTING',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(comments[0]).toContain('merge conflicts');
+    expect(comments[0]).toContain('mergeStateStatus: DIRTY');
+    expect(comments[0]).toContain('mergeable: CONFLICTING');
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('merges merge-eligible PRs after rechecking approval and feedback', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'Eligible for Merging',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+        terminalStates: ['Done'],
+      },
+    });
+    const merge = vi.fn<OrchestratorDependencies['mergePullRequest']>(async () => undefined);
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    let didMerge = false;
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchMergeEligibleIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestStatus: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        state: didMerge ? 'merged' : 'open',
+        mergedAt: didMerge ? '2026-05-26T06:08:45Z' : null,
+      }),
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: null,
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      mergePullRequest: async (...args) => {
+        didMerge = true;
+        await merge(...args);
+      },
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(merge).toHaveBeenCalledWith(
+      'https://github.com/anmho/symphony/pull/54',
+      '/tmp/repo',
+      undefined,
+    );
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Done');
+    expect(comments.some((comment) => comment.includes('merged approved GitHub PR'))).toBe(true);
+    expect(orchestrator.snapshot().completed).toEqual(['ANM-391']);
+  });
+
+  it('moves conflicted merge-eligible PRs back to active work', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'Eligible for Merging',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const merge = vi.fn(async () => undefined);
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchMergeEligibleIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: null,
+        latestReviewDecision: null,
+        mergeStateStatus: 'DIRTY',
+        mergeable: 'CONFLICTING',
+        headRefOid: 'sha',
+      }),
+      mergePullRequest: merge,
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(merge).not.toHaveBeenCalled();
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(comments[0]).toContain('merge conflicts');
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('moves merge-eligible PRs with late review comments back to active work', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'Eligible for Merging',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const merge = vi.fn(async () => undefined);
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchMergeEligibleIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'One more approval-time fix.',
+            path: null,
+            line: null,
+            url: 'https://github.com/anmho/symphony/pull/54#issuecomment-1',
+            createdAt: '2026-05-26T06:10:00Z',
+          },
+        ],
+      }),
+      mergePullRequest: merge,
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(merge).not.toHaveBeenCalled();
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
@@ -1457,10 +1815,22 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     fetchIssueById: async (_config, issueId) => makeIssue(issueId),
     fetchTerminalIssues: async () => [],
     fetchHandoffIssues: async () => [],
+    fetchMergeEligibleIssues: async () => [],
     writeRunnerComment: async () => undefined,
     moveIssueToState: async () => undefined,
     fetchPullRequestStatus: async () => null,
     fetchPullRequestReviewFeedback: async () => null,
+    fetchPullRequestMergeReadiness: async () => ({
+      url: 'https://github.com/anmho/symphony/pull/1',
+      state: 'open',
+      isDraft: false,
+      reviewDecision: null,
+      latestReviewDecision: null,
+      mergeStateStatus: null,
+      mergeable: null,
+      headRefOid: null,
+    }),
+    mergePullRequest: async () => undefined,
     requestPullRequestReviewers: async () => undefined,
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),
     removeWorkspace: async () => undefined,
@@ -1512,6 +1882,7 @@ function makeConfig(
       activeStates: ['Todo', 'In Progress'],
       terminalStates: ['Done', 'Closed', 'Canceled'],
       handoffState: null,
+      mergeState: null,
     },
     polling: { intervalMs: 30000 },
     workspace: {

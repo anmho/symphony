@@ -4,6 +4,7 @@ import {
   fetchPullRequestReviewFeedback,
   fetchPullRequestStatus,
   parsePullRequestMetadata,
+  parsePullRequestMergeReadiness,
   parseGithubPullRequestUrl,
   requestPullRequestReviewers,
 } from '../src/github.js';
@@ -187,6 +188,29 @@ describe('github client', () => {
     });
   });
 
+  it('falls back to the latest human review when aggregate review decision is empty', () => {
+    expect(
+      parsePullRequestMergeReadiness(
+        JSON.stringify({
+          url: 'https://github.com/anmho/symphony/pull/55',
+          state: 'OPEN',
+          isDraft: false,
+          reviewDecision: '',
+          latestReviews: [
+            { state: 'COMMENTED', author: { login: 'anmho-symphony', __typename: 'Bot' } },
+            { state: 'APPROVED', author: { login: 'anmho', __typename: 'User' } },
+          ],
+          mergeStateStatus: 'CLEAN',
+          mergeable: 'MERGEABLE',
+          headRefOid: 'sha',
+        }),
+      ),
+    ).toMatchObject({
+      reviewDecision: null,
+      latestReviewDecision: 'APPROVED',
+    });
+  });
+
   it('ignores unresolved review threads after the bot has replied', async () => {
     const runner = vi.fn(async () => ({
       exitCode: 0,
@@ -237,6 +261,71 @@ describe('github client', () => {
       ),
     ).resolves.toMatchObject({
       url: 'https://github.com/anmho/symphony/pull/49',
+      unresolvedComments: [],
+    });
+  });
+
+  it('ignores GitHub App comments even when GitHub reports the app slug instead of a bot login', async () => {
+    const runner = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              url: 'https://github.com/anmho/symphony/pull/54',
+              reviewThreads: {
+                nodes: [
+                  {
+                    isResolved: false,
+                    path: 'src/github.ts',
+                    line: 12,
+                    comments: {
+                      nodes: [
+                        {
+                          author: { login: 'anmho-symphony', __typename: 'Bot' },
+                          body: 'Superseded by app-authored replacement PR.',
+                          url: 'https://github.com/anmho/symphony/pull/54#discussion_r1',
+                          createdAt: '2026-05-26T05:06:49Z',
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+              reviews: {
+                nodes: [
+                  {
+                    author: { login: 'anmho-symphony', __typename: 'Bot' },
+                    body: 'Addressed feedback.',
+                    url: 'https://github.com/anmho/symphony/pull/54#pullrequestreview-1',
+                    submittedAt: '2026-05-26T05:07:00Z',
+                    state: 'COMMENTED',
+                  },
+                ],
+              },
+              comments: {
+                nodes: [
+                  {
+                    author: { login: 'anmho-symphony', __typename: 'Bot' },
+                    body: '@codex review',
+                    url: 'https://github.com/anmho/symphony/pull/54#issuecomment-1',
+                    createdAt: '2026-05-26T05:08:00Z',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+      stderr: '',
+    }));
+
+    await expect(
+      fetchPullRequestReviewFeedback(
+        'https://github.com/anmho/symphony/pull/54',
+        runner,
+      ),
+    ).resolves.toMatchObject({
       unresolvedComments: [],
     });
   });
