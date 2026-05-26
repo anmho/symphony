@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  fetchPullRequestMetadata,
   fetchPullRequestStatus,
   parseGithubPullRequestUrl,
 } from '../src/github.js';
@@ -91,6 +92,42 @@ describe('github client', () => {
         'url,state,mergedAt,number,headRepository',
       ],
       { timeoutMs: 30000 },
+    );
+  });
+
+  it('fetches PR metadata with author for handoff gates', async () => {
+    const runner = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        url: 'https://github.com/anmho/symphony/pull/391',
+        author: { login: 'app/anmho-symphony' },
+        baseRefName: 'main',
+        headRefName: 'symphony/ANM-391',
+        body: 'Linear: https://linear.app/anmho/issue/ANM-391/x',
+      }),
+      stderr: '',
+    }));
+
+    await expect(
+      fetchPullRequestMetadata(
+        'https://github.com/anmho/symphony/pull/391',
+        '/repo/symphony',
+        runner,
+      ),
+    ).resolves.toMatchObject({
+      authorLogin: 'app/anmho-symphony',
+      headRefName: 'symphony/ANM-391',
+    });
+    expect(runner).toHaveBeenCalledWith(
+      'gh',
+      [
+        'pr',
+        'view',
+        'https://github.com/anmho/symphony/pull/391',
+        '--json',
+        'author,url,headRefName,baseRefName,body',
+      ],
+      { cwd: '/repo/symphony', timeoutMs: 60000 },
     );
   });
 });

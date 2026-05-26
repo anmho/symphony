@@ -100,15 +100,33 @@ export interface DigestConfig {
   resendEndpoint: string;
 }
 
-export interface GithubPrIdentityConfig {
+export interface GithubMachineUserPrIdentityConfig {
   kind: 'machine_user';
   tokenCommand: string;
   authorName: string;
   authorEmail: string;
 }
 
+export interface GithubAppPrIdentityConfig {
+  kind: 'github_app';
+  appSlug: string;
+  tokenCommand: string;
+  authorName: string;
+  authorEmail: string;
+}
+
+export type GithubPrIdentityConfig = GithubMachineUserPrIdentityConfig | GithubAppPrIdentityConfig;
+
 export interface GithubConfig {
   prIdentity: GithubPrIdentityConfig | null;
+}
+
+export interface PullRequestMetadata {
+  url: string;
+  baseRefName: string;
+  headRefName: string;
+  body: string;
+  authorLogin: string | null;
 }
 
 export interface EffectiveWorkflowConfig {

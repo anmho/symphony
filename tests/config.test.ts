@@ -224,6 +224,34 @@ Prompt
     });
   });
 
+  it("parses GitHub App PR identity config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+github:
+  pr_identity:
+    kind: github_app
+    app_slug: anmho-symphony
+    token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
+    author_name: anmho Symphony
+    author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.github.prIdentity).toEqual({
+      kind: "github_app",
+      appSlug: "anmho-symphony",
+      tokenCommand:
+        "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
+      authorName: "anmho Symphony",
+      authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com"
+    });
+  });
+
   it("rejects incomplete GitHub machine-user PR identity config", () => {
     vi.stubEnv("LINEAR_API_KEY", "lin_test");
     const definition = parseWorkflowMarkdown(`---

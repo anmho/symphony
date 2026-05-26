@@ -780,6 +780,58 @@ describe('orchestrator', () => {
     ]);
   });
 
+  it('blocks PR-linked handoff when the configured PR identity author does not match', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: {
+          kind: 'github_app',
+          appSlug: 'anmho-symphony',
+          tokenCommand: 'symphony github-app-token',
+          authorName: 'anmho Symphony',
+          authorEmail: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+        },
+      },
+    });
+    const comments: string[] = [];
+    const moved = vi.fn(async () => undefined);
+    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+      fetchPullRequestMetadata: async (url) => ({
+        url,
+        baseRefName: 'main',
+        headRefName: 'symphony/APP-1',
+        body: 'Linear: https://linear.app/anmho/issue/APP-1/x',
+        authorLogin: 'anmho',
+      }),
+      runCodexTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).not.toHaveBeenCalled();
+    expect(comments[0]).toContain('Expected PR author: app/anmho-symphony');
+    expect(comments[0]).toContain('Actual PR author: anmho');
+    expect(runCodexTurn).toHaveBeenCalled();
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
   it('does not dispatch active PR-linked candidate issues', async () => {
     const issue = makeIssue('APP-1', {
       attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
@@ -1103,6 +1155,13 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     writeRunnerComment: async () => undefined,
     moveIssueToState: async () => undefined,
     fetchPullRequestStatus: async () => null,
+    fetchPullRequestMetadata: async (url) => ({
+      url,
+      baseRefName: 'main',
+      headRefName: 'symphony/APP-1',
+      body: '',
+      authorLogin: null,
+    }),
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),
     removeWorkspace: async () => undefined,
     workspaceInfoForIssue: (_config, issue) => makeWorkspace(issue),
@@ -1134,6 +1193,7 @@ function makeConfig(
     workspace?: Partial<EffectiveWorkflowConfig['workspace']>;
     digest?: Partial<EffectiveWorkflowConfig['digest']>;
     agent?: Partial<EffectiveWorkflowConfig['agent']>;
+    github?: Partial<EffectiveWorkflowConfig['github']>;
   } = {},
 ): EffectiveWorkflowConfig {
   const config: EffectiveWorkflowConfig = {
@@ -1218,6 +1278,10 @@ function makeConfig(
     digest: {
       ...config.digest,
       ...overrides.digest,
+    },
+    github: {
+      ...config.github,
+      ...overrides.github,
     },
   };
 }

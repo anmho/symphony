@@ -214,7 +214,7 @@ gt auth
 gt init --trunk main
 ```
 
-In Graphite mode, Symphony adds PR handoff instructions to each agent prompt. The worker must verify Graphite with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`, submit with `gt submit --stack --no-interactive --no-edit --no-ai`, and then verify the GitHub PR metadata with `gh pr view --json url,baseRefName,headRefName,body`. Handoff is not complete unless the PR head matches the Symphony branch, the PR base matches the expected parent stack branch, and the PR body still contains the Linear Ticket link.
+In Graphite mode, Symphony adds PR handoff instructions to each agent prompt. The worker must verify Graphite with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`, submit with `gt submit --stack --no-interactive --no-edit --no-ai`, and then verify the GitHub PR metadata with `gh pr view --json author,url,baseRefName,headRefName,body`. Handoff is not complete unless the PR head matches the Symphony branch, the PR base matches the expected parent stack branch, the PR body still contains the Linear Ticket link, and any configured PR identity author matches.
 
 If `fallback: fail`, a missing or uninitialized Graphite setup is a clear blocker and the worker should leave a Linear handoff explaining it. If `fallback: github`, the worker may use the normal GitHub PR flow and note the fallback in Linear.
 
@@ -226,7 +226,9 @@ author:@me (title:ANM- OR branch:symphony/)
 
 ### GitHub PR identity
 
-Symphony can keep Codex execution local while opening PRs as a separate GitHub machine user. Configure a token command in `WORKFLOW.md` after storing the machine-user token in Vault:
+Symphony can keep Codex execution local while requiring PRs to be opened as a configured identity. Prompt instructions tell agents what to do, but they are advisory; Symphony enforces the configured GitHub App author as a required handoff gate after PR creation or update. If the actual PR author differs, Symphony leaves a Linear blocker comment with the expected and actual author and does not move the issue to the handoff state.
+
+For a machine user, configure a token command in `WORKFLOW.md` after storing the token in Vault:
 
 ```yaml
 github:
@@ -237,7 +239,19 @@ github:
     author_email: anmho-symphony@users.noreply.github.com
 ```
 
-The token is only used during PR handoff. Agents are instructed to set `GH_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
+For a GitHub App-authored handoff, configure the app slug and token command:
+
+```yaml
+github:
+  pr_identity:
+    kind: github_app
+    app_slug: anmho-symphony
+    token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
+    author_name: anmho Symphony
+    author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
+```
+
+Machine-user tokens are only used during PR handoff. Agents are instructed to set `GH_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
 
 ```sh
 symphony doctor github-pr-identity --workflow WORKFLOW.md

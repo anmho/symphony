@@ -1,4 +1,4 @@
-import type { PullRequestStatus } from './types.js';
+import type { PullRequestMetadata, PullRequestStatus } from './types.js';
 import { runCommand, type CommandResult } from './process.js';
 
 type CommandRunner = (
@@ -79,6 +79,46 @@ export async function fetchPullRequestStatus(
     state,
     mergedAt: payload.merged_at ?? null,
   };
+}
+
+export async function fetchPullRequestMetadata(
+  url: string,
+  cwd?: string,
+  runner: CommandRunner = runCommand,
+): Promise<PullRequestMetadata> {
+  const options: { cwd?: string; timeoutMs: number } = { timeoutMs: 60000 };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  const result = await runner(
+    'gh',
+    ['pr', 'view', url, '--json', 'author,url,headRefName,baseRefName,body'],
+    options,
+  );
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      detail
+        ? `github_pr_metadata_unavailable: gh pr view ${url} failed: ${detail}`
+        : `github_pr_metadata_unavailable: gh pr view ${url} failed`,
+    );
+  }
+  return parsePullRequestMetadata(result.stdout);
+}
+
+export function parsePullRequestMetadata(raw: string): PullRequestMetadata {
+  const parsed = JSON.parse(raw) as Partial<PullRequestMetadata> & {
+    author?: { login?: string | null } | null;
+  };
+  const url = typeof parsed.url === 'string' ? parsed.url : '';
+  const baseRefName = typeof parsed.baseRefName === 'string' ? parsed.baseRefName : '';
+  const headRefName = typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
+  const body = typeof parsed.body === 'string' ? parsed.body : '';
+  const authorLogin = typeof parsed.author?.login === 'string' ? parsed.author.login : null;
+  if (!url || !baseRefName || !headRefName) {
+    throw new Error('github_pr_metadata_incomplete');
+  }
+  return { url, baseRefName, headRefName, body, authorLogin };
 }
 
 async function fetchPullRequestStatusWithGh(

@@ -1,5 +1,6 @@
 import { runCommand, type CommandResult } from "./process.js";
-import type { EffectiveWorkflowConfig, GithubPrIdentityConfig, NormalizedIssue, PullRequestConfig } from "./types.js";
+import { parsePullRequestMetadata } from "./github.js";
+import type { EffectiveWorkflowConfig, GithubPrIdentityConfig, NormalizedIssue, PullRequestConfig, PullRequestMetadata } from "./types.js";
 
 export type CommandRunner = (
   command: string,
@@ -11,13 +12,7 @@ export type PreparedPrBackend =
   | { backend: "github"; fallbackReason?: string }
   | { backend: "graphite"; version: string };
 
-export interface VerifiedPullRequestMetadata {
-  url: string;
-  baseRefName: string;
-  headRefName: string;
-  body: string;
-  authorLogin: string | null;
-}
+export type VerifiedPullRequestMetadata = PullRequestMetadata;
 
 export async function preparePrHandoffBackend(
   config: Pick<EffectiveWorkflowConfig, "pullRequest">,
@@ -82,6 +77,7 @@ export async function submitGraphiteStackAndVerify(input: {
   branch: string;
   expectedBaseBranch: string;
   linearTicketUrl: string;
+  expectedAuthorLogin?: string | null;
   runner?: CommandRunner;
 }): Promise<VerifiedPullRequestMetadata> {
   const runner = input.runner ?? runCommand;
@@ -191,21 +187,6 @@ async function runBackendProbe(
   }
 }
 
-function parsePullRequestMetadata(raw: string): VerifiedPullRequestMetadata {
-  const parsed = JSON.parse(raw) as Partial<VerifiedPullRequestMetadata> & {
-    author?: { login?: string | null } | null;
-  };
-  const url = typeof parsed.url === "string" ? parsed.url : "";
-  const baseRefName = typeof parsed.baseRefName === "string" ? parsed.baseRefName : "";
-  const headRefName = typeof parsed.headRefName === "string" ? parsed.headRefName : "";
-  const body = typeof parsed.body === "string" ? parsed.body : "";
-  const authorLogin = typeof parsed.author?.login === "string" ? parsed.author.login : null;
-  if (!url || !baseRefName || !headRefName) {
-    throw new Error("github_pr_metadata_incomplete");
-  }
-  return { url, baseRefName, headRefName, body, authorLogin };
-}
-
 function commandFailure(code: string, command: string, result: CommandResult): string {
   const detail = (result.stderr || result.stdout).trim();
   return detail ? `${code}: ${command} failed: ${detail}` : `${code}: ${command} failed`;
@@ -214,6 +195,12 @@ function commandFailure(code: string, command: string, result: CommandResult): s
 function buildIdentityInstructions(identity: GithubPrIdentityConfig | null): string {
   if (!identity) {
     return "Use the currently authenticated local GitHub identity.";
+  }
+  if (identity.kind === "github_app") {
+    return [
+      `PR handoff must produce GitHub author app/${identity.appSlug}.`,
+      "Prompt instructions are advisory; Symphony enforces this identity after PR creation or update and blocks handoff if the author differs."
+    ].join("\n");
   }
   return [
     "Use the configured GitHub machine-user PR identity for handoff commands, not the default local GitHub user.",

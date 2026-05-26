@@ -30,7 +30,7 @@ import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
-import { fetchPullRequestStatus } from './github.js';
+import { fetchPullRequestMetadata, fetchPullRequestStatus } from './github.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
@@ -58,6 +58,7 @@ import type {
   LiveSession,
   NormalizedIssue,
   OrchestratorSnapshot,
+  PullRequestMetadata,
   PullRequestStatus,
   RunAttempt,
   WorkspaceInfo,
@@ -93,6 +94,10 @@ export interface OrchestratorDependencies {
   fetchPullRequestStatus: (
     url: string,
   ) => Promise<PullRequestStatus | null>;
+  fetchPullRequestMetadata: (
+    url: string,
+    cwd?: string,
+  ) => Promise<PullRequestMetadata>;
   prepareWorkspace: (
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
@@ -276,6 +281,7 @@ export class Orchestrator {
       writeRunnerComment,
       moveIssueToState,
       fetchPullRequestStatus,
+      fetchPullRequestMetadata,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
       workspaceInfoForIssue,
@@ -1105,6 +1111,14 @@ export class Orchestrator {
       }
 
       if (this.shouldMoveToHandoff(config, entry)) {
+        const latestIssue =
+          (await this.deps.fetchIssueById(config, issue.id)) ?? issue;
+        const goalStatus = entry.session.goalStatus?.toLowerCase();
+        const requiresPrUrl = goalStatus !== 'blocked';
+        if (!(await this.ensurePrIdentityHandoffGate(config, latestIssue, entry, null, requiresPrUrl))) {
+          this.releaseIssue(issue.id);
+          return;
+        }
         await this.deps.moveIssueToState(
           config,
           issue.id,
@@ -1114,8 +1128,8 @@ export class Orchestrator {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
-        this.handoff.set(issue.identifier, issueSummary(config, issue));
-        this.rework.delete(issue.identifier);
+        this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        this.rework.delete(latestIssue.identifier);
         this.reworkIssues.delete(issue.id);
         this.releaseIssue(issue.id);
         return;
@@ -1195,6 +1209,9 @@ export class Orchestrator {
     if (await this.syncMergedPrLinkedIssueToTerminal(config, issue, entry)) {
       return true;
     }
+    if (!(await this.ensurePrIdentityHandoffGate(config, issue, entry, prUrl))) {
+      return false;
+    }
 
     await this.deps.moveIssueToState(config, issue.id, handoffState);
     const handedOffIssue = { ...issue, state: handoffState };
@@ -1215,6 +1232,108 @@ export class Orchestrator {
       'moved PR-linked issue to handoff state',
     );
     return true;
+  }
+
+  private async ensurePrIdentityHandoffGate(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    entry: RunningEntry | null = null,
+    prUrl: string | null = null,
+    requiresPrUrl = true,
+  ): Promise<boolean> {
+    const expectedAuthor = expectedPrAuthorLogin(config);
+    if (!expectedAuthor) {
+      return true;
+    }
+
+    const resolvedPrUrl = prUrl ?? githubPullRequestUrlFromIssue(issue);
+    if (!resolvedPrUrl) {
+      if (!requiresPrUrl) {
+        return true;
+      }
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because github.pr_identity is configured but no GitHub PR link was found.',
+          `Expected PR author: ${expectedAuthor}`,
+        ].join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          expectedAuthor,
+          actualAuthor: null,
+          reason: 'missing_pr_url',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    let metadata: PullRequestMetadata;
+    try {
+      metadata = await this.deps.fetchPullRequestMetadata(
+        resolvedPrUrl,
+        config.workspace.repoPath,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because PR metadata was unavailable for the configured github.pr_identity gate.',
+          `Expected PR author: ${expectedAuthor}`,
+          'Actual PR author: unavailable',
+          `PR: ${resolvedPrUrl}`,
+          `Error: ${message}`,
+        ].join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          expectedAuthor,
+          actualAuthor: null,
+          prUrl: resolvedPrUrl,
+          reason: 'metadata_unavailable',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    if (metadata.authorLogin !== expectedAuthor) {
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because the PR author does not match the configured github.pr_identity.',
+          `Expected PR author: ${expectedAuthor}`,
+          `Actual PR author: ${metadata.authorLogin ?? 'unavailable'}`,
+          `PR: ${metadata.url}`,
+        ].join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          expectedAuthor,
+          actualAuthor: metadata.authorLogin,
+          prUrl: metadata.url,
+          reason: 'author_mismatch',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  private async writePrIdentityBlockerComment(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    body: string,
+  ): Promise<void> {
+    const marker = body.split('\n')[0] ?? body;
+    if (issue.comments.some((comment) => comment.includes(marker))) {
+      return;
+    }
+    await this.deps.writeRunnerComment(config, issue.id, body);
   }
 
   private async syncMergedPrLinkedIssueToTerminal(
@@ -1448,6 +1567,16 @@ export class Orchestrator {
 
 export function createDefaultOrchestrator(workflowPath: string): Orchestrator {
   return new Orchestrator({ workflowPath });
+}
+
+function expectedPrAuthorLogin(
+  config: EffectiveWorkflowConfig,
+): string | null {
+  const identity = config.github.prIdentity;
+  if (!identity || identity.kind !== 'github_app') {
+    return null;
+  }
+  return `app/${identity.appSlug}`;
 }
 
 function sleep(ms: number): Promise<void> {

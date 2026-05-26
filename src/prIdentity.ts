@@ -24,6 +24,9 @@ export async function resolvePrIdentity(
   if (!identity) {
     return null;
   }
+  if (!identity.tokenCommand || !identity.authorName || !identity.authorEmail) {
+    throw new Error('github_pr_identity_token_not_configured');
+  }
   const result = await runner(identity.tokenCommand, { timeoutMs: 30000 });
   if (result.exitCode !== 0) {
     throw new Error(
@@ -87,6 +90,9 @@ export function prIdentityEnv(
   token: string,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
+  if (!identity.authorName || !identity.authorEmail) {
+    throw new Error('github_pr_identity_git_author_not_configured');
+  }
   return {
     ...baseEnv,
     GH_TOKEN: token,
