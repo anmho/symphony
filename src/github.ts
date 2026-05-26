@@ -253,7 +253,7 @@ export async function mergePullRequest(
 ): Promise<void> {
   const metadata = await fetchPullRequestMetadata(url, cwd, runner);
   if (hasGraphitePrLink(metadata.body)) {
-    await mergeGraphitePullRequest(url, cwd, env, runner);
+    await mergeGraphitePullRequest(url, metadata.baseRefName, cwd, env, runner);
     return;
   }
 
@@ -284,6 +284,7 @@ export async function mergePullRequest(
 
 async function mergeGraphitePullRequest(
   url: string,
+  baseRefName: string,
   cwd?: string,
   env?: NodeJS.ProcessEnv,
   runner: CommandRunner = runCommand,
@@ -305,9 +306,11 @@ async function mergeGraphitePullRequest(
     throw new Error(
       detail
         ? `graphite_pr_checkout_failed: gh pr checkout ${url} failed: ${detail}`
-        : `graphite_pr_checkout_failed: gh pr checkout ${url} failed`,
+      : `graphite_pr_checkout_failed: gh pr checkout ${url} failed`,
     );
   }
+
+  await ensureGraphiteBranchTracked(baseRefName, cwd, runner);
 
   const mergeOptions: { cwd?: string; timeoutMs: number } = {
     timeoutMs: 120000,
@@ -322,6 +325,40 @@ async function mergeGraphitePullRequest(
       detail
         ? `graphite_pr_merge_failed: gt merge --no-interactive failed: ${detail}`
         : 'graphite_pr_merge_failed: gt merge --no-interactive failed',
+    );
+  }
+}
+
+async function ensureGraphiteBranchTracked(
+  baseRefName: string,
+  cwd?: string,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  const options: { cwd?: string; timeoutMs: number } = {
+    timeoutMs: 120000,
+  };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  const info = await runner('gt', ['branch', 'info'], options);
+  if (info.exitCode === 0) {
+    return;
+  }
+  const detail = (info.stderr || info.stdout).trim();
+  if (!/untracked branch/i.test(detail)) {
+    throw new Error(
+      detail
+        ? `graphite_branch_info_failed: gt branch info failed: ${detail}`
+        : 'graphite_branch_info_failed: gt branch info failed',
+    );
+  }
+  const track = await runner('gt', ['track', '-p', baseRefName], options);
+  if (track.exitCode !== 0) {
+    const trackDetail = (track.stderr || track.stdout).trim();
+    throw new Error(
+      trackDetail
+        ? `graphite_branch_track_failed: gt track -p ${baseRefName} failed: ${trackDetail}`
+        : `graphite_branch_track_failed: gt track -p ${baseRefName} failed`,
     );
   }
 }

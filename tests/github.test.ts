@@ -272,9 +272,73 @@ describe('github client', () => {
       },
       {
         command: 'gt',
+        args: ['branch', 'info'],
+        env: undefined,
+      },
+      {
+        command: 'gt',
         args: ['merge', '--no-interactive'],
         env: undefined,
       },
+    ]);
+  });
+
+  it('tracks untracked Graphite branches before merging', async () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      env?: NodeJS.ProcessEnv;
+    }> = [];
+    const env = { ...process.env, GH_TOKEN: 'ghs_test' };
+    const runner = vi.fn(async (command, args, options) => {
+      calls.push({ command, args, env: options.env });
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            url: 'https://github.com/anmho/website/pull/9',
+            author: { login: 'app/anmho-symphony' },
+            baseRefName: 'main',
+            headRefName: 'symphony/ANM-298-app',
+            body: 'Graphite: https://app.graphite.com/github/pr/anmho/website/9',
+            reviewRequests: [],
+          }),
+          stderr: '',
+        };
+      }
+      if (command === 'gt' && args.join(' ') === 'branch info') {
+        return {
+          exitCode: 1,
+          stdout:
+            'ERROR: Cannot perform this operation on untracked branch symphony/ANM-298-app.',
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+
+    await mergePullRequest(
+      'https://github.com/anmho/website/pull/9',
+      '/repo',
+      env,
+      runner,
+    );
+
+    expect(calls.map((call) => [call.command, call.args])).toEqual([
+      [
+        'gh',
+        [
+          'pr',
+          'view',
+          'https://github.com/anmho/website/pull/9',
+          '--json',
+          'author,url,headRefName,baseRefName,body,reviewRequests',
+        ],
+      ],
+      ['gh', ['pr', 'checkout', 'https://github.com/anmho/website/pull/9']],
+      ['gt', ['branch', 'info']],
+      ['gt', ['track', '-p', 'main']],
+      ['gt', ['merge', '--no-interactive']],
     ]);
   });
 
