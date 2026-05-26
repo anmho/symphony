@@ -1,4 +1,4 @@
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
+import type { EffectiveWorkflowConfig, JsonObject, NormalizedIssue } from "./types.js";
 import { symphonyIssueTemplateData, SYMPHONY_ISSUE_TEMPLATE_NAME } from "./ticket-template.js";
 
 interface GraphQLResponse<T> {
@@ -19,7 +19,13 @@ interface LinearIssueNode {
   state?: { name?: string | null } | null;
   labels?: { nodes?: Array<{ name?: string | null }> } | null;
   comments?: { nodes?: Array<{ body?: string | null }> } | null;
-  attachments?: { nodes?: Array<{ url?: string | null; title?: string | null }> } | null;
+  attachments?: {
+    nodes?: Array<{
+      url?: string | null;
+      title?: string | null;
+      metadata?: JsonObject | null;
+    }>;
+  } | null;
   relations?: {
     nodes?: Array<{
       type?: string | null;
@@ -65,7 +71,7 @@ const ISSUE_FIELDS = `
   state { name }
   labels { nodes { name } }
   comments(first: 25) { nodes { body } }
-  attachments(first: 25) { nodes { url title } }
+  attachments(first: 25) { nodes { url title metadata } }
   relations(first: 50) {
     nodes {
       type
@@ -620,6 +626,11 @@ function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {
     attachments: (node.attachments?.nodes ?? [])
       .flatMap((attachment) => [attachment.url, attachment.title])
       .filter((value): value is string => Boolean(value)),
+    attachmentDetails: (node.attachments?.nodes ?? []).map((attachment) => ({
+      url: attachment.url ?? null,
+      title: attachment.title ?? null,
+      metadata: attachment.metadata ?? null,
+    })),
     blockedBy: (node.relations?.nodes ?? [])
       .filter((relation) => relation.type === "blocks" || relation.type === "blocked_by")
       .map((relation) => relation.relatedIssue)
