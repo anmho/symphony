@@ -11,6 +11,7 @@ import {
   fetchCandidateIssues,
   fetchHandoffIssues,
   fetchIssueById,
+  fetchMergeEligibleIssues,
   fetchTerminalIssues,
   moveIssueToState,
   writeRunnerComment,
@@ -33,8 +34,10 @@ import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
 import {
   fetchPullRequestMetadata,
+  fetchPullRequestMergeReadiness,
   fetchPullRequestReviewFeedback,
   fetchPullRequestStatus,
+  mergePullRequest,
   requestPullRequestReviewers,
 } from './github.js';
 import { latestVisibleWorkEvents } from './status.js';
@@ -65,6 +68,7 @@ import type {
   NormalizedIssue,
   OrchestratorSnapshot,
   PullRequestMetadata,
+  PullRequestMergeReadiness,
   PullRequestStatus,
   PullRequestReviewFeedback,
   RunAttempt,
@@ -88,6 +92,9 @@ export interface OrchestratorDependencies {
   fetchHandoffIssues: (
     config: EffectiveWorkflowConfig,
   ) => Promise<NormalizedIssue[]>;
+  fetchMergeEligibleIssues: (
+    config: EffectiveWorkflowConfig,
+  ) => Promise<NormalizedIssue[]>;
   writeRunnerComment: (
     config: EffectiveWorkflowConfig,
     issueId: string,
@@ -108,6 +115,15 @@ export interface OrchestratorDependencies {
   fetchPullRequestReviewFeedback: (
     url: string,
   ) => Promise<PullRequestReviewFeedback | null>;
+  fetchPullRequestMergeReadiness: (
+    url: string,
+    cwd?: string,
+  ) => Promise<PullRequestMergeReadiness>;
+  mergePullRequest: (
+    url: string,
+    cwd?: string,
+    env?: NodeJS.ProcessEnv,
+  ) => Promise<void>;
   requestPullRequestReviewers: (
     url: string,
     reviewers: string[],
@@ -163,6 +179,16 @@ function isHandoffState(
   return Boolean(
     config.tracker.handoffState &&
       state.toLowerCase() === config.tracker.handoffState.toLowerCase(),
+  );
+}
+
+function isMergeState(
+  state: string,
+  config: EffectiveWorkflowConfig,
+): boolean {
+  return Boolean(
+    config.tracker.mergeState &&
+      state.toLowerCase() === config.tracker.mergeState.toLowerCase(),
   );
 }
 
@@ -324,6 +350,7 @@ export class Orchestrator {
       loadWorkflowConfig,
       fetchCandidateIssues,
       fetchHandoffIssues,
+      fetchMergeEligibleIssues,
       fetchIssueById,
       fetchTerminalIssues,
       writeRunnerComment,
@@ -331,6 +358,8 @@ export class Orchestrator {
       fetchPullRequestStatus,
       fetchPullRequestMetadata,
       fetchPullRequestReviewFeedback,
+      fetchPullRequestMergeReadiness,
+      mergePullRequest,
       requestPullRequestReviewers,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
@@ -577,6 +606,7 @@ export class Orchestrator {
     this.lastTickAtMs = this.deps.now();
     const terminalIssues = await this.refreshCompletedFromLinear(config);
     await this.refreshHandoffFromLinear(config);
+    await this.refreshMergeEligibleFromLinear(config);
 
     if (!this.startupCleanupDone) {
       await this.cleanupTerminalWorkspaces(config, terminalIssues);
@@ -758,13 +788,17 @@ export class Orchestrator {
     const handoffIssues = await this.deps.fetchHandoffIssues(config);
     this.handoff.clear();
     for (const issue of handoffIssues) {
-      if (this.completed.has(issue.identifier)) {
-        continue;
-      }
+      this.clearStaleCompletedIssue(issue);
       if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
         continue;
       }
       if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
+        continue;
+      }
+      if (await this.syncConflictedPrLinkedIssueToActive(config, issue)) {
+        continue;
+      }
+      if (await this.syncApprovedPrLinkedIssueToMergeEligible(config, issue)) {
         continue;
       }
       this.handoff.set(issue.identifier, issueSummary(config, issue));
@@ -773,6 +807,43 @@ export class Orchestrator {
       this.claimed.delete(issue.id);
     }
     return handoffIssues;
+  }
+
+  private async refreshMergeEligibleFromLinear(
+    config: EffectiveWorkflowConfig,
+  ): Promise<NormalizedIssue[]> {
+    const mergeIssues = await this.deps.fetchMergeEligibleIssues(config);
+    for (const issue of mergeIssues) {
+      this.clearStaleCompletedIssue(issue);
+      if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
+        continue;
+      }
+      if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
+        continue;
+      }
+      if (await this.syncConflictedPrLinkedIssueToActive(config, issue)) {
+        continue;
+      }
+      if (await this.mergeApprovedPrLinkedIssue(config, issue)) {
+        continue;
+      }
+      this.handoff.set(issue.identifier, issueSummary(config, issue));
+      this.rework.delete(issue.identifier);
+      this.retryAttempts.delete(issue.id);
+      this.claimed.delete(issue.id);
+    }
+    return mergeIssues;
+  }
+
+  private clearStaleCompletedIssue(issue: NormalizedIssue): void {
+    if (!this.completed.has(issue.identifier)) {
+      return;
+    }
+    this.completed.delete(issue.identifier);
+    this.deps.logger.info(
+      { issue: issue.identifier, state: issue.state },
+      'removed stale completed cache entry for non-terminal issue',
+    );
   }
 
   private async reconcileRunning(
@@ -1293,6 +1364,267 @@ export class Orchestrator {
     return true;
   }
 
+  private async syncApprovedPrLinkedIssueToMergeEligible(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ): Promise<boolean> {
+    const mergeState = config.tracker.mergeState;
+    if (!mergeState || isHandoffState(mergeState, config)) {
+      return false;
+    }
+    if (!isHandoffState(issue.state, config)) {
+      return false;
+    }
+    const prUrl = githubPullRequestUrlFromIssue(issue);
+    if (!prUrl) {
+      return false;
+    }
+    if (!(await this.ensurePrIdentityHandoffGate(config, issue, null, prUrl))) {
+      return false;
+    }
+
+    let readiness: PullRequestMergeReadiness;
+    try {
+      readiness = await this.deps.fetchPullRequestMergeReadiness(
+        prUrl,
+        config.workspace.repoPath,
+      );
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'failed to fetch linked GitHub PR merge readiness',
+      );
+      return false;
+    }
+    if (!isPullRequestApproved(readiness)) {
+      return false;
+    }
+
+    await this.deps.moveIssueToState(config, issue.id, mergeState);
+    await this.deps.writeRunnerComment(
+      config,
+      issue.id,
+      [
+        `Symphony observed approved GitHub PR: ${readiness.url}.`,
+        '',
+        `Moved this issue to ${mergeState} for merge automation.`,
+      ].join('\n'),
+    );
+    const mergeIssue = { ...issue, state: mergeState };
+    this.handoff.set(issue.identifier, issueSummary(config, mergeIssue));
+    this.rework.delete(issue.identifier);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+    this.deps.logger.info(
+      { issue: issue.identifier, prUrl: readiness.url, state: mergeState },
+      'moved approved PR-linked issue to merge state',
+    );
+    return true;
+  }
+
+  private async syncConflictedPrLinkedIssueToActive(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ): Promise<boolean> {
+    if (!isHandoffState(issue.state, config) && !isMergeState(issue.state, config)) {
+      return false;
+    }
+    const prUrl = githubPullRequestUrlFromIssue(issue);
+    if (!prUrl) {
+      return false;
+    }
+
+    let readiness: PullRequestMergeReadiness;
+    try {
+      readiness = await this.deps.fetchPullRequestMergeReadiness(
+        prUrl,
+        config.workspace.repoPath,
+      );
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'failed to fetch linked GitHub PR merge readiness',
+      );
+      return false;
+    }
+    if (!isPullRequestConflicted(readiness)) {
+      return false;
+    }
+
+    await this.moveMergeIssueBackToActive(
+      config,
+      issue,
+      [
+        'Symphony found the linked PR has merge conflicts and needs agent rework.',
+        `PR: ${readiness.url}`,
+        `mergeStateStatus: ${readiness.mergeStateStatus ?? 'unknown'}`,
+        `mergeable: ${readiness.mergeable ?? 'unknown'}`,
+      ].join('\n'),
+    );
+    return true;
+  }
+
+  private async mergeApprovedPrLinkedIssue(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ): Promise<boolean> {
+    if (!isMergeState(issue.state, config)) {
+      return false;
+    }
+    const prUrl = githubPullRequestUrlFromIssue(issue);
+    if (!prUrl) {
+      await this.moveMergeIssueBackToActive(
+        config,
+        issue,
+        'Symphony could not merge because no GitHub PR link was found.',
+      );
+      return true;
+    }
+    if (!(await this.ensurePrIdentityHandoffGate(config, issue, null, prUrl))) {
+      return false;
+    }
+
+    let readiness: PullRequestMergeReadiness;
+    try {
+      readiness = await this.deps.fetchPullRequestMergeReadiness(
+        prUrl,
+        config.workspace.repoPath,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.moveMergeIssueBackToActive(
+        config,
+        issue,
+        [
+          'Symphony could not verify PR merge readiness.',
+          `PR: ${prUrl}`,
+          `Error: ${message}`,
+        ].join('\n'),
+      );
+      return true;
+    }
+
+    if (readiness.state === 'merged') {
+      return this.syncMergedPrLinkedIssueToTerminal(config, issue);
+    }
+    if (readiness.state !== 'open') {
+      await this.moveMergeIssueBackToActive(
+        config,
+        issue,
+        `Symphony could not merge because the linked PR is ${readiness.state}: ${readiness.url}.`,
+      );
+      return true;
+    }
+    if (readiness.isDraft) {
+      await this.moveMergeIssueBackToHandoff(
+        config,
+        issue,
+        `Symphony paused merge automation because the linked PR is still a draft: ${readiness.url}.`,
+      );
+      return true;
+    }
+    if (!isPullRequestApproved(readiness)) {
+      await this.moveMergeIssueBackToHandoff(
+        config,
+        issue,
+        `Symphony paused merge automation because the linked PR is no longer approved: ${readiness.url}.`,
+      );
+      return true;
+    }
+    if (isPullRequestConflicted(readiness)) {
+      await this.moveMergeIssueBackToActive(
+        config,
+        issue,
+        [
+          'Symphony found the approved PR is not mergeable and needs agent rework.',
+          `PR: ${readiness.url}`,
+          `mergeStateStatus: ${readiness.mergeStateStatus ?? 'unknown'}`,
+          `mergeable: ${readiness.mergeable ?? 'unknown'}`,
+        ].join('\n'),
+      );
+      return true;
+    }
+    if (!isPullRequestReadyToMerge(readiness)) {
+      this.deps.logger.info(
+        { issue: issue.identifier, prUrl: readiness.url, readiness },
+        'approved PR is not ready to merge yet',
+      );
+      return false;
+    }
+
+    try {
+      const identity = await this.deps.resolvePrIdentity(config);
+      await this.deps.mergePullRequest(
+        readiness.url,
+        config.workspace.repoPath,
+        identity?.env,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.moveMergeIssueBackToActive(
+        config,
+        issue,
+        [
+          'Symphony attempted to merge the approved PR but GitHub rejected the merge.',
+          `PR: ${readiness.url}`,
+          `Error: ${message}`,
+        ].join('\n'),
+      );
+      return true;
+    }
+
+    await this.deps.writeRunnerComment(
+      config,
+      issue.id,
+      `Symphony merged approved GitHub PR: ${readiness.url}.`,
+    );
+    return this.syncMergedPrLinkedIssueToTerminal(config, issue);
+  }
+
+  private async moveMergeIssueBackToActive(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    body: string,
+  ): Promise<void> {
+    const targetState =
+      config.tracker.activeStates.find(
+        (state) => state.toLowerCase() === 'in progress',
+      ) ?? config.tracker.activeStates[0];
+    if (!targetState) {
+      this.deps.logger.warn(
+        { issue: issue.identifier },
+        'merge issue needed rework but no active state is configured',
+      );
+      return;
+    }
+    await this.deps.writeRunnerComment(config, issue.id, body);
+    await this.deps.moveIssueToState(config, issue.id, targetState);
+    this.reworkIssues.add(issue.id);
+    this.handoff.delete(issue.identifier);
+    this.completed.delete(issue.identifier);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+  }
+
+  private async moveMergeIssueBackToHandoff(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    body: string,
+  ): Promise<void> {
+    const handoffState = config.tracker.handoffState;
+    if (!handoffState) {
+      await this.moveMergeIssueBackToActive(config, issue, body);
+      return;
+    }
+    await this.deps.writeRunnerComment(config, issue.id, body);
+    await this.deps.moveIssueToState(config, issue.id, handoffState);
+    const handoffIssue = { ...issue, state: handoffState };
+    this.handoff.set(issue.identifier, issueSummary(config, handoffIssue));
+    this.rework.delete(issue.identifier);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+  }
+
   private async ensurePrIdentityHandoffGate(
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
@@ -1541,7 +1873,7 @@ export class Orchestrator {
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
   ): Promise<boolean> {
-    if (!isHandoffState(issue.state, config)) {
+    if (!isHandoffState(issue.state, config) && !isMergeState(issue.state, config)) {
       return false;
     }
     const prUrl = githubPullRequestUrlFromIssue(issue);
@@ -1790,6 +2122,27 @@ function missingRequiredReviewers(
 ): string[] {
   const requested = new Set(requestedReviewers.map((reviewer) => reviewer.toLowerCase()));
   return requiredReviewers.filter((reviewer) => !requested.has(reviewer.toLowerCase()));
+}
+
+function isPullRequestApproved(readiness: PullRequestMergeReadiness): boolean {
+  if (readiness.reviewDecision) {
+    return readiness.reviewDecision === 'APPROVED';
+  }
+  return readiness.latestReviewDecision === 'APPROVED';
+}
+
+function isPullRequestConflicted(readiness: PullRequestMergeReadiness): boolean {
+  return readiness.mergeStateStatus === 'DIRTY' || readiness.mergeable === 'CONFLICTING';
+}
+
+function isPullRequestReadyToMerge(readiness: PullRequestMergeReadiness): boolean {
+  return (
+    readiness.state === 'open' &&
+    !readiness.isDraft &&
+    isPullRequestApproved(readiness) &&
+    readiness.mergeStateStatus === 'CLEAN' &&
+    readiness.mergeable === 'MERGEABLE'
+  );
 }
 
 function sleep(ms: number): Promise<void> {

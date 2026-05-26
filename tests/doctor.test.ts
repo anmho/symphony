@@ -177,6 +177,7 @@ function makeConfig(
       activeStates: ['Todo', 'In Progress'],
       terminalStates: ['Done', 'Closed', 'Canceled'],
       handoffState: null,
+      mergeState: null,
     },
     polling: { intervalMs: 30000 },
     workspace: {

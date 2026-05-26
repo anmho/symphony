@@ -201,7 +201,8 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       repoLabelPrefix: "repo:",
       activeStates: ["Todo"],
       terminalStates: ["Done"],
-      handoffState: null
+      handoffState: null,
+      mergeState: null
     },
     polling: { intervalMs: 30000 },
     workspace: {

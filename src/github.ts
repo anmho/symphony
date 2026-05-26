@@ -1,5 +1,6 @@
 import type {
   PullRequestMetadata,
+  PullRequestMergeReadiness,
   PullRequestReviewComment,
   PullRequestReviewFeedback,
   PullRequestStatus,
@@ -136,6 +137,100 @@ export function parsePullRequestMetadata(raw: string): PullRequestMetadata {
   return { url, baseRefName, headRefName, body, authorLogin, reviewRequestLogins };
 }
 
+export async function fetchPullRequestMergeReadiness(
+  url: string,
+  cwd?: string,
+  runner: CommandRunner = runCommand,
+): Promise<PullRequestMergeReadiness> {
+  const options: { cwd?: string; timeoutMs: number } = { timeoutMs: 60000 };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  const result = await runner(
+    'gh',
+    [
+      'pr',
+      'view',
+      url,
+      '--json',
+      'url,state,isDraft,reviewDecision,latestReviews,mergeStateStatus,mergeable,headRefOid',
+    ],
+    options,
+  );
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      detail
+        ? `github_pr_merge_readiness_unavailable: gh pr view ${url} failed: ${detail}`
+        : `github_pr_merge_readiness_unavailable: gh pr view ${url} failed`,
+    );
+  }
+  return parsePullRequestMergeReadiness(result.stdout);
+}
+
+export function parsePullRequestMergeReadiness(raw: string): PullRequestMergeReadiness {
+  const parsed = JSON.parse(raw) as Partial<PullRequestMergeReadiness> & {
+    latestReviews?: Array<{ state?: string | null; author?: GithubAuthor | null }> | null;
+  };
+  const url = typeof parsed.url === 'string' ? parsed.url : '';
+  if (!url) {
+    throw new Error('github_pr_merge_readiness_incomplete');
+  }
+  const rawState = typeof parsed.state === 'string' ? parsed.state.toLowerCase() : 'open';
+  const state = rawState === 'merged' || rawState === 'closed' ? rawState : 'open';
+  const latestHumanReview = [...(parsed.latestReviews ?? [])]
+    .reverse()
+    .find((review) => !isAutomationAuthor(review?.author) && typeof review?.state === 'string');
+  const reviewDecision =
+    typeof parsed.reviewDecision === 'string' && parsed.reviewDecision.trim()
+      ? parsed.reviewDecision
+      : null;
+  const latestReviewDecision =
+    typeof latestHumanReview?.state === 'string' && latestHumanReview.state.trim()
+      ? latestHumanReview.state
+      : null;
+  return {
+    url,
+    state,
+    isDraft: parsed.isDraft === true,
+    reviewDecision,
+    latestReviewDecision,
+    mergeStateStatus: typeof parsed.mergeStateStatus === 'string' ? parsed.mergeStateStatus : null,
+    mergeable: typeof parsed.mergeable === 'string' ? parsed.mergeable : null,
+    headRefOid: typeof parsed.headRefOid === 'string' ? parsed.headRefOid : null,
+  };
+}
+
+export async function mergePullRequest(
+  url: string,
+  cwd?: string,
+  env?: NodeJS.ProcessEnv,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } = {
+    timeoutMs: 120000,
+  };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  if (env) {
+    options.env = env;
+  }
+  const result = await runner(
+    'gh',
+    ['pr', 'merge', url, '--squash', '--delete-branch'],
+    options,
+  );
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      detail
+        ? `github_pr_merge_failed: gh pr merge ${url} --squash --delete-branch failed: ${detail}`
+        : `github_pr_merge_failed: gh pr merge ${url} --squash --delete-branch failed`,
+    );
+  }
+}
+
 export async function requestPullRequestReviewers(
   url: string,
   reviewers: string[],
@@ -192,7 +287,7 @@ export async function fetchPullRequestReviewFeedback(
               line
               comments(first: 20) {
                 nodes {
-                  author { login }
+                  author { login __typename }
                   body
                   url
                   createdAt
@@ -202,7 +297,7 @@ export async function fetchPullRequestReviewFeedback(
           }
           reviews(first: 50) {
             nodes {
-              author { login }
+              author { login __typename }
               body
               url
               submittedAt
@@ -211,7 +306,7 @@ export async function fetchPullRequestReviewFeedback(
           }
           comments(first: 50) {
             nodes {
-              author { login }
+              author { login __typename }
               body
               url
               createdAt
@@ -239,20 +334,22 @@ export async function fetchPullRequestReviewFeedback(
 
   const unresolvedComments: PullRequestReviewComment[] = [];
   let latestBotActivityAt = '';
+  // GitHub App authors can appear as either `app-name[bot]` or just the app slug
+  // depending on the API surface. `__typename` is the stable Bot/User discriminator.
   for (const thread of pullRequest.reviewThreads?.nodes ?? []) {
     for (const comment of thread?.comments?.nodes ?? []) {
-      if (isBotAuthor(comment?.author?.login) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
+      if (isAutomationAuthor(comment?.author) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
         latestBotActivityAt = comment.createdAt;
       }
     }
   }
   for (const review of pullRequest.reviews?.nodes ?? []) {
-    if (isBotAuthor(review?.author?.login) && review?.submittedAt && review.submittedAt > latestBotActivityAt) {
+    if (isAutomationAuthor(review?.author) && review?.submittedAt && review.submittedAt > latestBotActivityAt) {
       latestBotActivityAt = review.submittedAt;
     }
   }
   for (const comment of pullRequest.comments?.nodes ?? []) {
-    if (isBotAuthor(comment?.author?.login) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
+    if (isAutomationAuthor(comment?.author) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
       latestBotActivityAt = comment.createdAt;
     }
   }
@@ -268,7 +365,7 @@ export async function fetchPullRequestReviewFeedback(
     if (!latestReviewerComment?.body?.trim()) {
       continue;
     }
-    if (isBotAuthor(latestReviewerComment.author?.login)) {
+    if (isAutomationAuthor(latestReviewerComment.author)) {
       continue;
     }
     unresolvedComments.push({
@@ -281,7 +378,7 @@ export async function fetchPullRequestReviewFeedback(
     });
   }
   for (const review of pullRequest.reviews?.nodes ?? []) {
-    if (!review || isBotAuthor(review.author?.login)) {
+    if (!review || isAutomationAuthor(review.author)) {
       continue;
     }
     const state = review.state ?? null;
@@ -302,7 +399,7 @@ export async function fetchPullRequestReviewFeedback(
     });
   }
   for (const comment of pullRequest.comments?.nodes ?? []) {
-    if (!comment?.body?.trim() || isBotAuthor(comment.author?.login)) {
+    if (!comment?.body?.trim() || isAutomationAuthor(comment.author)) {
       continue;
     }
     if (comment.createdAt && latestBotActivityAt && comment.createdAt <= latestBotActivityAt) {
@@ -335,7 +432,7 @@ interface GithubReviewRepository {
         line?: number | null;
         comments?: {
           nodes?: Array<{
-            author?: { login?: string | null } | null;
+            author?: GithubAuthor | null;
             body?: string | null;
             url?: string | null;
             createdAt?: string | null;
@@ -345,7 +442,7 @@ interface GithubReviewRepository {
     } | null;
     reviews?: {
       nodes?: Array<{
-        author?: { login?: string | null } | null;
+        author?: GithubAuthor | null;
         body?: string | null;
         url?: string | null;
         submittedAt?: string | null;
@@ -354,7 +451,7 @@ interface GithubReviewRepository {
     } | null;
     comments?: {
       nodes?: Array<{
-        author?: { login?: string | null } | null;
+        author?: GithubAuthor | null;
         body?: string | null;
         url?: string | null;
         createdAt?: string | null;
@@ -363,8 +460,13 @@ interface GithubReviewRepository {
   } | null;
 }
 
-function isBotAuthor(login: string | null | undefined): boolean {
-  return Boolean(login?.endsWith('[bot]'));
+interface GithubAuthor {
+  login?: string | null;
+  __typename?: string | null;
+}
+
+function isAutomationAuthor(author: GithubAuthor | null | undefined): boolean {
+  return author?.__typename === 'Bot' || Boolean(author?.login?.endsWith('[bot]'));
 }
 
 function uniqueReviewerLogins(reviewers: string[]): string[] {

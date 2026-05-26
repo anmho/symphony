@@ -179,7 +179,8 @@ function makeConfig(command: string): EffectiveWorkflowConfig {
       repoLabelPrefix: "repo:",
       activeStates: ["Todo"],
       terminalStates: ["Done"],
-      handoffState: null
+      handoffState: null,
+      mergeState: null
     },
     polling: { intervalMs: 30000 },
     workspace: {

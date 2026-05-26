@@ -41,6 +41,7 @@ export interface TrackerConfig {
   activeStates: string[];
   terminalStates: string[];
   handoffState: string | null;
+  mergeState: string | null;
 }
 
 export interface PollingConfig {
@@ -239,6 +240,17 @@ export interface PullRequestReviewFeedback {
   repo: string;
   number: number;
   unresolvedComments: PullRequestReviewComment[];
+}
+
+export interface PullRequestMergeReadiness {
+  url: string;
+  state: 'open' | 'closed' | 'merged';
+  isDraft: boolean;
+  reviewDecision: string | null;
+  latestReviewDecision: string | null;
+  mergeStateStatus: string | null;
+  mergeable: string | null;
+  headRefOid: string | null;
 }
 
 export interface LiveSession {

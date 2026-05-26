@@ -127,7 +127,8 @@ function makeConfig(options: { identity?: boolean } = {}): EffectiveWorkflowConf
       repoLabelPrefix: "repo:",
       activeStates: ["Todo", "In Progress"],
       terminalStates: ["Done"],
-      handoffState: "In Review"
+      handoffState: "In Review",
+      mergeState: null
     },
     polling: { intervalMs: 30000 },
     workspace: {

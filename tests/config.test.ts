@@ -68,6 +68,7 @@ Body
 tracker:
   team_key: ANM
   handoff_state: Human Review
+  merge_state: Eligible for Merging
   required_labels:
     - symphony
   repo_label_prefix: "repo:"
@@ -87,6 +88,7 @@ Prompt
     expect(config.tracker.projectSlug).toBeNull();
     expect(config.tracker.teamKey).toBe("ANM");
     expect(config.tracker.handoffState).toBe("Human Review");
+    expect(config.tracker.mergeState).toBe("Eligible for Merging");
     expect(config.tracker.requiredLabels).toEqual(["symphony"]);
     expect(config.workspace.root).toBe(path.resolve("/tmp/symphony/.symphony/workspaces"));
     expect(config.workspace.projectsRoot).toBe("/Users/test/repos");
