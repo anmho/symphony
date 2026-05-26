@@ -12,6 +12,7 @@ import {
   fetchDaemonStatus,
   queueSteer,
   resumeIssue,
+  setDaemonMaxConcurrency,
 } from './status.js';
 import { isRateLimitError } from './rateLimit.js';
 import {
@@ -307,6 +308,24 @@ async function runOpenTuiStatusWatch(
                   issue ? resumeIssue(options.port, issue) : null,
                 )
                 .then(() => render());
+            } else if (
+              command === 'concurrency clear' ||
+              command === 'max-concurrency clear'
+            ) {
+              void setDaemonMaxConcurrency(options.port, null).then(() =>
+                render(),
+              );
+            } else if (
+              command.startsWith('concurrency ') ||
+              command.startsWith('max-concurrency ')
+            ) {
+              const rawValue = command.split(/\s+/, 2)[1] ?? '';
+              const value = Number(rawValue);
+              if (Number.isInteger(value) && value > 0) {
+                void setDaemonMaxConcurrency(options.port, value).then(() =>
+                  render(),
+                );
+              }
             } else if (command.startsWith('steer ')) {
               const text = commandBuffer.trim().slice('steer '.length);
               void selectedIssue(options.port, filterText, selectedIndex)
@@ -495,7 +514,7 @@ export function renderStatusScreen(
     });
 
   const headerLine = padLineToWidth(
-    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(String(snapshot.running.length))}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('handoff=')}${snapshot.handoff.length}  ${theme.dim('completed=')}${snapshot.completed.length}`,
+    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(`${snapshot.concurrency.running}/${snapshot.concurrency.effectiveMax ?? '?'}`)}  ${theme.dim('max-source=')}${snapshot.concurrency.overrideActive ? theme.warn('override') : theme.ok(snapshot.concurrency.source)}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('handoff=')}${snapshot.handoff.length}  ${theme.dim('completed=')}${snapshot.completed.length}`,
     terminalWidth,
   );
   const workflowLine = padLineToWidth(
@@ -825,6 +844,8 @@ function renderView(
       `  ${theme.accent(':events')}        show selected agent event/message`,
       `  ${theme.accent(':retry')}         retry/resume selected queued agent now`,
       `  ${theme.accent(':steer text')}    queue guidance for selected agent`,
+      `  ${theme.accent(':concurrency N')} set max concurrent agents`,
+      `  ${theme.accent(':concurrency clear')} use WORKFLOW.md concurrency`,
       `  ${theme.accent(':clear')}         clear filter`,
       `  ${theme.accent('/text')}          filter rows`,
       `  ${theme.accent('Up/Down j/k')}    move selection`,

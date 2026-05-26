@@ -110,7 +110,7 @@ Monitor agents in a k9s-style terminal UI:
 symphony watch
 ```
 
-`symphony watch` reads the same local status endpoint as `symphony status`, but presents agents as a continuously refreshed resource table. It supports `j/k` or arrow navigation, `:` command mode, `/` filtering, `?` help, `d` describe, `l` logs, `s` steer, `r` retry/resume selected, `ctrl-r` refresh, and `q` quit. The watch UI expands to fill the terminal width and height (k9s-style flex columns and dynamic log viewport).
+`symphony watch` reads the same local status endpoint as `symphony status`, but presents agents as a continuously refreshed resource table. It supports `j/k` or arrow navigation, `:` command mode, `/` filtering, `?` help, `d` describe, `l` logs, `s` steer, `r` retry/resume selected, `:concurrency N`, `:concurrency clear`, `ctrl-r` refresh, and `q` quit. The watch UI expands to fill the terminal width and height (k9s-style flex columns and dynamic log viewport).
 
 ### macOS menu bar monitor
 
@@ -157,6 +157,14 @@ If Codex becomes available before a reported reset time, force a probe immediate
 
 ```sh
 symphony resume
+```
+
+Tune max concurrent agents for the running daemon without editing `WORKFLOW.md`:
+
+```sh
+symphony concurrency
+symphony concurrency set 3
+symphony concurrency clear
 ```
 
 Create a Linear ticket for Symphony dispatch using the agent-brief preset (labels `symphony`, `repo:<key>`, `needs-triage`):
@@ -249,7 +257,7 @@ symphony stop
 
 Each issue worker prepares a Git worktree, runs hooks, starts or resumes a Codex app-server thread, and loops while the Linear issue remains active. When Codex reports a rate limit, the runner pauses new Codex launches until the reset time in the current process.
 
-Runtime state is intentionally in-memory to match the OpenAI Symphony spec. Restart recovery is tracker/filesystem-driven: active Linear issues and existing worktrees determine what gets picked back up.
+Most runtime state is intentionally in-memory to match the OpenAI Symphony spec. Restart recovery is tracker/filesystem-driven: active Linear issues and existing worktrees determine what gets picked back up. Operator controls that must survive daemon restarts, such as queued steering and the max-concurrency override, are stored under `.symphony/state/` next to the workflow.
 
 `symphony start` launches a normal detached user process and writes pid/log files under `~/.symphony`. It does not install a LaunchAgent or auto-start on login.
 
@@ -257,7 +265,7 @@ Runtime state is intentionally in-memory to match the OpenAI Symphony spec. Rest
 
 Rate-limit handling is intentionally different from ordinary failure retry. Symphony parks new launches until Codex's reported reset time, but also probes parked runs every `agent.rate_limit_probe_interval_ms` with per-issue jitter so work can resume if access returns earlier than the reported reset. The default probe interval is 15 seconds.
 
-The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. Per-issue public work streams are stored as JSONL under `.symphony/events/`, and queued steering state is stored under `.symphony/state/`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
+The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. Per-issue public work streams are stored as JSONL under `.symphony/events/`, and persisted operator controls are stored under `.symphony/state/`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
 
 ## Safety Notes
 

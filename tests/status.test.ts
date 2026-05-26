@@ -6,6 +6,7 @@ import {
   queueSteer,
   requestChanges,
   resumeIssue,
+  setDaemonMaxConcurrency,
   startStatusServer,
 } from '../src/status.js';
 import type { OrchestratorSnapshot } from '../src/types.js';
@@ -25,6 +26,7 @@ describe('status server', () => {
   });
 
   it('serves work events and selected-agent controls', async () => {
+    let maxConcurrencyOverride: number | null = null;
     server = await startStatusServer(() => snapshot(), 0, {
       getEvents: () => [
         {
@@ -45,6 +47,18 @@ describe('status server', () => {
       queueSteer: (issue) => ({ queued: true, issue }),
       resumeIssue: (issue) => ({ resumed: true, issue }),
       requestChanges: (issue) => ({ issue, state: 'In Progress' }),
+      setMaxConcurrencyOverride: (maxConcurrentAgents) => {
+        maxConcurrencyOverride = maxConcurrentAgents;
+        return {
+          running: 0,
+          configuredMax: 5,
+          effectiveMax: maxConcurrentAgents ?? 5,
+          source: maxConcurrentAgents === null ? 'workflow' : 'override',
+          overrideActive: maxConcurrentAgents !== null,
+          overrideMax: maxConcurrentAgents,
+          overrideUpdatedAtMs: maxConcurrentAgents === null ? null : 2000,
+        };
+      },
     });
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : 0;
@@ -64,6 +78,21 @@ describe('status server', () => {
     ).resolves.toMatchObject({
       issue: 'ANM-1',
       state: 'In Progress',
+    });
+    await expect(setDaemonMaxConcurrency(port, 2)).resolves.toMatchObject({
+      concurrency: {
+        effectiveMax: 2,
+        source: 'override',
+        overrideActive: true,
+      },
+    });
+    expect(maxConcurrencyOverride).toBe(2);
+    await expect(setDaemonMaxConcurrency(port, null)).resolves.toMatchObject({
+      concurrency: {
+        effectiveMax: 5,
+        source: 'workflow',
+        overrideActive: false,
+      },
     });
   });
 
@@ -124,6 +153,15 @@ function snapshot(): OrchestratorSnapshot {
       resumeAfterMs: null,
       reason: null,
       updatedAtMs: null,
+    },
+    concurrency: {
+      running: 0,
+      configuredMax: 5,
+      effectiveMax: 5,
+      source: 'workflow',
+      overrideActive: false,
+      overrideMax: null,
+      overrideUpdatedAtMs: null,
     },
     lastTickAtMs: null,
     lastConfigError: null,

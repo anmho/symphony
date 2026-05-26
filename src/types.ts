@@ -154,6 +154,16 @@ export interface CodexUsageTotals {
   runtimeMs: number;
 }
 
+export interface ConcurrencySnapshot {
+  running: number;
+  configuredMax: number | null;
+  effectiveMax: number | null;
+  source: 'workflow' | 'override' | 'unknown';
+  overrideActive: boolean;
+  overrideMax: number | null;
+  overrideUpdatedAtMs: number | null;
+}
+
 export interface CodexTurnResult {
   status: 'completed' | 'failed' | 'rate_limited';
   threadId: string;
@@ -233,6 +243,7 @@ export interface OrchestratorSnapshot {
   completedDetails: IssueSummary[];
   codexTotals: CodexUsageTotals;
   codexRateLimit: CodexRateLimitSnapshot;
+  concurrency: ConcurrencySnapshot;
   lastTickAtMs: number | null;
   lastConfigError: string | null;
   paused: boolean;

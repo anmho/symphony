@@ -1,3 +1,11 @@
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
 import { loadWorkflowConfig } from './config.js';
 import {
   fetchCandidateIssues,
@@ -45,6 +53,7 @@ import type {
   CodexUsageTotals,
   EffectiveWorkflowConfig,
   AgentWorkEvent,
+  ConcurrencySnapshot,
   IssueSummary,
   LiveSession,
   NormalizedIssue,
@@ -229,6 +238,8 @@ export class Orchestrator {
   private pausedAtMs: number | null = null;
   private startupCleanupDone = false;
   private tickInFlight: Promise<void> | null = null;
+  private maxConcurrencyOverride: number | null = null;
+  private maxConcurrencyOverrideUpdatedAtMs: number | null = null;
 
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
@@ -285,6 +296,7 @@ export class Orchestrator {
     };
     this.eventStore = this.deps.eventStore;
     this.digestStateStore = this.deps.digestStateStore;
+    this.loadMaxConcurrencyOverride();
   }
 
   async start(): Promise<void> {
@@ -339,11 +351,34 @@ export class Orchestrator {
       completedDetails: [...this.completed.values()],
       codexTotals: { ...this.codexTotals },
       codexRateLimit: { ...this.codexRateLimit },
+      concurrency: this.concurrencySnapshot(this.lastKnownGoodConfig),
       lastTickAtMs: this.lastTickAtMs,
       lastConfigError: this.lastConfigError,
       paused: this.operatorPaused,
       pausedAtMs: this.pausedAtMs,
     };
+  }
+
+  setMaxConcurrencyOverride(maxConcurrentAgents: number | null): ConcurrencySnapshot {
+    if (
+      maxConcurrentAgents !== null &&
+      (!Number.isInteger(maxConcurrentAgents) || maxConcurrentAgents <= 0)
+    ) {
+      throw new Error(`invalid_max_concurrent_agents: ${maxConcurrentAgents}`);
+    }
+    this.maxConcurrencyOverride = maxConcurrentAgents;
+    this.maxConcurrencyOverrideUpdatedAtMs =
+      maxConcurrentAgents === null ? null : this.deps.now();
+    this.persistMaxConcurrencyOverride();
+    this.deps.logger.info(
+      {
+        maxConcurrentAgents,
+        source: maxConcurrentAgents === null ? 'workflow' : 'override',
+      },
+      'updated max concurrency override',
+    );
+    void this.tick();
+    return this.concurrencySnapshot(this.lastKnownGoodConfig);
   }
 
   pause(): { paused: boolean } {
@@ -513,7 +548,7 @@ export class Orchestrator {
     ).filter((issue) => isIssueEligible(issue, config));
 
     for (const issue of candidates) {
-      if (this.running.size >= config.agent.maxConcurrentAgents) {
+      if (this.running.size >= this.effectiveMaxConcurrentAgents(config)) {
         break;
       }
       if (this.claimed.has(issue.id)) {
@@ -729,7 +764,7 @@ export class Orchestrator {
       (attempt) => attempt.dueAtMs <= now,
     );
     for (const attempt of dueAttempts) {
-      if (this.running.size >= config.agent.maxConcurrentAgents) {
+      if (this.running.size >= this.effectiveMaxConcurrentAgents(config)) {
         return;
       }
       if (this.running.has(attempt.issueId)) {
@@ -834,6 +869,79 @@ export class Orchestrator {
 
     this.running.set(issue.id, entry);
     this.appendRunnerEvent(entry, 'issue claimed by Symphony');
+  }
+
+  private effectiveMaxConcurrentAgents(config: EffectiveWorkflowConfig): number {
+    return this.maxConcurrencyOverride ?? config.agent.maxConcurrentAgents;
+  }
+
+  private concurrencySnapshot(
+    config: EffectiveWorkflowConfig | null,
+  ): ConcurrencySnapshot {
+    const configuredMax = config?.agent.maxConcurrentAgents ?? null;
+    const effectiveMax =
+      this.maxConcurrencyOverride ?? configuredMax;
+    const overrideActive = this.maxConcurrencyOverride !== null;
+    return {
+      running: this.running.size,
+      configuredMax,
+      effectiveMax,
+      source: overrideActive ? 'override' : configuredMax === null ? 'unknown' : 'workflow',
+      overrideActive,
+      overrideMax: this.maxConcurrencyOverride,
+      overrideUpdatedAtMs: this.maxConcurrencyOverrideUpdatedAtMs,
+    };
+  }
+
+  private maxConcurrencyOverridePath(): string {
+    return path.join(
+      path.dirname(path.resolve(this.workflowPath)),
+      '.symphony',
+      'state',
+      'concurrency.json',
+    );
+  }
+
+  private loadMaxConcurrencyOverride(): void {
+    const overridePath = this.maxConcurrencyOverridePath();
+    if (!existsSync(this.workflowPath) || !existsSync(overridePath)) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(overridePath, 'utf8')) as {
+        maxConcurrentAgents?: unknown;
+        updatedAtMs?: unknown;
+      };
+      const value = parsed.maxConcurrentAgents;
+      if (Number.isInteger(value) && Number(value) > 0) {
+        this.maxConcurrencyOverride = Number(value);
+        this.maxConcurrencyOverrideUpdatedAtMs =
+          typeof parsed.updatedAtMs === 'number' ? parsed.updatedAtMs : null;
+      }
+    } catch {
+      this.maxConcurrencyOverride = null;
+      this.maxConcurrencyOverrideUpdatedAtMs = null;
+    }
+  }
+
+  private persistMaxConcurrencyOverride(): void {
+    const overridePath = this.maxConcurrencyOverridePath();
+    if (this.maxConcurrencyOverride === null) {
+      rmSync(overridePath, { force: true });
+      return;
+    }
+    mkdirSync(path.dirname(overridePath), { recursive: true });
+    writeFileSync(
+      overridePath,
+      `${JSON.stringify(
+        {
+          maxConcurrentAgents: this.maxConcurrencyOverride,
+          updatedAtMs: this.maxConcurrencyOverrideUpdatedAtMs,
+        },
+        null,
+        2,
+      )}\n`,
+    );
   }
 
   private async runIssue(

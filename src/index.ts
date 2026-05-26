@@ -30,6 +30,7 @@ import {
   resumeIssue,
   resumeOrchestrator,
   resumeRateLimitedRuns,
+  setDaemonMaxConcurrency,
   startStatusServer,
 } from './status.js';
 import { StreamingEventDisplay, formatDisplayEvent } from './eventDisplay.js';
@@ -253,6 +254,57 @@ program
       return;
     }
     console.log(JSON.stringify(status, null, 2));
+  });
+
+const concurrency = program
+  .command('concurrency')
+  .description('View or change the running daemon max concurrent agents.');
+
+concurrency
+  .command('get', { isDefault: true })
+  .description('Show effective daemon max concurrency.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const status = await fetchDaemonStatus(port);
+    if (!status) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}.`);
+      return;
+    }
+    console.log(formatConcurrencyStatus(status.concurrency));
+  });
+
+concurrency
+  .command('set')
+  .description('Set a persisted max concurrency override for the running daemon.')
+  .argument('<max>', 'positive integer max concurrent agents')
+  .action(async (max: string) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonMaxConcurrency(
+      port,
+      readPositiveInteger(max, 'max_concurrent_agents'),
+    );
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support concurrency controls.`,
+      );
+      return;
+    }
+    console.log(formatConcurrencyStatus(result.concurrency));
+  });
+
+concurrency
+  .command('clear')
+  .description('Clear the persisted max concurrency override.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonMaxConcurrency(port, null);
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support concurrency controls.`,
+      );
+      return;
+    }
+    console.log(formatConcurrencyStatus(result.concurrency));
   });
 
 program
@@ -514,6 +566,8 @@ async function runForeground(options: CliOptions): Promise<void> {
       },
       pauseDispatch: () => orchestrator.pause(),
       resumeDispatch: () => orchestrator.resume(),
+      setMaxConcurrencyOverride: (maxConcurrentAgents) =>
+        orchestrator.setMaxConcurrencyOverride(maxConcurrentAgents),
     },
   );
 
@@ -645,6 +699,23 @@ function readPositiveInteger(value: string, name: string): number {
     throw new Error(`invalid_${name}: ${value}`);
   }
   return parsed;
+}
+
+function formatConcurrencyStatus(concurrency: {
+  running: number;
+  configuredMax: number | null;
+  effectiveMax: number | null;
+  source: string;
+  overrideActive: boolean;
+  overrideMax: number | null;
+}): string {
+  return [
+    `running=${concurrency.running}`,
+    `configured=${concurrency.configuredMax ?? 'unknown'}`,
+    `effective=${concurrency.effectiveMax ?? 'unknown'}`,
+    `source=${concurrency.source}`,
+    `override=${concurrency.overrideActive ? concurrency.overrideMax : 'none'}`,
+  ].join(' ');
 }
 
 async function checkedRun(

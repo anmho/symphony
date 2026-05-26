@@ -1,5 +1,9 @@
 import http, { type Server } from 'node:http';
-import type { AgentWorkEvent, OrchestratorSnapshot } from './types.js';
+import type {
+  AgentWorkEvent,
+  ConcurrencySnapshot,
+  OrchestratorSnapshot,
+} from './types.js';
 import { compactAgentWorkEvents } from './eventDisplay.js';
 
 export const DEFAULT_STATUS_PORT = 3979;
@@ -25,6 +29,9 @@ export interface StatusServerControls {
     issue: string,
     feedback: string,
   ) => Promise<{ issue: string; state: string }> | { issue: string; state: string };
+  setMaxConcurrencyOverride?: (
+    maxConcurrentAgents: number | null,
+  ) => ConcurrencySnapshot;
 }
 
 export function startStatusServer(
@@ -133,6 +140,40 @@ export function startStatusServer(
     }
 
     if (
+      url.pathname === '/control/concurrency' &&
+      request.method === 'POST' &&
+      controls.setMaxConcurrencyOverride
+    ) {
+      const body = await readJsonBody(request);
+      const maxConcurrentAgents =
+        body.maxConcurrentAgents === null || body.max === null
+          ? null
+          : typeof body.maxConcurrentAgents === 'number'
+            ? body.maxConcurrentAgents
+            : typeof body.max === 'number'
+              ? body.max
+              : undefined;
+      if (
+        maxConcurrentAgents === undefined ||
+        (maxConcurrentAgents !== null &&
+          (!Number.isInteger(maxConcurrentAgents) || maxConcurrentAgents <= 0))
+      ) {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({ error: 'positive_integer_max_required' }),
+        );
+        return;
+      }
+      const concurrency =
+        controls.setMaxConcurrencyOverride(maxConcurrentAgents);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ concurrency, snapshot: getSnapshot() }, null, 2),
+      );
+      return;
+    }
+
+    if (
       url.pathname === '/control/pause' &&
       request.method === 'POST' &&
       controls.pauseDispatch
@@ -224,6 +265,28 @@ export async function resumeOrchestrator(
       return null;
     }
     return (await response.json()) as { paused: boolean };
+  } catch {
+    return null;
+  }
+}
+
+export async function setDaemonMaxConcurrency(
+  port = DEFAULT_STATUS_PORT,
+  maxConcurrentAgents: number | null,
+): Promise<{ concurrency: ConcurrencySnapshot } | null> {
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/control/concurrency`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ maxConcurrentAgents }),
+      },
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as { concurrency: ConcurrencySnapshot };
   } catch {
     return null;
   }
