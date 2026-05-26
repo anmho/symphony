@@ -342,6 +342,82 @@ describe('github client', () => {
     ]);
   });
 
+  it('syncs Graphite PR metadata and retries when merge cannot find associated PRs', async () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      env?: NodeJS.ProcessEnv;
+    }> = [];
+    const env = { ...process.env, GH_TOKEN: 'ghs_test' };
+    let mergeAttempts = 0;
+    const runner = vi.fn(async (command, args, options) => {
+      calls.push({ command, args, env: options.env });
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            url: 'https://github.com/anmho/website/pull/9',
+            author: { login: 'app/anmho-symphony' },
+            baseRefName: 'main',
+            headRefName: 'symphony/ANM-298-app',
+            body: 'Graphite: https://app.graphite.com/github/pr/anmho/website/9',
+            reviewRequests: [],
+          }),
+          stderr: '',
+        };
+      }
+      if (command === 'gt' && args.join(' ') === 'branch info') {
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (command === 'gt' && args.join(' ') === 'merge --no-interactive') {
+        mergeAttempts += 1;
+        if (mergeAttempts === 1) {
+          return {
+            exitCode: 1,
+            stdout:
+              'ERROR: The following branches do not have associated PRs\n▸ symphony/ANM-298-app\n\nPlease submit and then retry.',
+            stderr: '',
+          };
+        }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+
+    await mergePullRequest(
+      'https://github.com/anmho/website/pull/9',
+      '/repo',
+      env,
+      runner,
+    );
+
+    expect(calls.map((call) => [call.command, call.args])).toEqual([
+      [
+        'gh',
+        [
+          'pr',
+          'view',
+          'https://github.com/anmho/website/pull/9',
+          '--json',
+          'author,url,headRefName,baseRefName,body,reviewRequests',
+        ],
+      ],
+      ['gh', ['pr', 'checkout', 'https://github.com/anmho/website/pull/9']],
+      ['gt', ['branch', 'info']],
+      ['gt', ['merge', '--no-interactive']],
+      [
+        'gt',
+        [
+          'submit',
+          '--no-interactive',
+          '--no-edit',
+          '--update-only',
+          '--always',
+        ],
+      ],
+      ['gt', ['merge', '--no-interactive']],
+    ]);
+  });
+
   it('merges non-Graphite pull requests through GitHub', async () => {
     const calls: Array<{
       command: string;

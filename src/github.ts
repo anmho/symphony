@@ -321,10 +321,58 @@ async function mergeGraphitePullRequest(
   const merge = await runner('gt', ['merge', '--no-interactive'], mergeOptions);
   if (merge.exitCode !== 0) {
     const detail = (merge.stderr || merge.stdout).trim();
+    if (/do not have associated PRs/i.test(detail)) {
+      await syncGraphitePullRequest(cwd, runner);
+      const retry = await runner(
+        'gt',
+        ['merge', '--no-interactive'],
+        mergeOptions,
+      );
+      if (retry.exitCode === 0) {
+        return;
+      }
+      const retryDetail = (retry.stderr || retry.stdout).trim();
+      throw new Error(
+        retryDetail
+          ? `graphite_pr_merge_failed: gt merge --no-interactive failed after submit sync: ${retryDetail}`
+          : 'graphite_pr_merge_failed: gt merge --no-interactive failed after submit sync',
+      );
+    }
     throw new Error(
       detail
         ? `graphite_pr_merge_failed: gt merge --no-interactive failed: ${detail}`
         : 'graphite_pr_merge_failed: gt merge --no-interactive failed',
+    );
+  }
+}
+
+async function syncGraphitePullRequest(
+  cwd?: string,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  const options: { cwd?: string; timeoutMs: number } = {
+    timeoutMs: 120000,
+  };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  const submit = await runner(
+    'gt',
+    [
+      'submit',
+      '--no-interactive',
+      '--no-edit',
+      '--update-only',
+      '--always',
+    ],
+    options,
+  );
+  if (submit.exitCode !== 0) {
+    const detail = (submit.stderr || submit.stdout).trim();
+    throw new Error(
+      detail
+        ? `graphite_pr_submit_sync_failed: gt submit --update-only --always failed: ${detail}`
+        : 'graphite_pr_submit_sync_failed: gt submit --update-only --always failed',
     );
   }
 }
