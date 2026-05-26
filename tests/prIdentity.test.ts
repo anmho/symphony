@@ -18,7 +18,9 @@ describe('GitHub PR identity', () => {
     }));
 
     expect(identity?.token).toBe('ghp_testtoken');
+    expect(identity?.login).toBeNull();
     expect(identity?.env.GH_TOKEN).toBe('ghp_testtoken');
+    expect(identity?.env.GITHUB_TOKEN).toBe('ghp_testtoken');
     expect(identity?.env.GIT_AUTHOR_NAME).toBe('Symphony');
     expect(identity?.env.GIT_AUTHOR_EMAIL).toBe('anmho-symphony@users.noreply.github.com');
     expect(identity?.env.GIT_COMMITTER_NAME).toBe('Symphony');
@@ -72,6 +74,33 @@ describe('GitHub PR identity', () => {
     expect(calls).toContain('/repo/symphony:git remote get-url origin');
   });
 
+  it('diagnoses GitHub App installation identity', async () => {
+    const calls: string[] = [];
+    const output = await diagnosePrIdentity(makeConfig({ githubApp: true }), async (command, options) => {
+      calls.push(`${options?.cwd ?? ''}:${command}`);
+      if (command === 'vault token') {
+        return { exitCode: 0, stdout: 'ghs_installationtoken\n', stderr: '' };
+      }
+      if (command === 'gh api /installation/repositories --jq .total_count') {
+        return { exitCode: 0, stdout: '169\n', stderr: '' };
+      }
+      if (command === 'git remote get-url origin') {
+        return { exitCode: 0, stdout: 'git@github.com:anmho/symphony.git\n', stderr: '' };
+      }
+      if (command === 'gh api repos/anmho/symphony --jq .full_name') {
+        return { exitCode: 0, stdout: 'anmho/symphony\n', stderr: '' };
+      }
+      return { exitCode: 1, stdout: '', stderr: `unexpected ${command}` };
+    });
+
+    expect(output).toEqual([
+      'GitHub PR identity configured for app/anmho-symphony.',
+      'GitHub App installation token can list 169 repositories.',
+      'Repo anmho/symphony is accessible to the installation token.',
+    ]);
+    expect(calls).toContain('/repo/symphony:git remote get-url origin');
+  });
+
   it('redacts tokens from arbitrary text', () => {
     expect(redactSecretLikeText('x-access-token:ghp_secret@github.com ghp_secret')).toBe(
       'x-access-token:[redacted]@github.com [redacted]',
@@ -79,10 +108,18 @@ describe('GitHub PR identity', () => {
   });
 });
 
-function makeConfig(): Pick<EffectiveWorkflowConfig, 'github' | 'workspace'> {
+function makeConfig(options: { githubApp?: boolean } = {}): Pick<EffectiveWorkflowConfig, 'github' | 'workspace'> {
   return {
     github: {
-      prIdentity: makeIdentity(),
+      prIdentity: options.githubApp
+        ? {
+            kind: 'github_app',
+            appSlug: 'anmho-symphony',
+            tokenCommand: 'vault token',
+            authorName: 'anmho Symphony',
+            authorEmail: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+          }
+        : makeIdentity(),
     },
     workspace: {
       root: '/tmp/workspaces',

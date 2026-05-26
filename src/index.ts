@@ -43,6 +43,7 @@ import {
   diagnoseDispatchIssues,
   renderDispatchDoctorReport,
 } from './doctor.js';
+import { mintGithubAppInstallationToken } from './githubAppToken.js';
 import { diagnosePrIdentity } from './prIdentity.js';
 import {
   DEFAULT_CODEX_APP_SERVER_COMMAND,
@@ -117,6 +118,23 @@ program
       console.warn(`Warning: ${warning.message}`);
     }
   });
+
+program
+  .command('github-app-token')
+  .description('Mint a GitHub App installation token from a private key command.')
+  .requiredOption('--app-id <id>', 'GitHub App id')
+  .requiredOption('--installation-id <id>', 'GitHub App installation id')
+  .requiredOption('--private-key-command <command>', 'command that prints the GitHub App private key PEM')
+  .action(
+    async (options: {
+      appId: string;
+      installationId: string;
+      privateKeyCommand: string;
+    }) => {
+      const token = await mintGithubAppInstallationToken(options);
+      console.log(token.token);
+    },
+  );
 
 const labels = program.command('labels').description('Manage Linear labels used by Symphony dispatch.');
 
@@ -231,7 +249,7 @@ doctor
 
 doctor
   .command('github-pr-identity')
-  .description('Verify the configured GitHub machine-user PR identity.')
+  .description('Verify the configured GitHub PR identity.')
   .action(async () => {
     const workflowPath = await resolveWorkflowPath(program.opts<CliOptions>().workflow);
     const config = await loadWorkflowConfig(workflowPath);

@@ -100,12 +100,22 @@ export interface DigestConfig {
   resendEndpoint: string;
 }
 
-export interface GithubPrIdentityConfig {
+export interface GithubMachineUserPrIdentityConfig {
   kind: 'machine_user';
   tokenCommand: string;
   authorName: string;
   authorEmail: string;
 }
+
+export interface GithubAppPrIdentityConfig {
+  kind: 'github_app';
+  appSlug: string;
+  tokenCommand: string;
+  authorName: string;
+  authorEmail: string;
+}
+
+export type GithubPrIdentityConfig = GithubMachineUserPrIdentityConfig | GithubAppPrIdentityConfig;
 
 export interface GithubConfig {
   prIdentity: GithubPrIdentityConfig | null;

@@ -35,7 +35,7 @@ export async function resolvePrIdentity(
     throw new Error('github_pr_identity_token_empty');
   }
   return {
-    login: null,
+    login: identity.kind === 'github_app' ? `app/${identity.appSlug}` : null,
     token,
     env: prIdentityEnv(identity, token),
   };
@@ -51,6 +51,38 @@ export async function diagnosePrIdentity(
   const resolved = await resolvePrIdentity(config, runner);
   if (!resolved) {
     return ['GitHub PR identity is not configured.'];
+  }
+  if (config.github.prIdentity.kind === 'github_app') {
+    const repos = await runner('gh api /installation/repositories --jq .total_count', {
+      env: resolved.env,
+      timeoutMs: 30000,
+    });
+    if (repos.exitCode !== 0) {
+      throw new Error(
+        `github_pr_identity_auth_failed: ${redactSecretLikeText(repos.stderr || repos.stdout)}`,
+      );
+    }
+    const lines = [
+      `GitHub PR identity configured for ${resolved.login}.`,
+      `GitHub App installation token can list ${repos.stdout.trim()} repositories.`,
+    ];
+    for (const repoPath of Object.values(config.workspace.repoRoutes)) {
+      const repo = await gitHubRepoFromRemote(repoPath, runner, resolved.env);
+      if (!repo) {
+        continue;
+      }
+      const access = await runner(`gh api repos/${repo} --jq .full_name`, {
+        env: resolved.env,
+        timeoutMs: 30000,
+      });
+      if (access.exitCode !== 0) {
+        throw new Error(
+          `github_pr_identity_repo_access_failed: ${repo}: ${redactSecretLikeText(access.stderr || access.stdout)}`,
+        );
+      }
+      lines.push(`Repo ${access.stdout.trim()} is accessible to the installation token.`);
+    }
+    return lines;
   }
   const user = await runner('gh api user --jq .login', {
     env: resolved.env,
@@ -90,6 +122,7 @@ export function prIdentityEnv(
   return {
     ...baseEnv,
     GH_TOKEN: token,
+    GITHUB_TOKEN: token,
     GIT_AUTHOR_NAME: identity.authorName,
     GIT_AUTHOR_EMAIL: identity.authorEmail,
     GIT_COMMITTER_NAME: identity.authorName,

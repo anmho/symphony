@@ -97,12 +97,21 @@ const RawWorkflowConfigSchema = z
     github: z
       .object({
         pr_identity: z
-          .object({
-            kind: z.literal("machine_user"),
-            token_command: z.string().min(1),
-            author_name: z.string().min(1),
-            author_email: z.string().min(1)
-          })
+          .discriminatedUnion("kind", [
+            z.object({
+              kind: z.literal("machine_user"),
+              token_command: z.string().min(1),
+              author_name: z.string().min(1),
+              author_email: z.string().min(1)
+            }),
+            z.object({
+              kind: z.literal("github_app"),
+              app_slug: z.string().min(1),
+              token_command: z.string().min(1),
+              author_name: z.string().min(1),
+              author_email: z.string().min(1)
+            })
+          ])
           .optional()
       })
       .optional(),
@@ -298,12 +307,20 @@ export function resolveWorkflowConfig(
     },
     github: {
       prIdentity: github.pr_identity
-        ? {
-            kind: github.pr_identity.kind,
-            tokenCommand: github.pr_identity.token_command,
-            authorName: github.pr_identity.author_name,
-            authorEmail: github.pr_identity.author_email
-          }
+        ? github.pr_identity.kind === "github_app"
+          ? {
+              kind: github.pr_identity.kind,
+              appSlug: github.pr_identity.app_slug,
+              tokenCommand: github.pr_identity.token_command,
+              authorName: github.pr_identity.author_name,
+              authorEmail: github.pr_identity.author_email
+            }
+          : {
+              kind: github.pr_identity.kind,
+              tokenCommand: github.pr_identity.token_command,
+              authorName: github.pr_identity.author_name,
+              authorEmail: github.pr_identity.author_email
+            }
         : null
     },
     pullRequest: {
@@ -344,9 +361,17 @@ export function renderConfigSummary(config: EffectiveWorkflowConfig): string {
     `concurrency=${config.agent.maxConcurrentAgents}`,
     `prBackend=${config.pullRequest.backend}`,
     `digest=${config.digest.enabled ? `${config.digest.intervalMs}ms` : "disabled"}`,
-    `githubPrIdentity=${config.github.prIdentity?.kind ?? ""}`,
+    `githubPrIdentity=${renderGithubPrIdentitySummary(config)}`,
     `taskCodex="${config.codex.command}"`
   ].join(" ");
+}
+
+function renderGithubPrIdentitySummary(config: EffectiveWorkflowConfig): string {
+  const identity = config.github.prIdentity;
+  if (!identity) {
+    return "";
+  }
+  return identity.kind === "github_app" ? `${identity.kind}:${identity.appSlug}` : identity.kind;
 }
 
 function normalizeConcurrencyMap(input: Record<string, number>): Record<string, number> {

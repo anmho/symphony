@@ -80,6 +80,14 @@ pull_request:
   backend: github
   graphite:
     fallback: fail
+
+github:
+  pr_identity:
+    kind: github_app
+    app_slug: anmho-symphony
+    token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
+    author_name: anmho Symphony
+    author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
 ---
 You are Symphony working on Linear issue {{ issue.identifier }}: {{ issue.title }}.
 
