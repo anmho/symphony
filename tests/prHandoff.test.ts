@@ -76,7 +76,7 @@ describe("PR handoff backend", () => {
           author: { login: "anmho" },
           baseRefName: "symphony/ANM-294",
           headRefName: "symphony/ANM-295",
-          body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.dev/github/pr/anmho/symphony/295"
+          body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.com/github/pr/anmho/symphony/295"
         })
       }
     });
@@ -87,7 +87,7 @@ describe("PR handoff backend", () => {
         branch: "symphony/ANM-295",
         expectedBaseBranch: "symphony/ANM-294",
         linearTicketUrl: "https://linear.app/anmho/issue/ANM-295/x",
-        graphitePrUrl: "https://app.graphite.dev/github/pr/anmho/symphony/295",
+        graphitePrUrl: "https://app.graphite.com/github/pr/anmho/symphony/295",
         expectedAuthorLogin: "anmho",
         runner
       })
@@ -96,7 +96,7 @@ describe("PR handoff backend", () => {
       baseRefName: "symphony/ANM-294",
       headRefName: "symphony/ANM-295",
       authorLogin: "anmho",
-      body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.dev/github/pr/anmho/symphony/295"
+      body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.com/github/pr/anmho/symphony/295"
     });
   });
 
@@ -266,6 +266,18 @@ describe("PR handoff backend", () => {
     expect(instructions).toContain("gh pr view --json url,author,baseRefName,headRefName,body");
   });
 
+  it("adds GitHub App author expectations to GitHub prompts", () => {
+    const instructions = buildPrHandoffInstructions(
+      makeConfig({ backend: "github", fallback: "fail", identity: "github_app" }),
+      makeIssue()
+    );
+
+    expect(instructions).toContain("configured GitHub App PR identity (anmho-symphony)");
+    expect(instructions).toContain("Expected GitHub PR author login: app/anmho-symphony.");
+    expect(instructions).toContain("GH_TOKEN` and `GITHUB_TOKEN");
+    expect(instructions).toContain("3862765+anmho-symphony[bot]@users.noreply.github.com");
+  });
+
   it("warns that Graphite may use the local identity when service account is configured", () => {
     const instructions = buildPrHandoffInstructions(
       makeConfig({ backend: "graphite", fallback: "fail", identity: true }),
@@ -295,11 +307,20 @@ function fakeRunner(
 function makeConfig(pr: {
   backend: "github" | "graphite";
   fallback: "fail" | "github";
-  identity?: boolean;
+  identity?: boolean | "github_app";
 }): EffectiveWorkflowConfig {
   return {
     github: {
-      prIdentity: pr.identity
+      prIdentity: pr.identity === "github_app"
+        ? {
+            kind: "github_app",
+            appSlug: "anmho-symphony",
+            tokenCommand:
+              "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
+            authorName: "anmho Symphony",
+            authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com"
+          }
+        : pr.identity
         ? {
             kind: "machine_user",
             tokenCommand: "vault kv get -mount=secret -field=token prod/providers/github/symphony",

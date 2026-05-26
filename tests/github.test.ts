@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchPullRequestMetadata,
+  fetchPullRequestReviewFeedback,
   fetchPullRequestStatus,
   parseGithubPullRequestUrl,
 } from '../src/github.js';
@@ -129,5 +130,64 @@ describe('github client', () => {
       ],
       { cwd: '/repo/symphony', timeoutMs: 60000 },
     );
+  });
+
+  it('returns unresolved review feedback without echoing bot replies', async () => {
+    const runner = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              url: 'https://github.com/anmho/symphony/pull/49',
+              reviewThreads: {
+                nodes: [
+                  {
+                    id: 'thread-1',
+                    isResolved: false,
+                    path: 'package.json',
+                    line: null,
+                    comments: {
+                      nodes: [
+                        {
+                          author: { login: 'anmho' },
+                          body: 'Why did we need `assets`',
+                          url: 'https://github.com/anmho/symphony/pull/49#discussion_r1',
+                          createdAt: '2026-05-26T02:29:45Z',
+                        },
+                        {
+                          author: { login: 'anmho-symphony[bot]' },
+                          body: 'Removed it.',
+                          url: 'https://github.com/anmho/symphony/pull/49#discussion_r2',
+                          createdAt: '2026-05-26T02:48:00Z',
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+      stderr: '',
+    }));
+
+    await expect(
+      fetchPullRequestReviewFeedback(
+        'https://github.com/anmho/symphony/pull/49',
+        runner,
+      ),
+    ).resolves.toMatchObject({
+      url: 'https://github.com/anmho/symphony/pull/49',
+      unresolvedComments: [
+        {
+          author: 'anmho',
+          body: 'Why did we need `assets`',
+          path: 'package.json',
+          url: 'https://github.com/anmho/symphony/pull/49#discussion_r1',
+        },
+      ],
+    });
   });
 });

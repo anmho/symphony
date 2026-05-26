@@ -136,7 +136,7 @@ export function buildPrHandoffInstructions(
       identityInstructions,
       "Push the current branch, open or update the PR with GitHub tooling, keep the Linear and Graphite links in the PR body, and verify the PR author/head/base/body with `gh pr view --json url,author,baseRefName,headRefName,body` before leaving the handoff.",
       issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
-      "Graphite: after the PR exists, add `https://app.graphite.dev/github/pr/<owner>/<repo>/<number>` to the PR body."
+      "Graphite: after the PR exists, add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
     ].join("\n");
   }
 
@@ -152,14 +152,14 @@ export function buildPrHandoffInstructions(
     identityInstructions,
     "Before submitting, verify Graphite is usable with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`.",
     config.github.prIdentity
-      ? "Warning: a GitHub service-account PR identity is configured, but Graphite submit may still use the local Graphite/GitHub identity. If the submitted PR author is not the service account, leave a clear Linear blocker."
+      ? "Warning: a GitHub PR identity is configured, but Graphite submit may still use the local Graphite/GitHub identity. If the submitted PR author is not the configured identity, leave a clear Linear blocker."
       : "",
     fallbackSentence,
     "Submit the stack with `gt submit --stack --no-interactive --no-edit --no-ai`.",
     "After submit, verify the resulting GitHub PR metadata with `gh pr view --json url,author,baseRefName,headRefName,body`.",
     "The PR head must match the current branch, the PR base must match the expected parent stack branch, and the PR body must include the Linear and Graphite links.",
     issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
-    "Graphite: add `https://app.graphite.dev/github/pr/<owner>/<repo>/<number>` to the PR body."
+    "Graphite: add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
   ].filter(Boolean).join("\n");
 }
 
@@ -196,16 +196,24 @@ function buildIdentityInstructions(identity: GithubPrIdentityConfig | null): str
   if (!identity) {
     return "Use the currently authenticated local GitHub identity.";
   }
-  if (identity.kind === "github_app") {
-    return [
-      `PR handoff must produce GitHub author app/${identity.appSlug}.`,
-      "Prompt instructions are advisory; Symphony enforces this identity after PR creation or update and blocks handoff if the author differs."
-    ].join("\n");
-  }
+  const identityName =
+    identity.kind === "github_app"
+      ? `GitHub App PR identity (${identity.appSlug})`
+      : "GitHub machine-user PR identity";
+  const expectedAuthor =
+    identity.kind === "github_app"
+      ? `Expected GitHub PR author login: app/${identity.appSlug}.`
+      : "";
+  const enforcement =
+    identity.kind === "github_app"
+      ? "Prompt instructions are advisory; Symphony enforces this identity after PR creation or update and blocks handoff if the author differs."
+      : "";
   return [
-    "Use the configured GitHub machine-user PR identity for handoff commands, not the default local GitHub user.",
+    `Use the configured ${identityName} for handoff commands, not the default local GitHub user.`,
     `Before PR handoff, resolve the token with: \`${identity.tokenCommand}\`.`,
-    "Use that token only in-process as `GH_TOKEN` for `gh` commands and for the authenticated push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
+    "Use that token only in-process as `GH_TOKEN` and `GITHUB_TOKEN` for `gh` commands and for the authenticated push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
+    expectedAuthor,
+    enforcement,
     `Use Git author and committer identity: ${identity.authorName} <${identity.authorEmail}>.`
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }

@@ -221,6 +221,23 @@ export interface PullRequestStatus {
   mergedAt: string | null;
 }
 
+export interface PullRequestReviewComment {
+  author: string | null;
+  body: string;
+  path: string | null;
+  line: number | null;
+  url: string | null;
+  createdAt: string | null;
+}
+
+export interface PullRequestReviewFeedback {
+  url: string;
+  owner: string;
+  repo: string;
+  number: number;
+  unresolvedComments: PullRequestReviewComment[];
+}
+
 export interface LiveSession {
   issueId: string;
   identifier: string;

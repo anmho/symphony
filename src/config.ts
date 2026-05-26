@@ -360,9 +360,17 @@ export function renderConfigSummary(config: EffectiveWorkflowConfig): string {
     `concurrency=${config.agent.maxConcurrentAgents}`,
     `prBackend=${config.pullRequest.backend}`,
     `digest=${config.digest.enabled ? `${config.digest.intervalMs}ms` : "disabled"}`,
-    `githubPrIdentity=${config.github.prIdentity?.kind ?? ""}`,
+    `githubPrIdentity=${renderGithubPrIdentitySummary(config)}`,
     `taskCodex="${config.codex.command}"`
   ].join(" ");
+}
+
+function renderGithubPrIdentitySummary(config: EffectiveWorkflowConfig): string {
+  const identity = config.github.prIdentity;
+  if (!identity) {
+    return "";
+  }
+  return identity.kind === "github_app" ? `${identity.kind}:${identity.appSlug}` : identity.kind;
 }
 
 function normalizeConcurrencyMap(input: Record<string, number>): Record<string, number> {

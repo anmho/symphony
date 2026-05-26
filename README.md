@@ -226,20 +226,9 @@ author:@me (title:ANM- OR branch:symphony/)
 
 ### GitHub PR identity
 
-Symphony can keep Codex execution local while requiring PRs to be opened as a configured identity. Prompt instructions tell agents what to do, but they are advisory; Symphony enforces the configured GitHub App author as a required handoff gate after PR creation or update. If the actual PR author differs, Symphony leaves a Linear blocker comment with the expected and actual author and does not move the issue to the handoff state.
+Symphony can keep Codex execution local while opening PRs through a configured identity. Prompt instructions tell agents what to do, but they are advisory; for GitHub App PR identities, Symphony enforces the configured `app/<slug>` author as a required handoff gate after PR creation or update. If the actual PR author differs, Symphony leaves a Linear blocker comment with the expected and actual author and does not move the issue to the handoff state.
 
-For a machine user, configure a token command in `WORKFLOW.md` after storing the token in Vault:
-
-```yaml
-github:
-  pr_identity:
-    kind: machine_user
-    token_command: vault kv get -mount=secret -field=token prod/providers/github/symphony
-    author_name: Symphony
-    author_email: anmho-symphony@users.noreply.github.com
-```
-
-For a GitHub App-authored handoff, configure the app slug and token command:
+Configure a token command in `WORKFLOW.md` after storing the GitHub App private key in Vault:
 
 ```yaml
 github:
@@ -251,13 +240,15 @@ github:
     author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
 ```
 
-Machine-user tokens are only used during PR handoff. Agents are instructed to set `GH_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
+The token is minted only during PR handoff. Agents are instructed to set `GH_TOKEN` and `GITHUB_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
 
 ```sh
 symphony doctor github-pr-identity --workflow WORKFLOW.md
 ```
 
-Graphite submit may still use the locally authenticated Graphite/GitHub identity; use the GitHub backend for machine-user PR authorship until Graphite bot identity support is verified.
+Graphite submit may still use the locally authenticated Graphite/GitHub identity; use the GitHub backend for GitHub App PR authorship until Graphite bot identity support is verified.
+
+GitHub App display names and icons are managed in GitHub's app settings UI. The production app uses display name `anmho Symphony` with PR author login `app/anmho-symphony`; upload `assets/anmho-symphony-github-app-icon.png` as the app logo.
 
 Stop it:
 

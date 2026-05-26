@@ -39,6 +39,7 @@ describe("cli", () => {
     expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("concurrency");
     expect(result.stdout).toContain("validate-config");
+    expect(result.stdout).toContain("github-app-token");
     expect(result.stdout).toContain("doctor");
     expect(result.stdout).toContain("ticket");
   });

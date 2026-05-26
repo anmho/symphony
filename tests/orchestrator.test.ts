@@ -700,6 +700,61 @@ describe('orchestrator', () => {
     ]);
   });
 
+  it('moves handoff issues with unresolved PR review comments back to active work', async () => {
+    const issue = makeIssue('ANM-379', {
+      id: 'issue-379',
+      title: 'symphony: rename GitHub App identity',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/49'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/49',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 49,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'Why did we need `assets`',
+            path: 'package.json',
+            line: 23,
+            url: 'https://github.com/anmho/symphony/pull/49#discussion_r3300841166',
+            createdAt: '2026-05-26T02:29:45Z',
+          },
+        ],
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(comments[0]).toContain('Unresolved GitHub PR review comments were found.');
+    expect(comments[0]).toContain('package.json:23 by @anmho');
+    expect(comments[0]).toContain('Why did we need `assets`');
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
   it('moves externally handed-off running issues into the handoff snapshot', async () => {
     const issue = makeIssue('APP-1');
     const config = makeConfig({
@@ -1162,6 +1217,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
       body: '',
       authorLogin: null,
     }),
+    fetchPullRequestReviewFeedback: async () => null,
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),
     removeWorkspace: async () => undefined,
     workspaceInfoForIssue: (_config, issue) => makeWorkspace(issue),

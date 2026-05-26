@@ -54,13 +54,14 @@ pull_request:
   graphite:
     fallback: fail
 
-# Optional: open/update PRs as a GitHub machine user while Codex still runs locally.
+# Optional: open/update PRs as a GitHub App while Codex still runs locally.
 github:
   pr_identity:
-    kind: machine_user
-    token_command: vault kv get -mount=secret -field=token prod/providers/github/symphony
-    author_name: Symphony
-    author_email: anmho-symphony@users.noreply.github.com
+    kind: github_app
+    app_slug: anmho-symphony
+    token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
+    author_name: anmho Symphony
+    author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
 ---
 You are implementing Linear issue {{ issue.identifier }}: {{ issue.title }}.
 
