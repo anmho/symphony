@@ -389,7 +389,9 @@ describe('orchestrator', () => {
       goalObjective: 'Complete Linear issue APP-1',
       goalUpdatedAtMs: 1000,
     });
-    expect(orchestrator.events('APP-1', 0, 20).map((event) => event.type)).toContain('goal');
+    expect(
+      orchestrator.events('APP-1', 0, 20).map((event) => event.type),
+    ).toContain('goal');
   });
 
   it('moves completed Codex goals to the configured handoff state', async () => {
@@ -436,9 +438,9 @@ describe('orchestrator', () => {
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'Human Review');
     expect(orchestrator.snapshot().running).toHaveLength(0);
     expect(orchestrator.snapshot().claimed).toHaveLength(0);
-    expect(orchestrator.events('APP-1', 0, 20).map((event) => event.summary)).toContain(
-      'issue moved to handoff state',
-    );
+    expect(
+      orchestrator.events('APP-1', 0, 20).map((event) => event.summary),
+    ).toContain('issue moved to handoff state');
   });
 
   it('passes the configured GitHub App identity environment to Codex runs', async () => {
@@ -460,9 +462,11 @@ describe('orchestrator', () => {
           GH_TOKEN: 'ghs_test',
           GITHUB_TOKEN: 'ghs_test',
           GIT_AUTHOR_NAME: 'anmho Symphony',
-          GIT_AUTHOR_EMAIL: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+          GIT_AUTHOR_EMAIL:
+            '3862765+anmho-symphony[bot]@users.noreply.github.com',
           GIT_COMMITTER_NAME: 'anmho Symphony',
-          GIT_COMMITTER_EMAIL: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+          GIT_COMMITTER_EMAIL:
+            '3862765+anmho-symphony[bot]@users.noreply.github.com',
         },
       }),
       runCodexTurn: async (input) => {
@@ -482,7 +486,8 @@ describe('orchestrator', () => {
       GH_TOKEN: 'ghs_test',
       GITHUB_TOKEN: 'ghs_test',
       GIT_AUTHOR_NAME: 'anmho Symphony',
-      GIT_COMMITTER_EMAIL: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+      GIT_COMMITTER_EMAIL:
+        '3862765+anmho-symphony[bot]@users.noreply.github.com',
     });
   });
 
@@ -665,7 +670,9 @@ describe('orchestrator', () => {
           title: 'Ready for human review',
           state: 'In Review',
           labels: ['symphony'],
-          comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/37'],
+          comments: [
+            'GitHub PR opened: https://github.com/anmho/symphony/pull/37',
+          ],
         }),
       ],
       fetchCandidateIssues: async () => [],
@@ -912,7 +919,9 @@ describe('orchestrator', () => {
 
     await orchestrator.tick();
 
-    expect(comments[0]).toContain('GitHub PR review feedback requiring agent rework was found.');
+    expect(comments[0]).toContain(
+      'GitHub PR review feedback requiring agent rework was found.',
+    );
     expect(comments[0]).toContain('package.json:23 by @anmho');
     expect(comments[0]).toContain('Why did we need `assets`');
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
@@ -987,6 +996,68 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
 
+  it('syncs PR review feedback from relevant PR-linked issues outside the handoff query', async () => {
+    const issue = makeIssue('ANM-379', {
+      id: 'issue-379',
+      state: 'In Review',
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/49'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(['anmho']),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchRelevantIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/49',
+        baseRefName: 'main',
+        headRefName: 'symphony/ANM-379',
+        body: 'Linear: https://linear.app/anmho/issue/ANM-379/x',
+        authorLogin: 'app/anmho-symphony',
+        reviewRequestLogins: [],
+      }),
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/49',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 49,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'Please respond to this Graphite review comment.',
+            path: 'src/index.ts',
+            line: 12,
+            url: 'https://github.com/anmho/symphony/pull/49#discussion_r1',
+            createdAt: '2026-05-26T08:00:00Z',
+          },
+        ],
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(comments[0]).toContain(
+      'Please respond to this Graphite review comment.',
+    );
+  });
+
   it('moves approved handoff PRs into the merge-eligible state', async () => {
     const issue = makeIssue('ANM-391', {
       id: 'issue-391',
@@ -1035,7 +1106,11 @@ describe('orchestrator', () => {
 
     await orchestrator.tick();
 
-    expect(moved).toHaveBeenCalledWith(config, issue.id, 'Eligible for Merging');
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      issue.id,
+      'Eligible for Merging',
+    );
     expect(comments[0]).toContain('approved GitHub PR');
     expect(orchestrator.snapshot().handoffDetails).toMatchObject([
       {
@@ -1043,6 +1118,189 @@ describe('orchestrator', () => {
         state: 'Eligible for Merging',
       },
     ]);
+  });
+
+  it('moves approved relevant PR-linked issues to the merge-eligible state outside the handoff query', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(['anmho']),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchRelevantIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        baseRefName: 'main',
+        headRefName: 'symphony/ANM-391',
+        body: 'Linear: https://linear.app/anmho/issue/ANM-391/x',
+        authorLogin: 'app/anmho-symphony',
+        reviewRequestLogins: ['anmho'],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      issue.id,
+      'Eligible for Merging',
+    );
+  });
+
+  it('uses Linear attachment review metadata when GitHub omits aggregate approval', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      attachments: ['https://github.com/anmho/symphony/pull/54'],
+      attachmentDetails: [
+        {
+          url: 'https://github.com/anmho/symphony/pull/54',
+          title: 'GitHub PR',
+          metadata: {
+            status: 'inReview',
+            mergedAt: null,
+            reviews: [
+              {
+                isBot: false,
+                state: 'approved',
+                reviewerLogin: 'anmho',
+                submittedAt: '2026-05-26T08:22:41Z',
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(['anmho']),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchRelevantIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        baseRefName: 'main',
+        headRefName: 'symphony/ANM-391',
+        body: 'Linear: https://linear.app/anmho/issue/ANM-391/x',
+        authorLogin: 'app/anmho-symphony',
+        reviewRequestLogins: ['anmho'],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: null,
+        latestReviewDecision: null,
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      issue.id,
+      'Eligible for Merging',
+    );
+  });
+
+  it('does not let Linear attachment approval override GitHub changes requested', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      attachments: ['https://github.com/anmho/symphony/pull/54'],
+      attachmentDetails: [
+        {
+          url: 'https://github.com/anmho/symphony/pull/54',
+          title: 'GitHub PR',
+          metadata: {
+            status: 'inReview',
+            reviews: [{ isBot: false, state: 'approved' }],
+          },
+        },
+      ],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(['anmho']),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchRelevantIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        baseRefName: 'main',
+        headRefName: 'symphony/ANM-391',
+        body: 'Linear: https://linear.app/anmho/issue/ANM-391/x',
+        authorLogin: 'app/anmho-symphony',
+        reviewRequestLogins: ['anmho'],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'CHANGES_REQUESTED',
+        latestReviewDecision: null,
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).not.toHaveBeenCalled();
   });
 
   it('moves conflicted handoff PRs back to active work', async () => {
@@ -1115,7 +1373,9 @@ describe('orchestrator', () => {
         terminalStates: ['Done'],
       },
     });
-    const merge = vi.fn<OrchestratorDependencies['mergePullRequest']>(async () => undefined);
+    const merge = vi.fn<OrchestratorDependencies['mergePullRequest']>(
+      async () => undefined,
+    );
     const moved = vi.fn(async () => undefined);
     const comments: string[] = [];
     let didMerge = false;
@@ -1170,7 +1430,9 @@ describe('orchestrator', () => {
       undefined,
     );
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'Done');
-    expect(comments.some((comment) => comment.includes('merged approved GitHub PR'))).toBe(true);
+    expect(
+      comments.some((comment) => comment.includes('merged approved GitHub PR')),
+    ).toBe(true);
     expect(orchestrator.snapshot().completed).toEqual(['ANM-391']);
   });
 
@@ -1770,7 +2032,10 @@ describe('orchestrator', () => {
       deps,
     );
 
-    const result = await orchestrator.requestChanges('APP-1', 'Please simplify the implementation.');
+    const result = await orchestrator.requestChanges(
+      'APP-1',
+      'Please simplify the implementation.',
+    );
 
     expect(result).toEqual({ issue: 'APP-1', state: 'In Progress' });
     expect(comments[0]).toContain('Please simplify the implementation.');
@@ -1779,6 +2044,74 @@ describe('orchestrator', () => {
     expect(codexCalls).toBe(1);
     expect(orchestrator.snapshot().running).toHaveLength(1);
     expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('queues active PR-linked issues for rework when GitHub review feedback appears', async () => {
+    const issue = makeIssue('APP-1', {
+      state: 'In Progress',
+      comments: ['https://github.com/anmho/example/pull/1'],
+    });
+    const comments: string[] = [];
+    const moved = vi.fn(async () => undefined);
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: {
+          kind: 'github_app',
+          appSlug: 'anmho-symphony',
+          tokenCommand: 'vault token',
+          authorName: 'anmho Symphony',
+          authorEmail: 'anmho-symphony@users.noreply.github.com',
+          reviewerLogin: null,
+          reviewerLogins: [],
+        },
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchRelevantIssues: async () => [issue],
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/example/pull/1',
+        authorLogin: 'app/anmho-symphony',
+        baseRefName: 'main',
+        headRefName: 'symphony/APP-1',
+        body: 'Linear: https://linear.app/anmho/issue/APP-1',
+        reviewRequestLogins: [],
+      }),
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/example/pull/1',
+        owner: 'anmho',
+        repo: 'example',
+        number: 1,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'Please address this comment.',
+            path: 'src/index.ts',
+            line: 12,
+            url: 'https://github.com/anmho/example/pull/1#discussion_r1',
+            createdAt: '2026-05-26T08:00:00Z',
+          },
+        ],
+      }),
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).not.toHaveBeenCalled();
+    expect(comments[0]).toContain('Please address this comment.');
   });
 
   it('does not send digests when digest config is disabled', async () => {
@@ -1940,6 +2273,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     fetchTerminalIssues: async () => [],
     fetchHandoffIssues: async () => [],
     fetchMergeEligibleIssues: async () => [],
+    fetchRelevantIssues: async () => [],
     writeRunnerComment: async () => undefined,
     moveIssueToState: async () => undefined,
     fetchPullRequestStatus: async () => null,
@@ -2114,6 +2448,7 @@ function makeIssue(
     labels: overrides.labels ?? [],
     comments: overrides.comments ?? [],
     attachments: overrides.attachments ?? [],
+    attachmentDetails: overrides.attachmentDetails ?? [],
     blockedBy: overrides.blockedBy ?? [],
     createdAt: overrides.createdAt ?? null,
     updatedAt: overrides.updatedAt ?? null,

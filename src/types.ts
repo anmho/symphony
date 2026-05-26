@@ -20,9 +20,16 @@ export interface NormalizedIssue {
   labels: string[];
   comments: string[];
   attachments: string[];
+  attachmentDetails?: NormalizedIssueAttachment[];
   blockedBy: BlockerRef[];
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface NormalizedIssueAttachment {
+  url: string | null;
+  title: string | null;
+  metadata: JsonObject | null;
 }
 
 export interface WorkflowDefinition {

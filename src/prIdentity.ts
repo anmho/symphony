@@ -1,5 +1,9 @@
+import { mintGithubAppInstallationToken } from './githubAppToken.js';
 import { runShellCommand, type CommandResult } from './process.js';
-import type { EffectiveWorkflowConfig, GithubPrIdentityConfig } from './types.js';
+import type {
+  EffectiveWorkflowConfig,
+  GithubPrIdentityConfig,
+} from './types.js';
 
 export type IdentityCommandRunner = (
   command: string,
@@ -12,7 +16,9 @@ export interface ResolvedPrIdentity {
   env: NodeJS.ProcessEnv;
 }
 
-export function hasPrIdentity(config: Pick<EffectiveWorkflowConfig, 'github'>): boolean {
+export function hasPrIdentity(
+  config: Pick<EffectiveWorkflowConfig, 'github'>,
+): boolean {
   return config.github.prIdentity !== null;
 }
 
@@ -27,16 +33,9 @@ export async function resolvePrIdentity(
   if (!identity.tokenCommand || !identity.authorName || !identity.authorEmail) {
     throw new Error('github_pr_identity_token_not_configured');
   }
-  const result = await runner(identity.tokenCommand, { timeoutMs: 30000 });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `github_pr_identity_token_command_failed: ${redactSecretLikeText(result.stderr || result.stdout)}`,
-    );
-  }
-  const token = result.stdout.trim();
-  if (!token) {
-    throw new Error('github_pr_identity_token_empty');
-  }
+  const token =
+    (await tryMintGithubAppTokenInProcess(identity.tokenCommand, runner)) ??
+    (await runGithubAppTokenCommand(identity.tokenCommand, runner));
   return {
     login: identity.kind === 'github_app' ? `app/${identity.appSlug}` : null,
     token,
@@ -56,10 +55,13 @@ export async function diagnosePrIdentity(
     return ['GitHub PR identity is not configured.'];
   }
   if (config.github.prIdentity.kind === 'github_app') {
-    const repos = await runner('gh api /installation/repositories --jq .total_count', {
-      env: resolved.env,
-      timeoutMs: 30000,
-    });
+    const repos = await runner(
+      'gh api /installation/repositories --jq .total_count',
+      {
+        env: resolved.env,
+        timeoutMs: 30000,
+      },
+    );
     if (repos.exitCode !== 0) {
       throw new Error(
         `github_pr_identity_auth_failed: ${redactSecretLikeText(repos.stderr || repos.stdout)}`,
@@ -83,7 +85,9 @@ export async function diagnosePrIdentity(
           `github_pr_identity_repo_access_failed: ${repo}: ${redactSecretLikeText(access.stderr || access.stdout)}`,
         );
       }
-      lines.push(`Repo ${access.stdout.trim()} is accessible to the installation token.`);
+      lines.push(
+        `Repo ${access.stdout.trim()} is accessible to the installation token.`,
+      );
     }
     return lines;
   }
@@ -168,6 +172,58 @@ async function gitHubRepoFromRemote(
 }
 
 function parseGitHubRemote(remote: string): string | null {
-  const httpsMatch = remote.match(/github\.com[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
+  const httpsMatch = remote.match(
+    /github\.com[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/,
+  );
   return httpsMatch?.[1] ?? null;
+}
+
+async function tryMintGithubAppTokenInProcess(
+  tokenCommand: string,
+  runner: IdentityCommandRunner,
+): Promise<string | null> {
+  const parsed = parseGithubAppTokenCommand(tokenCommand);
+  if (!parsed) {
+    return null;
+  }
+  const minted = await mintGithubAppInstallationToken({
+    ...parsed,
+    runner,
+  });
+  return minted.token;
+}
+
+async function runGithubAppTokenCommand(
+  tokenCommand: string,
+  runner: IdentityCommandRunner,
+): Promise<string> {
+  const result = await runner(tokenCommand, { timeoutMs: 30000 });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `github_pr_identity_token_command_failed: ${redactSecretLikeText(result.stderr || result.stdout)}`,
+    );
+  }
+  const token = result.stdout.trim();
+  if (!token) {
+    throw new Error('github_pr_identity_token_empty');
+  }
+  return token;
+}
+
+export function parseGithubAppTokenCommand(
+  command: string,
+): { appId: string; installationId: string; privateKeyCommand: string } | null {
+  if (!/\bgithub-app-token\b/.test(command)) {
+    return null;
+  }
+  const appId = command.match(/--app-id\s+(\S+)/)?.[1];
+  const installationId = command.match(/--installation-id\s+(\S+)/)?.[1];
+  const privateKeyCommand =
+    command.match(/--private-key-command\s+'([^']+)'/)?.[1] ??
+    command.match(/--private-key-command\s+"([^"]+)"/)?.[1] ??
+    command.match(/--private-key-command\s+(\S+)/)?.[1];
+  if (!appId || !installationId || !privateKeyCommand) {
+    return null;
+  }
+  return { appId, installationId, privateKeyCommand };
 }

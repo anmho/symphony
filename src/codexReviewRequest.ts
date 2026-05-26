@@ -1,16 +1,15 @@
-import type { CommandResult } from "./process.js";
-import { runCommand } from "./process.js";
-import type { EffectiveWorkflowConfig, NormalizedIssue } from "./types.js";
-import { fetchRelevantIssues, writeRunnerComment } from "./linear.js";
-import { resolvePrIdentity, type ResolvedPrIdentity } from "./prIdentity.js";
+import type { CommandResult } from './process.js';
+import { runCommand } from './process.js';
+import type { EffectiveWorkflowConfig, NormalizedIssue } from './types.js';
+import { pullRequestUrlFromText } from './github.js';
+import { fetchRelevantIssues, writeRunnerComment } from './linear.js';
+import { resolvePrIdentity, type ResolvedPrIdentity } from './prIdentity.js';
 
-const DEFAULT_CODEX_REVIEW_COMMENT = "@codex review";
-const GITHUB_PULL_REQUEST_URL = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+/;
-
+const DEFAULT_CODEX_REVIEW_COMMENT = '@codex review';
 export type ReviewRequestRunner = (
   command: string,
   args: string[],
-  options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }
+  options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
 ) => Promise<CommandResult>;
 
 export interface CodexReviewRequestResult {
@@ -28,10 +27,18 @@ export async function requestCodexReviewForIssue(
     githubComment?: string;
     dryRun?: boolean;
     runner?: ReviewRequestRunner;
-    resolveIdentity?: (config: Pick<EffectiveWorkflowConfig, "github">) => Promise<ResolvedPrIdentity | null>;
-    fetchIssues?: (config: EffectiveWorkflowConfig) => Promise<NormalizedIssue[]>;
-    writeComment?: (config: EffectiveWorkflowConfig, issueId: string, body: string) => Promise<void>;
-  } = {}
+    resolveIdentity?: (
+      config: Pick<EffectiveWorkflowConfig, 'github'>,
+    ) => Promise<ResolvedPrIdentity | null>;
+    fetchIssues?: (
+      config: EffectiveWorkflowConfig,
+    ) => Promise<NormalizedIssue[]>;
+    writeComment?: (
+      config: EffectiveWorkflowConfig,
+      issueId: string,
+      body: string,
+    ) => Promise<void>;
+  } = {},
 ): Promise<CodexReviewRequestResult> {
   const fetchIssues = options.fetchIssues ?? fetchRelevantIssues;
   const issues = await fetchIssues(config);
@@ -50,13 +57,21 @@ export async function requestCodexReviewForIssue(
     const runner = options.runner ?? runCommand;
     const resolveIdentity = options.resolveIdentity ?? resolvePrIdentity;
     const identity = await resolveIdentity(config);
-    const commandOptions: { env?: NodeJS.ProcessEnv; timeoutMs: number } = { timeoutMs: 60000 };
+    const commandOptions: { env?: NodeJS.ProcessEnv; timeoutMs: number } = {
+      timeoutMs: 60000,
+    };
     if (identity?.env) {
       commandOptions.env = identity.env;
     }
-    const result = await runner("gh", ["pr", "comment", prUrl, "--body", githubComment], commandOptions);
+    const result = await runner(
+      'gh',
+      ['pr', 'comment', prUrl, '--body', githubComment],
+      commandOptions,
+    );
     if (result.exitCode !== 0) {
-      throw new Error(`codex_review_github_comment_failed: ${result.stderr || result.stdout || result.exitCode}`);
+      throw new Error(
+        `codex_review_github_comment_failed: ${result.stderr || result.stdout || result.exitCode}`,
+      );
     }
 
     const writeComment = options.writeComment ?? writeRunnerComment;
@@ -65,9 +80,9 @@ export async function requestCodexReviewForIssue(
       issue.id,
       [
         `Requested Codex AI review for ${prUrl}.`,
-        "",
-        `GitHub comment: \`${githubComment}\``
-      ].join("\n")
+        '',
+        `GitHub comment: \`${githubComment}\``,
+      ].join('\n'),
     );
   }
 
@@ -75,16 +90,36 @@ export async function requestCodexReviewForIssue(
     issue: issue.identifier,
     prUrl,
     dryRun: options.dryRun === true,
-    githubComment
+    githubComment,
   };
 }
 
-export function githubPullRequestUrlFromIssue(issue: Pick<NormalizedIssue, "description" | "comments">): string | null {
-  const haystack = [issue.description ?? "", ...issue.comments].join("\n");
-  return haystack.match(GITHUB_PULL_REQUEST_URL)?.[0] ?? null;
+export function githubPullRequestUrlFromIssue(
+  issue: Pick<NormalizedIssue, 'description' | 'comments' | 'attachments'>,
+): string | null {
+  for (const candidate of [
+    ...(issue.attachments ?? []),
+    ...issue.comments,
+    issue.description ?? '',
+  ]) {
+    const url = pullRequestUrlFromText(candidate);
+    if (url) {
+      return url;
+    }
+  }
+  return null;
 }
 
-function findIssueByReference(issues: NormalizedIssue[], reference: string): NormalizedIssue | null {
+function findIssueByReference(
+  issues: NormalizedIssue[],
+  reference: string,
+): NormalizedIssue | null {
   const normalized = reference.trim().toLowerCase();
-  return issues.find((issue) => issue.id.toLowerCase() === normalized || issue.identifier.toLowerCase() === normalized) ?? null;
+  return (
+    issues.find(
+      (issue) =>
+        issue.id.toLowerCase() === normalized ||
+        issue.identifier.toLowerCase() === normalized,
+    ) ?? null
+  );
 }

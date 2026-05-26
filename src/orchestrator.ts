@@ -12,6 +12,7 @@ import {
   fetchHandoffIssues,
   fetchIssueById,
   fetchMergeEligibleIssues,
+  fetchRelevantIssues,
   fetchTerminalIssues,
   moveIssueToState,
   writeRunnerComment,
@@ -38,6 +39,7 @@ import {
   fetchPullRequestReviewFeedback,
   fetchPullRequestStatus,
   mergePullRequest,
+  pullRequestUrlFromText,
   removePullRequestReviewers,
   requestPullRequestReviewers,
 } from './github.js';
@@ -96,6 +98,9 @@ export interface OrchestratorDependencies {
   fetchMergeEligibleIssues: (
     config: EffectiveWorkflowConfig,
   ) => Promise<NormalizedIssue[]>;
+  fetchRelevantIssues: (
+    config: EffectiveWorkflowConfig,
+  ) => Promise<NormalizedIssue[]>;
   writeRunnerComment: (
     config: EffectiveWorkflowConfig,
     issueId: string,
@@ -106,9 +111,7 @@ export interface OrchestratorDependencies {
     issueId: string,
     stateName: string,
   ) => Promise<void>;
-  fetchPullRequestStatus: (
-    url: string,
-  ) => Promise<PullRequestStatus | null>;
+  fetchPullRequestStatus: (url: string) => Promise<PullRequestStatus | null>;
   fetchPullRequestMetadata: (
     url: string,
     cwd?: string,
@@ -185,17 +188,14 @@ function isHandoffState(
 ): boolean {
   return Boolean(
     config.tracker.handoffState &&
-      state.toLowerCase() === config.tracker.handoffState.toLowerCase(),
+    state.toLowerCase() === config.tracker.handoffState.toLowerCase(),
   );
 }
 
-function isMergeState(
-  state: string,
-  config: EffectiveWorkflowConfig,
-): boolean {
+function isMergeState(state: string, config: EffectiveWorkflowConfig): boolean {
   return Boolean(
     config.tracker.mergeState &&
-      state.toLowerCase() === config.tracker.mergeState.toLowerCase(),
+    state.toLowerCase() === config.tracker.mergeState.toLowerCase(),
   );
 }
 
@@ -232,11 +232,9 @@ function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
     ...issue.comments,
     issue.description ?? '',
   ]) {
-    const match = candidate.match(
-      /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+/,
-    );
-    if (match) {
-      return match[0] ?? null;
+    const url = pullRequestUrlFromText(candidate);
+    if (url) {
+      return url;
     }
   }
   return null;
@@ -279,12 +277,9 @@ function formatUnresolvedReviewFeedback(
       : 'PR review thread';
     const author = comment.author ? ` by @${comment.author}` : '';
     const url = comment.url ? `\n${comment.url}` : '';
-    return [
-      `${index + 1}. ${location}${author}`,
-      '',
-      comment.body,
-      url,
-    ].filter(Boolean).join('\n');
+    return [`${index + 1}. ${location}${author}`, '', comment.body, url]
+      .filter(Boolean)
+      .join('\n');
   });
 
   return [
@@ -361,6 +356,7 @@ export class Orchestrator {
       fetchCandidateIssues,
       fetchHandoffIssues,
       fetchMergeEligibleIssues,
+      fetchRelevantIssues,
       fetchIssueById,
       fetchTerminalIssues,
       writeRunnerComment,
@@ -387,8 +383,7 @@ export class Orchestrator {
         deps.eventStore ?? new AgentWorkEventStore(this.workflowPath, now),
       digestStateStore:
         deps.digestStateStore ?? new FileDigestStateStore(this.workflowPath),
-      sendDigestEmail: (config, email) =>
-        sendDigestEmail(config.digest, email),
+      sendDigestEmail: (config, email) => sendDigestEmail(config.digest, email),
       ...deps,
     };
     this.eventStore = this.deps.eventStore;
@@ -456,7 +451,9 @@ export class Orchestrator {
     };
   }
 
-  setMaxConcurrencyOverride(maxConcurrentAgents: number | null): ConcurrencySnapshot {
+  setMaxConcurrencyOverride(
+    maxConcurrentAgents: number | null,
+  ): ConcurrencySnapshot {
     if (
       maxConcurrentAgents !== null &&
       (!Number.isInteger(maxConcurrentAgents) || maxConcurrentAgents <= 0)
@@ -618,6 +615,7 @@ export class Orchestrator {
     const terminalIssues = await this.refreshCompletedFromLinear(config);
     await this.refreshHandoffFromLinear(config);
     await this.refreshMergeEligibleFromLinear(config);
+    await this.refreshPrLinkedIssuesFromLinear(config);
 
     if (!this.startupCleanupDone) {
       await this.cleanupTerminalWorkspaces(config, terminalIssues);
@@ -659,7 +657,9 @@ export class Orchestrator {
     }
   }
 
-  private async maybeSendDigest(config: EffectiveWorkflowConfig): Promise<void> {
+  private async maybeSendDigest(
+    config: EffectiveWorkflowConfig,
+  ): Promise<void> {
     if (!config.digest.enabled) {
       return;
     }
@@ -750,7 +750,8 @@ export class Orchestrator {
     terminalIssues: NormalizedIssue[] | null = null,
   ): Promise<void> {
     this.startupCleanupDone = true;
-    const issues = terminalIssues ?? (await this.deps.fetchTerminalIssues(config));
+    const issues =
+      terminalIssues ?? (await this.deps.fetchTerminalIssues(config));
     for (const issue of issues) {
       let workspace: WorkspaceInfo;
       try {
@@ -846,6 +847,66 @@ export class Orchestrator {
     return mergeIssues;
   }
 
+  private async refreshPrLinkedIssuesFromLinear(
+    config: EffectiveWorkflowConfig,
+  ): Promise<void> {
+    const issues = await this.deps.fetchRelevantIssues(config);
+    for (const issue of issues) {
+      if (isTerminalState(issue.state, config)) {
+        continue;
+      }
+      const prUrl = githubPullRequestUrlFromIssue(issue);
+      if (!prUrl) {
+        continue;
+      }
+      if (!(await this.isManagedPr(config, issue, prUrl))) {
+        continue;
+      }
+      if (isMergeState(issue.state, config)) {
+        await this.syncMergedPrLinkedIssueToTerminal(config, issue);
+        await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
+        await this.syncConflictedPrLinkedIssueToActive(config, issue);
+        await this.mergeApprovedPrLinkedIssue(config, issue);
+        continue;
+      }
+      if (isHandoffState(issue.state, config)) {
+        await this.syncMergedPrLinkedIssueToTerminal(config, issue);
+        await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
+        await this.syncConflictedPrLinkedIssueToActive(config, issue);
+        await this.syncApprovedPrLinkedIssueToMergeEligible(config, issue);
+        continue;
+      }
+      if (isActiveState(issue.state, config)) {
+        await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
+        await this.syncPrLinkedIssueToHandoff(config, issue);
+      }
+    }
+  }
+
+  private async isManagedPr(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    prUrl: string,
+  ): Promise<boolean> {
+    const expectedAuthor = expectedPrAuthorLogin(config);
+    if (!expectedAuthor) {
+      return true;
+    }
+    try {
+      const metadata = await this.deps.fetchPullRequestMetadata(
+        prUrl,
+        this.repoPathForIssue(config, issue),
+      );
+      return metadata.authorLogin === expectedAuthor;
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'failed to verify PR author for PR-linked issue refresh',
+      );
+      return false;
+    }
+  }
+
   private clearStaleCompletedIssue(issue: NormalizedIssue): void {
     if (!this.completed.has(issue.identifier)) {
       return;
@@ -872,7 +933,10 @@ export class Orchestrator {
         });
 
       if (latestIssue && isTerminalState(latestIssue.state, config)) {
-        this.completed.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        this.completed.set(
+          latestIssue.identifier,
+          issueSummary(config, latestIssue),
+        );
         this.rework.delete(latestIssue.identifier);
         this.reworkIssues.delete(latestIssue.id);
         entry.cancelReason = `state_${latestIssue.state}`;
@@ -880,13 +944,19 @@ export class Orchestrator {
         continue;
       }
 
-      if (latestIssue && await this.syncPrLinkedIssueToHandoff(config, latestIssue, entry)) {
+      if (
+        latestIssue &&
+        (await this.syncPrLinkedIssueToHandoff(config, latestIssue, entry))
+      ) {
         continue;
       }
 
       if (!latestIssue || !isActiveState(latestIssue.state, config)) {
         if (latestIssue && isHandoffState(latestIssue.state, config)) {
-          this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+          this.handoff.set(
+            latestIssue.identifier,
+            issueSummary(config, latestIssue),
+          );
           this.rework.delete(latestIssue.identifier);
           this.reworkIssues.delete(latestIssue.id);
         }
@@ -1013,7 +1083,9 @@ export class Orchestrator {
     this.appendRunnerEvent(entry, 'issue claimed by Symphony');
   }
 
-  private effectiveMaxConcurrentAgents(config: EffectiveWorkflowConfig): number {
+  private effectiveMaxConcurrentAgents(
+    config: EffectiveWorkflowConfig,
+  ): number {
     return this.maxConcurrencyOverride ?? config.agent.maxConcurrentAgents;
   }
 
@@ -1021,14 +1093,17 @@ export class Orchestrator {
     config: EffectiveWorkflowConfig | null,
   ): ConcurrencySnapshot {
     const configuredMax = config?.agent.maxConcurrentAgents ?? null;
-    const effectiveMax =
-      this.maxConcurrencyOverride ?? configuredMax;
+    const effectiveMax = this.maxConcurrencyOverride ?? configuredMax;
     const overrideActive = this.maxConcurrencyOverride !== null;
     return {
       running: this.running.size,
       configuredMax,
       effectiveMax,
-      source: overrideActive ? 'override' : configuredMax === null ? 'unknown' : 'workflow',
+      source: overrideActive
+        ? 'override'
+        : configuredMax === null
+          ? 'unknown'
+          : 'workflow',
       overrideActive,
       overrideMax: this.maxConcurrencyOverride,
       overrideUpdatedAtMs: this.maxConcurrencyOverrideUpdatedAtMs,
@@ -1197,13 +1272,10 @@ export class Orchestrator {
       if (prIdentity) {
         codexInput.env = prIdentity.env;
       }
-      const result = await this.deps.runCodexTurn(
-        codexInput,
-        {
-          signal: entry.abortController.signal,
-          onEvent: (event) => this.recordCodexEvent(entry, event),
-        },
-      );
+      const result = await this.deps.runCodexTurn(codexInput, {
+        signal: entry.abortController.signal,
+        onEvent: (event) => this.recordCodexEvent(entry, event),
+      });
 
       threadId = result.threadId;
       entry.session.threadId = result.threadId;
@@ -1270,7 +1342,15 @@ export class Orchestrator {
           );
           return;
         }
-        if (!(await this.ensurePrIdentityHandoffGate(config, latestIssue, entry, null, requiresPrUrl))) {
+        if (
+          !(await this.ensurePrIdentityHandoffGate(
+            config,
+            latestIssue,
+            entry,
+            null,
+            requiresPrUrl,
+          ))
+        ) {
           this.releaseIssue(issue.id);
           return;
         }
@@ -1283,7 +1363,10 @@ export class Orchestrator {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
-        this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        this.handoff.set(
+          latestIssue.identifier,
+          issueSummary(config, latestIssue),
+        );
         this.rework.delete(latestIssue.identifier);
         this.reworkIssues.delete(issue.id);
         this.releaseIssue(issue.id);
@@ -1339,7 +1422,9 @@ export class Orchestrator {
       return false;
     }
     const status = entry.session.goalStatus?.toLowerCase();
-    return status === 'complete' || status === 'completed' || status === 'blocked';
+    return (
+      status === 'complete' || status === 'completed' || status === 'blocked'
+    );
   }
 
   private async syncPrLinkedIssueToHandoff(
@@ -1368,7 +1453,9 @@ export class Orchestrator {
       this.reworkIssues.add(issue.id);
       return false;
     }
-    if (!(await this.ensurePrIdentityHandoffGate(config, issue, entry, prUrl))) {
+    if (
+      !(await this.ensurePrIdentityHandoffGate(config, issue, entry, prUrl))
+    ) {
       return false;
     }
 
@@ -1379,10 +1466,14 @@ export class Orchestrator {
     this.retryAttempts.delete(issue.id);
     this.claimed.delete(issue.id);
     if (entry) {
-      this.appendRunnerEvent(entry, 'issue moved to handoff state from linked PR', {
-        state: handoffState,
-        prUrl,
-      });
+      this.appendRunnerEvent(
+        entry,
+        'issue moved to handoff state from linked PR',
+        {
+          state: handoffState,
+          prUrl,
+        },
+      );
       entry.cancelReason = `state_${handoffState}`;
       entry.abortController.abort();
     }
@@ -1416,7 +1507,7 @@ export class Orchestrator {
     try {
       readiness = await this.deps.fetchPullRequestMergeReadiness(
         prUrl,
-        config.workspace.repoPath,
+        this.repoPathForIssue(config, issue),
       );
     } catch (error) {
       this.deps.logger.warn(
@@ -1425,7 +1516,7 @@ export class Orchestrator {
       );
       return false;
     }
-    if (!isPullRequestApproved(readiness)) {
+    if (!isPullRequestApproved(readiness, issue)) {
       return false;
     }
 
@@ -1455,7 +1546,10 @@ export class Orchestrator {
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
   ): Promise<boolean> {
-    if (!isHandoffState(issue.state, config) && !isMergeState(issue.state, config)) {
+    if (
+      !isHandoffState(issue.state, config) &&
+      !isMergeState(issue.state, config)
+    ) {
       return false;
     }
     const prUrl = githubPullRequestUrlFromIssue(issue);
@@ -1467,7 +1561,7 @@ export class Orchestrator {
     try {
       readiness = await this.deps.fetchPullRequestMergeReadiness(
         prUrl,
-        config.workspace.repoPath,
+        this.repoPathForIssue(config, issue),
       );
     } catch (error) {
       this.deps.logger.warn(
@@ -1517,7 +1611,7 @@ export class Orchestrator {
     try {
       readiness = await this.deps.fetchPullRequestMergeReadiness(
         prUrl,
-        config.workspace.repoPath,
+        this.repoPathForIssue(config, issue),
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1552,7 +1646,7 @@ export class Orchestrator {
       );
       return true;
     }
-    if (!isPullRequestApproved(readiness)) {
+    if (!isPullRequestApproved(readiness, issue)) {
       await this.moveMergeIssueBackToHandoff(
         config,
         issue,
@@ -1573,7 +1667,25 @@ export class Orchestrator {
       );
       return true;
     }
-    if (!isPullRequestReadyToMerge(readiness)) {
+    if (!isPullRequestReadyToMerge(readiness, issue)) {
+      if (
+        isPullRequestApproved(readiness, issue) &&
+        !isPullRequestConflicted(readiness) &&
+        (readiness.mergeStateStatus === 'UNSTABLE' ||
+          readiness.mergeStateStatus === 'BLOCKED')
+      ) {
+        await this.moveMergeIssueBackToActive(
+          config,
+          issue,
+          [
+            'Symphony found an approved PR with failing required checks and moved it back for agent rework.',
+            `PR: ${readiness.url}`,
+            `mergeStateStatus: ${readiness.mergeStateStatus ?? 'unknown'}`,
+            `mergeable: ${readiness.mergeable ?? 'unknown'}`,
+          ].join('\n'),
+        );
+        return true;
+      }
       this.deps.logger.info(
         { issue: issue.identifier, prUrl: readiness.url, readiness },
         'approved PR is not ready to merge yet',
@@ -1585,7 +1697,7 @@ export class Orchestrator {
       const identity = await this.deps.resolvePrIdentity(config);
       await this.deps.mergePullRequest(
         readiness.url,
-        config.workspace.repoPath,
+        this.repoPathForIssue(config, issue),
         identity?.env,
       );
     } catch (error) {
@@ -1678,16 +1790,25 @@ export class Orchestrator {
         [
           'Symphony blocked PR handoff because github.pr_identity is configured but no GitHub PR link was found.',
           expectedAuthor ? `Expected PR author: ${expectedAuthor}` : null,
-          requiredReviewers.length > 0 ? `Required reviewers: ${requiredReviewers.join(', ')}` : null,
-        ].filter(Boolean).join('\n'),
+          requiredReviewers.length > 0
+            ? `Required reviewers: ${requiredReviewers.join(', ')}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
       );
       if (entry) {
-        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
-          expectedAuthor,
-          requiredReviewers,
-          actualAuthor: null,
-          reason: 'missing_pr_url',
-        }, 'warn');
+        this.appendRunnerEvent(
+          entry,
+          'PR identity gate blocked handoff',
+          {
+            expectedAuthor,
+            requiredReviewers,
+            actualAuthor: null,
+            reason: 'missing_pr_url',
+          },
+          'warn',
+        );
       }
       return false;
     }
@@ -1696,7 +1817,7 @@ export class Orchestrator {
     try {
       metadata = await this.deps.fetchPullRequestMetadata(
         resolvedPrUrl,
-        config.workspace.repoPath,
+        this.repoPathForIssue(config, issue),
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1706,20 +1827,29 @@ export class Orchestrator {
         [
           'Symphony blocked PR handoff because PR metadata was unavailable for the configured github.pr_identity gate.',
           expectedAuthor ? `Expected PR author: ${expectedAuthor}` : null,
-          requiredReviewers.length > 0 ? `Required reviewers: ${requiredReviewers.join(', ')}` : null,
+          requiredReviewers.length > 0
+            ? `Required reviewers: ${requiredReviewers.join(', ')}`
+            : null,
           'Actual PR author: unavailable',
           `PR: ${resolvedPrUrl}`,
           `Error: ${message}`,
-        ].filter(Boolean).join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
       );
       if (entry) {
-        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
-          expectedAuthor,
-          requiredReviewers,
-          actualAuthor: null,
-          prUrl: resolvedPrUrl,
-          reason: 'metadata_unavailable',
-        }, 'warn');
+        this.appendRunnerEvent(
+          entry,
+          'PR identity gate blocked handoff',
+          {
+            expectedAuthor,
+            requiredReviewers,
+            actualAuthor: null,
+            prUrl: resolvedPrUrl,
+            reason: 'metadata_unavailable',
+          },
+          'warn',
+        );
       }
       return false;
     }
@@ -1736,12 +1866,17 @@ export class Orchestrator {
         ].join('\n'),
       );
       if (entry) {
-        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
-          expectedAuthor,
-          actualAuthor: metadata.authorLogin,
-          prUrl: metadata.url,
-          reason: 'author_mismatch',
-        }, 'warn');
+        this.appendRunnerEvent(
+          entry,
+          'PR identity gate blocked handoff',
+          {
+            expectedAuthor,
+            actualAuthor: metadata.authorLogin,
+            prUrl: metadata.url,
+            reason: 'author_mismatch',
+          },
+          'warn',
+        );
       }
       return false;
     }
@@ -1756,12 +1891,12 @@ export class Orchestrator {
         await this.deps.requestPullRequestReviewers(
           metadata.url,
           missingReviewers,
-          config.workspace.repoPath,
+          this.repoPathForIssue(config, issue),
           identity?.env,
         );
         metadata = await this.deps.fetchPullRequestMetadata(
           metadata.url,
-          config.workspace.repoPath,
+          this.repoPathForIssue(config, issue),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1777,13 +1912,18 @@ export class Orchestrator {
           ].join('\n'),
         );
         if (entry) {
-          this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
-            requiredReviewers,
-            missingReviewers,
-            reviewRequestLogins: metadata.reviewRequestLogins,
-            prUrl: metadata.url,
-            reason: 'reviewer_request_failed',
-          }, 'warn');
+          this.appendRunnerEvent(
+            entry,
+            'PR identity gate blocked handoff',
+            {
+              requiredReviewers,
+              missingReviewers,
+              reviewRequestLogins: metadata.reviewRequestLogins,
+              prUrl: metadata.url,
+              reason: 'reviewer_request_failed',
+            },
+            'warn',
+          );
         }
         return false;
       }
@@ -1805,13 +1945,18 @@ export class Orchestrator {
         ].join('\n'),
       );
       if (entry) {
-        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
-          requiredReviewers,
-          missingReviewers: stillMissingReviewers,
-          reviewRequestLogins: metadata.reviewRequestLogins,
-          prUrl: metadata.url,
-          reason: 'reviewer_not_requested',
-        }, 'warn');
+        this.appendRunnerEvent(
+          entry,
+          'PR identity gate blocked handoff',
+          {
+            requiredReviewers,
+            missingReviewers: stillMissingReviewers,
+            reviewRequestLogins: metadata.reviewRequestLogins,
+            prUrl: metadata.url,
+            reason: 'reviewer_not_requested',
+          },
+          'warn',
+        );
       }
       return false;
     }
@@ -1884,10 +2029,14 @@ export class Orchestrator {
     this.reworkIssues.delete(issue.id);
 
     if (entry) {
-      this.appendRunnerEvent(entry, 'issue moved to terminal state from merged PR', {
-        state: terminalState,
-        prUrl: prStatus.url,
-      });
+      this.appendRunnerEvent(
+        entry,
+        'issue moved to terminal state from merged PR',
+        {
+          state: terminalState,
+          prUrl: prStatus.url,
+        },
+      );
       entry.cancelReason = `state_${terminalState}`;
       entry.abortController.abort();
     }
@@ -1902,7 +2051,10 @@ export class Orchestrator {
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
   ): Promise<boolean> {
-    if (!isHandoffState(issue.state, config) && !isMergeState(issue.state, config)) {
+    const inHandoff = isHandoffState(issue.state, config);
+    const inMerge = isMergeState(issue.state, config);
+    const inActive = isActiveState(issue.state, config);
+    if (!inHandoff && !inMerge && !inActive) {
       return false;
     }
     const prUrl = githubPullRequestUrlFromIssue(issue);
@@ -1921,6 +2073,11 @@ export class Orchestrator {
       return false;
     }
     if (!feedback?.unresolvedComments.length) {
+      this.reworkIssues.delete(issue.id);
+      this.rework.delete(issue.identifier);
+      return false;
+    }
+    if (inActive && this.reworkIssues.has(issue.id)) {
       return false;
     }
     await this.removeConfiguredReviewRequestsForRework(config, issue, prUrl);
@@ -1942,8 +2099,17 @@ export class Orchestrator {
       issue.id,
       formatUnresolvedReviewFeedback(feedback, targetState),
     );
-    await this.deps.moveIssueToState(config, issue.id, targetState);
+    if (!inActive) {
+      await this.deps.moveIssueToState(config, issue.id, targetState);
+    }
     this.reworkIssues.add(issue.id);
+    this.rework.set(
+      issue.identifier,
+      issueSummary(config, {
+        ...issue,
+        state: inActive ? issue.state : targetState,
+      }),
+    );
     this.handoff.delete(issue.identifier);
     this.completed.delete(issue.identifier);
     this.retryAttempts.delete(issue.id);
@@ -1952,10 +2118,12 @@ export class Orchestrator {
       {
         issue: issue.identifier,
         prUrl,
-        state: targetState,
+        state: inActive ? issue.state : targetState,
         commentCount: feedback.unresolvedComments.length,
       },
-      'moved PR-linked issue back to active state for unresolved review comments',
+      inActive
+        ? 'queued PR-linked active issue for agent rework after unresolved review comments'
+        : 'moved PR-linked issue back to active state for unresolved review comments',
     );
     return true;
   }
@@ -2006,7 +2174,7 @@ export class Orchestrator {
       await this.deps.removePullRequestReviewers(
         prUrl,
         reviewers,
-        config.workspace.repoPath,
+        this.repoPathForIssue(config, issue),
         identity?.env,
       );
     } catch (error) {
@@ -2014,6 +2182,17 @@ export class Orchestrator {
         { error, issue: issue.identifier, prUrl, reviewers },
         'failed to remove configured reviewers while PR feedback is unresolved',
       );
+    }
+  }
+
+  private repoPathForIssue(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ): string {
+    try {
+      return this.deps.workspaceInfoForIssue(config, issue).repoPath;
+    } catch {
+      return config.workspace.repoPath;
     }
   }
 
@@ -2087,7 +2266,10 @@ export class Orchestrator {
         reason: event.reason,
         updatedAtMs: this.deps.now(),
       };
-    } else if (event.type === 'notification' && event.method === 'thread/goal/updated') {
+    } else if (
+      event.type === 'notification' &&
+      event.method === 'thread/goal/updated'
+    ) {
       const goal = goalFromNotification(event.params);
       if (goal) {
         entry.session.goalStatus = goal.status;
@@ -2183,9 +2365,7 @@ export function createDefaultOrchestrator(workflowPath: string): Orchestrator {
   return new Orchestrator({ workflowPath });
 }
 
-function expectedPrAuthorLogin(
-  config: EffectiveWorkflowConfig,
-): string | null {
+function expectedPrAuthorLogin(config: EffectiveWorkflowConfig): string | null {
   const identity = config.github.prIdentity;
   if (!identity || identity.kind !== 'github_app') {
     return null;
@@ -2193,9 +2373,7 @@ function expectedPrAuthorLogin(
   return `app/${identity.appSlug}`;
 }
 
-function requiredPrReviewerLogins(
-  config: EffectiveWorkflowConfig,
-): string[] {
+function requiredPrReviewerLogins(config: EffectiveWorkflowConfig): string[] {
   const identity = config.github.prIdentity;
   if (!identity || identity.kind !== 'github_app') {
     return [];
@@ -2207,26 +2385,86 @@ function missingRequiredReviewers(
   requiredReviewers: string[],
   requestedReviewers: string[],
 ): string[] {
-  const requested = new Set(requestedReviewers.map((reviewer) => reviewer.toLowerCase()));
-  return requiredReviewers.filter((reviewer) => !requested.has(reviewer.toLowerCase()));
+  const requested = new Set(
+    requestedReviewers.map((reviewer) => reviewer.toLowerCase()),
+  );
+  return requiredReviewers.filter(
+    (reviewer) => !requested.has(reviewer.toLowerCase()),
+  );
 }
 
-function isPullRequestApproved(readiness: PullRequestMergeReadiness): boolean {
+function isPullRequestApproved(
+  readiness: PullRequestMergeReadiness,
+  issue?: NormalizedIssue,
+): boolean {
   if (readiness.reviewDecision) {
     return readiness.reviewDecision === 'APPROVED';
   }
-  return readiness.latestReviewDecision === 'APPROVED';
+  if (readiness.latestReviewDecision) {
+    return readiness.latestReviewDecision === 'APPROVED';
+  }
+  return Boolean(issue && hasApprovedLinearPrAttachment(issue, readiness.url));
 }
 
-function isPullRequestConflicted(readiness: PullRequestMergeReadiness): boolean {
-  return readiness.mergeStateStatus === 'DIRTY' || readiness.mergeable === 'CONFLICTING';
+function hasApprovedLinearPrAttachment(
+  issue: NormalizedIssue,
+  prUrl: string,
+): boolean {
+  const matchingAttachment = (issue.attachmentDetails ?? []).find(
+    (attachment) => {
+      const attachmentPrUrl = attachment.url
+        ? pullRequestUrlFromText(attachment.url)
+        : null;
+      return attachmentPrUrl === prUrl;
+    },
+  );
+  const metadata = matchingAttachment?.metadata;
+  if (!metadata || metadata.status === 'closed' || metadata.mergedAt) {
+    return false;
+  }
+  const reviews = Array.isArray(metadata.reviews) ? metadata.reviews : [];
+  const latestHumanReview = reviews
+    .filter((review): review is Record<string, unknown> => {
+      if (!review || typeof review !== 'object') {
+        return false;
+      }
+      return review.isBot !== true && typeof review.state === 'string';
+    })
+    .sort((left, right) => {
+      const leftTime =
+        typeof left.submittedAt === 'string'
+          ? Date.parse(left.submittedAt)
+          : 0;
+      const rightTime =
+        typeof right.submittedAt === 'string'
+          ? Date.parse(right.submittedAt)
+          : 0;
+      return leftTime - rightTime;
+    })
+    .at(-1);
+  return (
+    typeof latestHumanReview?.state === 'string' &&
+    latestHumanReview.state.toUpperCase() === 'APPROVED'
+  );
 }
 
-function isPullRequestReadyToMerge(readiness: PullRequestMergeReadiness): boolean {
+function isPullRequestConflicted(
+  readiness: PullRequestMergeReadiness,
+): boolean {
+  return (
+    readiness.mergeStateStatus === 'DIRTY' ||
+    readiness.mergeable === 'CONFLICTING'
+  );
+}
+
+function isPullRequestReadyToMerge(
+  readiness: PullRequestMergeReadiness,
+  issue?: NormalizedIssue,
+): boolean {
   return (
     readiness.state === 'open' &&
     !readiness.isDraft &&
-    isPullRequestApproved(readiness) &&
+    isPullRequestApproved(readiness, issue) &&
     readiness.mergeStateStatus === 'CLEAN' &&
     readiness.mergeable === 'MERGEABLE'
   );
@@ -2249,7 +2487,9 @@ function hashString(value: string): number {
   return hash;
 }
 
-function goalFromNotification(params: unknown): { status: string | null; objective: string | null } | null {
+function goalFromNotification(
+  params: unknown,
+): { status: string | null; objective: string | null } | null {
   if (!params || typeof params !== 'object') {
     return null;
   }

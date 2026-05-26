@@ -29,6 +29,23 @@ export function parseGithubPullRequestUrl(
   };
 }
 
+export function pullRequestUrlFromText(text: string): string | null {
+  const githubMatch = text.match(
+    /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+/,
+  );
+  if (githubMatch) {
+    return githubMatch[0] ?? null;
+  }
+
+  const graphiteMatch = text.match(
+    /https:\/\/app\.graphite\.com\/github\/pr\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/(\d+)/,
+  );
+  if (!graphiteMatch) {
+    return null;
+  }
+  return `https://github.com/${graphiteMatch[1]}/${graphiteMatch[2]}/pull/${graphiteMatch[3]}`;
+}
+
 export async function fetchPullRequestStatus(
   url: string,
   runner: CommandRunner = runCommand,
@@ -73,11 +90,12 @@ export async function fetchPullRequestStatus(
     merged_at?: string | null;
     merged?: boolean;
   };
-  const state = payload.merged || payload.merged_at
-    ? 'merged'
-    : payload.state === 'closed'
-      ? 'closed'
-      : 'open';
+  const state =
+    payload.merged || payload.merged_at
+      ? 'merged'
+      : payload.state === 'closed'
+        ? 'closed'
+        : 'open';
 
   return {
     url: payload.html_url ?? url,
@@ -124,17 +142,27 @@ export function parsePullRequestMetadata(raw: string): PullRequestMetadata {
     reviewRequests?: Array<{ login?: string | null }> | null;
   };
   const url = typeof parsed.url === 'string' ? parsed.url : '';
-  const baseRefName = typeof parsed.baseRefName === 'string' ? parsed.baseRefName : '';
-  const headRefName = typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
+  const baseRefName =
+    typeof parsed.baseRefName === 'string' ? parsed.baseRefName : '';
+  const headRefName =
+    typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
   const body = typeof parsed.body === 'string' ? parsed.body : '';
-  const authorLogin = typeof parsed.author?.login === 'string' ? parsed.author.login : null;
+  const authorLogin =
+    typeof parsed.author?.login === 'string' ? parsed.author.login : null;
   const reviewRequestLogins = (parsed.reviewRequests ?? [])
     .map((request) => request?.login)
     .filter((login): login is string => Boolean(login));
   if (!url || !baseRefName || !headRefName) {
     throw new Error('github_pr_metadata_incomplete');
   }
-  return { url, baseRefName, headRefName, body, authorLogin, reviewRequestLogins };
+  return {
+    url,
+    baseRefName,
+    headRefName,
+    body,
+    authorLogin,
+    reviewRequestLogins,
+  };
 }
 
 export async function fetchPullRequestMergeReadiness(
@@ -168,25 +196,37 @@ export async function fetchPullRequestMergeReadiness(
   return parsePullRequestMergeReadiness(result.stdout);
 }
 
-export function parsePullRequestMergeReadiness(raw: string): PullRequestMergeReadiness {
+export function parsePullRequestMergeReadiness(
+  raw: string,
+): PullRequestMergeReadiness {
   const parsed = JSON.parse(raw) as Partial<PullRequestMergeReadiness> & {
-    latestReviews?: Array<{ state?: string | null; author?: GithubAuthor | null }> | null;
+    latestReviews?: Array<{
+      state?: string | null;
+      author?: GithubAuthor | null;
+    }> | null;
   };
   const url = typeof parsed.url === 'string' ? parsed.url : '';
   if (!url) {
     throw new Error('github_pr_merge_readiness_incomplete');
   }
-  const rawState = typeof parsed.state === 'string' ? parsed.state.toLowerCase() : 'open';
-  const state = rawState === 'merged' || rawState === 'closed' ? rawState : 'open';
+  const rawState =
+    typeof parsed.state === 'string' ? parsed.state.toLowerCase() : 'open';
+  const state =
+    rawState === 'merged' || rawState === 'closed' ? rawState : 'open';
   const latestHumanReview = [...(parsed.latestReviews ?? [])]
     .reverse()
-    .find((review) => !isAutomationAuthor(review?.author) && typeof review?.state === 'string');
+    .find(
+      (review) =>
+        !isAutomationAuthor(review?.author) &&
+        typeof review?.state === 'string',
+    );
   const reviewDecision =
     typeof parsed.reviewDecision === 'string' && parsed.reviewDecision.trim()
       ? parsed.reviewDecision
       : null;
   const latestReviewDecision =
-    typeof latestHumanReview?.state === 'string' && latestHumanReview.state.trim()
+    typeof latestHumanReview?.state === 'string' &&
+    latestHumanReview.state.trim()
       ? latestHumanReview.state
       : null;
   return {
@@ -195,9 +235,13 @@ export function parsePullRequestMergeReadiness(raw: string): PullRequestMergeRea
     isDraft: parsed.isDraft === true,
     reviewDecision,
     latestReviewDecision,
-    mergeStateStatus: typeof parsed.mergeStateStatus === 'string' ? parsed.mergeStateStatus : null,
+    mergeStateStatus:
+      typeof parsed.mergeStateStatus === 'string'
+        ? parsed.mergeStateStatus
+        : null,
     mergeable: typeof parsed.mergeable === 'string' ? parsed.mergeable : null,
-    headRefOid: typeof parsed.headRefOid === 'string' ? parsed.headRefOid : null,
+    headRefOid:
+      typeof parsed.headRefOid === 'string' ? parsed.headRefOid : null,
   };
 }
 
@@ -207,9 +251,16 @@ export async function mergePullRequest(
   env?: NodeJS.ProcessEnv,
   runner: CommandRunner = runCommand,
 ): Promise<void> {
-  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } = {
-    timeoutMs: 120000,
-  };
+  const metadata = await fetchPullRequestMetadata(url, cwd, runner);
+  if (hasGraphitePrLink(metadata.body)) {
+    await mergeGraphitePullRequest(url, cwd, env, runner);
+    return;
+  }
+
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } =
+    {
+      timeoutMs: 120000,
+    };
   if (cwd) {
     options.cwd = cwd;
   }
@@ -231,6 +282,56 @@ export async function mergePullRequest(
   }
 }
 
+async function mergeGraphitePullRequest(
+  url: string,
+  cwd?: string,
+  env?: NodeJS.ProcessEnv,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } =
+    {
+      timeoutMs: 120000,
+    };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  if (env) {
+    options.env = env;
+  }
+
+  const checkout = await runner('gh', ['pr', 'checkout', url], options);
+  if (checkout.exitCode !== 0) {
+    const detail = (checkout.stderr || checkout.stdout).trim();
+    throw new Error(
+      detail
+        ? `graphite_pr_checkout_failed: gh pr checkout ${url} failed: ${detail}`
+        : `graphite_pr_checkout_failed: gh pr checkout ${url} failed`,
+    );
+  }
+
+  const mergeOptions: { cwd?: string; timeoutMs: number } = {
+    timeoutMs: 120000,
+  };
+  if (cwd) {
+    mergeOptions.cwd = cwd;
+  }
+  const merge = await runner('gt', ['merge', '--no-interactive'], mergeOptions);
+  if (merge.exitCode !== 0) {
+    const detail = (merge.stderr || merge.stdout).trim();
+    throw new Error(
+      detail
+        ? `graphite_pr_merge_failed: gt merge --no-interactive failed: ${detail}`
+        : 'graphite_pr_merge_failed: gt merge --no-interactive failed',
+    );
+  }
+}
+
+function hasGraphitePrLink(body: string): boolean {
+  return /https:\/\/app\.graphite\.com\/github\/pr\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\d+/.test(
+    body,
+  );
+}
+
 export async function requestPullRequestReviewers(
   url: string,
   reviewers: string[],
@@ -239,9 +340,10 @@ export async function requestPullRequestReviewers(
   runner: CommandRunner = runCommand,
 ): Promise<void> {
   const uniqueReviewers = uniqueReviewerLogins(reviewers);
-  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } = {
-    timeoutMs: 60000,
-  };
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } =
+    {
+      timeoutMs: 60000,
+    };
   if (cwd) {
     options.cwd = cwd;
   }
@@ -278,9 +380,10 @@ export async function removePullRequestReviewers(
   if (!parsed || uniqueReviewers.length === 0) {
     return;
   }
-  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } = {
-    timeoutMs: 60000,
-  };
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } =
+    {
+      timeoutMs: 60000,
+    };
   if (cwd) {
     options.cwd = cwd;
   }
@@ -317,6 +420,7 @@ export async function fetchPullRequestReviewFeedback(
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
           url
+          reviewDecision
           reviewThreads(first: 100) {
             nodes {
               isResolved
@@ -359,34 +463,48 @@ export async function fetchPullRequestReviewFeedback(
     number: parsed.number,
   };
 
-  const payload = await fetchGraphql<{ repository?: GithubReviewRepository | null }>(
-    query,
-    variables,
-    runner,
-  );
+  const payload = await fetchGraphql<{
+    repository?: GithubReviewRepository | null;
+  }>(query, variables, runner);
   const pullRequest = payload?.repository?.pullRequest;
   if (!pullRequest) {
     return null;
   }
 
+  const reviewDecision =
+    typeof pullRequest.reviewDecision === 'string'
+      ? pullRequest.reviewDecision
+      : null;
   const unresolvedComments: PullRequestReviewComment[] = [];
   let latestBotActivityAt = '';
   // GitHub App authors can appear as either `app-name[bot]` or just the app slug
   // depending on the API surface. `__typename` is the stable Bot/User discriminator.
   for (const thread of pullRequest.reviewThreads?.nodes ?? []) {
     for (const comment of thread?.comments?.nodes ?? []) {
-      if (isAutomationAuthor(comment?.author) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
+      if (
+        isAutomationAuthor(comment?.author) &&
+        comment?.createdAt &&
+        comment.createdAt > latestBotActivityAt
+      ) {
         latestBotActivityAt = comment.createdAt;
       }
     }
   }
   for (const review of pullRequest.reviews?.nodes ?? []) {
-    if (isAutomationAuthor(review?.author) && review?.submittedAt && review.submittedAt > latestBotActivityAt) {
+    if (
+      isAutomationAuthor(review?.author) &&
+      review?.submittedAt &&
+      review.submittedAt > latestBotActivityAt
+    ) {
       latestBotActivityAt = review.submittedAt;
     }
   }
   for (const comment of pullRequest.comments?.nodes ?? []) {
-    if (isAutomationAuthor(comment?.author) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
+    if (
+      isAutomationAuthor(comment?.author) &&
+      comment?.createdAt &&
+      comment.createdAt > latestBotActivityAt
+    ) {
       latestBotActivityAt = comment.createdAt;
     }
   }
@@ -418,11 +536,18 @@ export async function fetchPullRequestReviewFeedback(
     if (!review || isAutomationAuthor(review.author)) {
       continue;
     }
+    if (reviewDecision === 'APPROVED') {
+      continue;
+    }
     const state = review.state ?? null;
     if (state !== 'CHANGES_REQUESTED' && state !== 'COMMENTED') {
       continue;
     }
-    if (review.submittedAt && latestBotActivityAt && review.submittedAt <= latestBotActivityAt) {
+    if (
+      review.submittedAt &&
+      latestBotActivityAt &&
+      review.submittedAt <= latestBotActivityAt
+    ) {
       continue;
     }
     const body = review.body?.trim() || `Review state: ${state}.`;
@@ -439,7 +564,11 @@ export async function fetchPullRequestReviewFeedback(
     if (!comment?.body?.trim() || isAutomationAuthor(comment.author)) {
       continue;
     }
-    if (comment.createdAt && latestBotActivityAt && comment.createdAt <= latestBotActivityAt) {
+    if (
+      comment.createdAt &&
+      latestBotActivityAt &&
+      comment.createdAt <= latestBotActivityAt
+    ) {
       continue;
     }
     unresolvedComments.push({
@@ -462,6 +591,7 @@ export async function fetchPullRequestReviewFeedback(
 interface GithubReviewRepository {
   pullRequest?: {
     url?: string | null;
+    reviewDecision?: string | null;
     reviewThreads?: {
       nodes?: Array<{
         isResolved?: boolean | null;
@@ -503,7 +633,9 @@ interface GithubAuthor {
 }
 
 function isAutomationAuthor(author: GithubAuthor | null | undefined): boolean {
-  return author?.__typename === 'Bot' || Boolean(author?.login?.endsWith('[bot]'));
+  return (
+    author?.__typename === 'Bot' || Boolean(author?.login?.endsWith('[bot]'))
+  );
 }
 
 function uniqueReviewerLogins(reviewers: string[]): string[] {
@@ -542,7 +674,9 @@ async function fetchGraphql<T>(
     if (response.ok) {
       const payload = (await response.json()) as { data?: T; errors?: unknown };
       if (payload.errors) {
-        throw new Error(`github_graphql_error: ${JSON.stringify(payload.errors)}`);
+        throw new Error(
+          `github_graphql_error: ${JSON.stringify(payload.errors)}`,
+        );
       }
       return payload.data ?? null;
     }
@@ -604,11 +738,12 @@ async function fetchPullRequestStatusWithGh(
     payload.headRepository?.nameWithOwner ??
     `${parsed.owner}/${payload.headRepository?.name ?? parsed.repo}`;
   const [owner = parsed.owner, repo = parsed.repo] = nameWithOwner.split('/');
-  const state = payload.state === 'MERGED'
-    ? 'merged'
-    : payload.state === 'CLOSED'
-      ? 'closed'
-      : 'open';
+  const state =
+    payload.state === 'MERGED'
+      ? 'merged'
+      : payload.state === 'CLOSED'
+        ? 'closed'
+        : 'open';
 
   return {
     url: payload.url ?? url,
