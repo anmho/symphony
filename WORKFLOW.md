@@ -88,7 +88,7 @@ Expected workflow:
 1. Inspect the repo instructions and relevant code before editing.
 2. Keep changes scoped to the issue and preserve unrelated user work.
 3. Run the most relevant tests, typechecks, builds, linters, or smoke checks available for the touched repo.
-4. Commit the finished work on the Symphony-created branch.
+4. Commit the finished work on the Symphony-created branch using a Conventional Commit message, for example `feat(symphony): add repo routing` or `fix(auth): repair token refresh`.
 5. Push the branch and open or update a GitHub pull request.
 6. Leave a Linear handoff comment with the PR link, verification performed, and any remaining blocker.
 7. When the PR handoff is ready, move the Linear issue to In Review so Symphony stops dispatching it as active work.

@@ -70,4 +70,4 @@ State: {{ issue.state }}
 Description:
 {{ issue.description }}
 
-Work in the current Git worktree. Make the smallest correct implementation, run relevant verification, and leave a clear handoff in Linear.
+Work in the current Git worktree. Make the smallest correct implementation, run relevant verification, commit with a Conventional Commit message, and leave a clear handoff in Linear.
