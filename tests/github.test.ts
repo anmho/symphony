@@ -6,6 +6,7 @@ import {
   parsePullRequestMetadata,
   parsePullRequestMergeReadiness,
   parseGithubPullRequestUrl,
+  removePullRequestReviewers,
   requestPullRequestReviewers,
 } from '../src/github.js';
 
@@ -164,6 +165,37 @@ describe('github client', () => {
           'edit',
           'https://github.com/anmho/symphony/pull/54',
           '--add-reviewer',
+          'anmho',
+        ],
+        env,
+      },
+    ]);
+  });
+
+  it('removes stale GitHub reviewer requests for a pull request', async () => {
+    const calls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
+    const runner = vi.fn(async (command, args, options) => {
+      calls.push({ command, args, env: options.env });
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    const env = { ...process.env, GH_TOKEN: 'ghs_test' };
+
+    await removePullRequestReviewers(
+      'https://github.com/anmho/symphony/pull/54',
+      ['anmho'],
+      '/repo',
+      env,
+      runner,
+    );
+
+    expect(calls).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'pr',
+          'edit',
+          'https://github.com/anmho/symphony/pull/54',
+          '--remove-reviewer',
           'anmho',
         ],
         env,

@@ -266,6 +266,43 @@ export async function requestPullRequestReviewers(
   }
 }
 
+export async function removePullRequestReviewers(
+  url: string,
+  reviewers: string[],
+  cwd?: string,
+  env?: NodeJS.ProcessEnv,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  const uniqueReviewers = uniqueReviewerLogins(reviewers);
+  const parsed = parseGithubPullRequestUrl(url);
+  if (!parsed || uniqueReviewers.length === 0) {
+    return;
+  }
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } = {
+    timeoutMs: 60000,
+  };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  if (env) {
+    options.env = env;
+  }
+
+  const args = ['pr', 'edit', url];
+  for (const reviewer of uniqueReviewers) {
+    args.push('--remove-reviewer', reviewer);
+  }
+  const result = await runner('gh', args, options);
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      detail
+        ? `github_pr_reviewer_removal_failed: gh ${args.join(' ')} failed: ${detail}`
+        : `github_pr_reviewer_removal_failed: gh ${args.join(' ')} failed`,
+    );
+  }
+}
+
 export async function fetchPullRequestReviewFeedback(
   url: string,
   runner: CommandRunner = runCommand,

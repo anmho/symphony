@@ -69,7 +69,9 @@ export async function runShellCommand(
     timeoutMs?: number;
   } = {}
 ): Promise<CommandResult> {
-  return runCommand("bash", ["-lc", command], options);
+  // Preserve the daemon's PATH for configured token commands; a login shell can
+  // select an older system Node before Bun/Node 24.
+  return runCommand("bash", ["-c", command], options);
 }
 
 export function splitCommand(command: string): { file: string; args: string[] } {

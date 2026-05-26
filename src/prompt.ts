@@ -32,5 +32,31 @@ function withPrHandoffInstructions(
   config: EffectiveWorkflowConfig,
   issue: NormalizedIssue
 ): string {
-  return `${prompt.trim()}\n\n${buildPrHandoffInstructions(config, issue)}`;
+  return [
+    prompt.trim(),
+    buildRecentLinearComments(issue),
+    buildPrHandoffInstructions(config, issue)
+  ].filter(Boolean).join("\n\n");
+}
+
+function buildRecentLinearComments(issue: NormalizedIssue): string | null {
+  const comments = issue.comments
+    .map((comment) => comment.trim())
+    .filter(Boolean)
+    .slice(-5)
+    .map((comment, index) => [`### Comment ${index + 1}`, truncateComment(comment)].join("\n\n"));
+
+  if (comments.length === 0) {
+    return null;
+  }
+
+  return ["## Recent Linear Comments", ...comments].join("\n\n");
+}
+
+function truncateComment(comment: string): string {
+  const maxLength = 4000;
+  if (comment.length <= maxLength) {
+    return comment;
+  }
+  return `${comment.slice(0, maxLength).trimEnd()}\n\n[comment truncated]`;
 }
