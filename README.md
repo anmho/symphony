@@ -226,24 +226,27 @@ author:@me (title:ANM- OR branch:symphony/)
 
 ### GitHub PR identity
 
-Symphony can keep Codex execution local while opening PRs as a separate GitHub machine user. Configure a token command in `WORKFLOW.md` after storing the machine-user token in Vault:
+Symphony can keep Codex execution local while opening PRs through a dedicated GitHub App identity. Configure a token command in `WORKFLOW.md` after storing the GitHub App private key in Vault:
 
 ```yaml
 github:
   pr_identity:
-    kind: machine_user
-    token_command: vault kv get -mount=secret -field=token prod/providers/github/symphony
-    author_name: Symphony
-    author_email: anmho-symphony@users.noreply.github.com
+    kind: github_app
+    app_slug: anmho-symphony
+    token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
+    author_name: anmho Symphony
+    author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
 ```
 
-The token is only used during PR handoff. Agents are instructed to set `GH_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
+The token is minted only during PR handoff. Agents are instructed to set `GH_TOKEN` and `GITHUB_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
 
 ```sh
 symphony doctor github-pr-identity --workflow WORKFLOW.md
 ```
 
-Graphite submit may still use the locally authenticated Graphite/GitHub identity; use the GitHub backend for machine-user PR authorship until Graphite bot identity support is verified.
+Graphite submit may still use the locally authenticated Graphite/GitHub identity; use the GitHub backend for GitHub App PR authorship until Graphite bot identity support is verified.
+
+GitHub App display names and icons are managed in GitHub's app settings UI. The production app uses display name `anmho Symphony` with PR author login `app/anmho-symphony`; upload `assets/anmho-symphony-github-app-icon.png` as the app logo.
 
 Stop it:
 
