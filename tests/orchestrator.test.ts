@@ -3,6 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { AgentWorkEventStore } from '../src/events.js';
+import type { DigestState, DigestStateStore } from '../src/digest.js';
 import {
   Orchestrator,
   type OrchestratorDependencies,
@@ -857,9 +858,156 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().running).toHaveLength(1);
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
+
+  it('does not send digests when digest config is disabled', async () => {
+    const sendDigest = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      fetchHandoffIssues: async () => [
+        makeIssue('APP-1', {
+          state: 'In Review',
+          comments: ['https://github.com/anmho/symphony/pull/1'],
+        }),
+      ],
+      sendDigestEmail: sendDigest,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(sendDigest).not.toHaveBeenCalled();
+  });
+
+  it('sends at most one digest per window and persists the event checkpoint', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'symphony-digest-'));
+    const eventStore = new AgentWorkEventStore(
+      path.join(dir, 'WORKFLOW.md'),
+      () => 9000,
+    );
+    eventStore.append({
+      issueId: 'APP-1',
+      identifier: 'APP-1',
+      repoKey: 'symphony',
+      workspacePath: null,
+      threadId: null,
+      turnId: null,
+      type: 'runner',
+      summary: 'failed checks need review',
+      timestampMs: 9000,
+    });
+    const stateStore = new MemoryDigestStateStore();
+    const config = makeConfig({
+      tracker: { handoffState: 'In Review' },
+      digest: { enabled: true, intervalMs: 1000, windowMs: 10000 },
+    });
+    let now = 10000;
+    const sentTexts: string[] = [];
+    const sendDigest: OrchestratorDependencies['sendDigestEmail'] = vi.fn(
+      async (_config, email) => {
+        sentTexts.push(email.text);
+      },
+    );
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      now: () => now,
+      eventStore,
+      digestStateStore: stateStore,
+      fetchHandoffIssues: async () => [
+        makeIssue('APP-1', {
+          state: 'In Review',
+          comments: ['https://github.com/anmho/symphony/pull/1'],
+        }),
+      ],
+      sendDigestEmail: sendDigest,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: path.join(dir, 'WORKFLOW.md') },
+      deps,
+    );
+
+    await orchestrator.tick();
+    expect(sendDigest).toHaveBeenCalledTimes(1);
+    expect(sentTexts[0]).toContain('failed checks need review');
+    expect(stateStore.state).toEqual({
+      lastSentAtMs: 10000,
+      lastProcessedCursor: 1,
+    });
+
+    now = 10500;
+    const restarted = new Orchestrator(
+      { workflowPath: path.join(dir, 'WORKFLOW.md') },
+      deps,
+    );
+    await restarted.tick();
+
+    expect(sendDigest).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not advance digest checkpoint when sending fails', async () => {
+    const stateStore = new MemoryDigestStateStore();
+    const config = makeConfig({
+      tracker: { handoffState: 'In Review' },
+      digest: { enabled: true, intervalMs: 1000, windowMs: 10000 },
+    });
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
+    const sendDigest = vi.fn(async () => {
+      throw new Error('resend_http_error: 500');
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      logger,
+      digestStateStore: stateStore,
+      fetchHandoffIssues: async () => [
+        makeIssue('APP-1', {
+          state: 'In Review',
+          comments: ['https://github.com/anmho/symphony/pull/1'],
+        }),
+      ],
+      sendDigestEmail: sendDigest,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await orchestrator.tick();
+
+    expect(sendDigest).toHaveBeenCalledTimes(2);
+    expect(stateStore.state).toEqual({
+      lastSentAtMs: null,
+      lastProcessedCursor: 0,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      { error: 'resend_http_error: 500' },
+      'failed to send Symphony digest email',
+    );
+  });
 });
 
 type TestDeps = Partial<OrchestratorDependencies>;
+
+class MemoryDigestStateStore implements DigestStateStore {
+  state: DigestState = {
+    lastSentAtMs: null,
+    lastProcessedCursor: 0,
+  };
+
+  read(): DigestState {
+    return { ...this.state };
+  }
+
+  write(state: DigestState): void {
+    this.state = { ...state };
+  }
+}
 
 function makeDeps(overrides: TestDeps = {}): TestDeps {
   const config = makeConfig();
@@ -901,6 +1049,7 @@ function makeConfig(
   overrides: {
     tracker?: Partial<EffectiveWorkflowConfig['tracker']>;
     workspace?: Partial<EffectiveWorkflowConfig['workspace']>;
+    digest?: Partial<EffectiveWorkflowConfig['digest']>;
   } = {},
 ): EffectiveWorkflowConfig {
   const config: EffectiveWorkflowConfig = {
@@ -958,6 +1107,15 @@ function makeConfig(
       backend: 'github',
       graphiteFallback: 'fail',
     },
+    digest: {
+      enabled: false,
+      recipient: 'andyminhtuanho@gmail.com',
+      sender: 'Symphony <agent@anmho.com>',
+      intervalMs: 3600000,
+      windowMs: 3600000,
+      resendApiKey: null,
+      resendEndpoint: 'https://api.resend.com/emails',
+    },
   };
   return {
     ...config,
@@ -968,6 +1126,10 @@ function makeConfig(
     workspace: {
       ...config.workspace,
       ...overrides.workspace,
+    },
+    digest: {
+      ...config.digest,
+      ...overrides.digest,
     },
   };
 }

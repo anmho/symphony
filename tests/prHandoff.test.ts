@@ -201,6 +201,15 @@ function makeConfig(pr: {
     pullRequest: {
       backend: pr.backend,
       graphiteFallback: pr.fallback
+    },
+    digest: {
+      enabled: false,
+      recipient: "andyminhtuanho@gmail.com",
+      sender: "Symphony <agent@anmho.com>",
+      intervalMs: 3600000,
+      windowMs: 3600000,
+      resendApiKey: null,
+      resendEndpoint: "https://api.resend.com/emails"
     }
   } as EffectiveWorkflowConfig;
 }

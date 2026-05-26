@@ -90,6 +90,16 @@ export interface PullRequestConfig {
   graphiteFallback: GraphiteFallback;
 }
 
+export interface DigestConfig {
+  enabled: boolean;
+  recipient: string;
+  sender: string;
+  intervalMs: number;
+  windowMs: number;
+  resendApiKey: string | null;
+  resendEndpoint: string;
+}
+
 export interface GithubPrIdentityConfig {
   kind: 'machine_user';
   tokenCommand: string;
@@ -113,6 +123,7 @@ export interface EffectiveWorkflowConfig {
   codex: CodexConfig;
   github: GithubConfig;
   pullRequest: PullRequestConfig;
+  digest: DigestConfig;
 }
 
 export interface WorkspaceInfo {

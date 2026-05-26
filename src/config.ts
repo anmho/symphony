@@ -8,6 +8,10 @@ import type { EffectiveWorkflowConfig, JsonObject, WorkflowDefinition } from "./
 
 const DEFAULT_ACTIVE_STATES = ["Todo", "In Progress"];
 const DEFAULT_TERMINAL_STATES = ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"];
+const DEFAULT_DIGEST_RECIPIENT = "andyminhtuanho@gmail.com";
+const DEFAULT_DIGEST_SENDER = "Symphony <agent@anmho.com>";
+const DEFAULT_DIGEST_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 export interface SymphonyUserConfig {
   workflow: string | null;
@@ -111,6 +115,17 @@ const RawWorkflowConfigSchema = z
           })
           .optional()
       })
+      .optional(),
+    digest: z
+      .object({
+        enabled: z.boolean().optional(),
+        recipient: z.string().optional(),
+        sender: z.string().optional(),
+        interval_ms: z.number().int().positive().optional(),
+        window_ms: z.number().int().positive().optional(),
+        resend_api_key: z.string().optional(),
+        resend_endpoint: z.string().url().optional()
+      })
       .optional()
   })
   .passthrough();
@@ -210,6 +225,7 @@ export function resolveWorkflowConfig(
   const codex = raw.codex ?? {};
   const github = raw.github ?? {};
   const pullRequest = raw.pull_request ?? {};
+  const digest = raw.digest ?? {};
 
   const apiKey = resolveEnvValue(tracker.api_key ?? "$LINEAR_API_KEY", userConfig);
   const projectSlug = normalizeOptionalString(tracker.project_slug);
@@ -293,6 +309,27 @@ export function resolveWorkflowConfig(
     pullRequest: {
       backend: pullRequest.backend ?? "github",
       graphiteFallback: pullRequest.graphite?.fallback ?? "fail"
+    },
+    digest: {
+      enabled: digest.enabled ?? false,
+      recipient:
+        normalizeOptionalString(
+          digest.recipient ? resolveEnvValue(digest.recipient, userConfig) : undefined
+        ) ??
+        resolveConfiguredValue("NOTIFICATION_TO", userConfig) ??
+        DEFAULT_DIGEST_RECIPIENT,
+      sender:
+        normalizeOptionalString(
+          digest.sender ? resolveEnvValue(digest.sender, userConfig) : undefined
+        ) ??
+        resolveConfiguredValue("NOTIFICATION_FROM", userConfig) ??
+        DEFAULT_DIGEST_SENDER,
+      intervalMs: digest.interval_ms ?? DEFAULT_DIGEST_INTERVAL_MS,
+      windowMs: digest.window_ms ?? digest.interval_ms ?? DEFAULT_DIGEST_INTERVAL_MS,
+      resendApiKey: normalizeOptionalString(
+        resolveEnvValue(digest.resend_api_key ?? "$RESEND_API_KEY", userConfig)
+      ),
+      resendEndpoint: digest.resend_endpoint ?? DEFAULT_RESEND_ENDPOINT
     }
   };
 }
@@ -306,6 +343,7 @@ export function renderConfigSummary(config: EffectiveWorkflowConfig): string {
     `repo=${config.workspace.repoPath}`,
     `concurrency=${config.agent.maxConcurrentAgents}`,
     `prBackend=${config.pullRequest.backend}`,
+    `digest=${config.digest.enabled ? `${config.digest.intervalMs}ms` : "disabled"}`,
     `githubPrIdentity=${config.github.prIdentity?.kind ?? ""}`,
     `taskCodex="${config.codex.command}"`
   ].join(" ");
