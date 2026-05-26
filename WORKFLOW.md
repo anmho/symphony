@@ -38,6 +38,8 @@ workspace:
     skills: skills
     website: website
     desktop: desktop
+    better-auth-studio: better-auth-studio
+    tab-organizer: tab-organizer
     bluebubbles-cli: bluebubbles-cli
     bluebubbles-sdk: bluebubbles-sdk
     kalshi-cli: kalshi-cli
