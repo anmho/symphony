@@ -38,6 +38,7 @@ import {
   fetchPullRequestReviewFeedback,
   fetchPullRequestStatus,
   mergePullRequest,
+  removePullRequestReviewers,
   requestPullRequestReviewers,
 } from './github.js';
 import { latestVisibleWorkEvents } from './status.js';
@@ -125,6 +126,12 @@ export interface OrchestratorDependencies {
     env?: NodeJS.ProcessEnv,
   ) => Promise<void>;
   requestPullRequestReviewers: (
+    url: string,
+    reviewers: string[],
+    cwd?: string,
+    env?: NodeJS.ProcessEnv,
+  ) => Promise<void>;
+  removePullRequestReviewers: (
     url: string,
     reviewers: string[],
     cwd?: string,
@@ -220,16 +227,19 @@ function reviewKindFromIssue(
 }
 
 function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
-  const haystack = [
-    issue.description ?? '',
-    ...issue.comments,
+  for (const candidate of [
     ...issue.attachments,
-  ].join('\n');
-  return (
-    haystack.match(
+    ...issue.comments,
+    issue.description ?? '',
+  ]) {
+    const match = candidate.match(
       /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+/,
-    )?.[0] ?? null
-  );
+    );
+    if (match) {
+      return match[0] ?? null;
+    }
+  }
+  return null;
 }
 
 function repoKeyFromIssue(
@@ -360,6 +370,7 @@ export class Orchestrator {
       fetchPullRequestReviewFeedback,
       fetchPullRequestMergeReadiness,
       mergePullRequest,
+      removePullRequestReviewers,
       requestPullRequestReviewers,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
@@ -1245,6 +1256,20 @@ export class Orchestrator {
           (await this.deps.fetchIssueById(config, issue.id)) ?? issue;
         const goalStatus = entry.session.goalStatus?.toLowerCase();
         const requiresPrUrl = goalStatus !== 'blocked';
+        const prUrl = githubPullRequestUrlFromIssue(latestIssue);
+        if (
+          prUrl &&
+          (await this.hasUnresolvedPrReviewFeedback(config, latestIssue, prUrl))
+        ) {
+          this.scheduleRetry(
+            config,
+            latestIssue,
+            1,
+            'unresolved_pr_feedback',
+            this.deps.now() + 1000,
+          );
+          return;
+        }
         if (!(await this.ensurePrIdentityHandoffGate(config, latestIssue, entry, null, requiresPrUrl))) {
           this.releaseIssue(issue.id);
           return;
@@ -1338,6 +1363,10 @@ export class Orchestrator {
     }
     if (await this.syncMergedPrLinkedIssueToTerminal(config, issue, entry)) {
       return true;
+    }
+    if (await this.hasUnresolvedPrReviewFeedback(config, issue, prUrl)) {
+      this.reworkIssues.add(issue.id);
+      return false;
     }
     if (!(await this.ensurePrIdentityHandoffGate(config, issue, entry, prUrl))) {
       return false;
@@ -1894,6 +1923,7 @@ export class Orchestrator {
     if (!feedback?.unresolvedComments.length) {
       return false;
     }
+    await this.removeConfiguredReviewRequestsForRework(config, issue, prUrl);
 
     const targetState =
       config.tracker.activeStates.find(
@@ -1928,6 +1958,63 @@ export class Orchestrator {
       'moved PR-linked issue back to active state for unresolved review comments',
     );
     return true;
+  }
+
+  private async hasUnresolvedPrReviewFeedback(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    prUrl: string,
+  ): Promise<boolean> {
+    let feedback: PullRequestReviewFeedback | null;
+    try {
+      feedback = await this.deps.fetchPullRequestReviewFeedback(prUrl);
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'failed to fetch linked GitHub PR review feedback',
+      );
+      return false;
+    }
+    if (!feedback?.unresolvedComments.length) {
+      return false;
+    }
+    await this.removeConfiguredReviewRequestsForRework(config, issue, prUrl);
+    this.deps.logger.info(
+      {
+        issue: issue.identifier,
+        prUrl,
+        commentCount: feedback.unresolvedComments.length,
+      },
+      'blocked PR handoff because unresolved review feedback remains',
+    );
+    return true;
+  }
+
+  private async removeConfiguredReviewRequestsForRework(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    prUrl: string,
+  ): Promise<void> {
+    const reviewers = requiredPrReviewerLogins(config);
+    if (reviewers.length === 0) {
+      return;
+    }
+    try {
+      const identity = await this.deps.resolvePrIdentity(config);
+      // Rework invalidates the active review request; request review again only
+      // after the worker has addressed the unresolved feedback.
+      await this.deps.removePullRequestReviewers(
+        prUrl,
+        reviewers,
+        config.workspace.repoPath,
+        identity?.env,
+      );
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl, reviewers },
+        'failed to remove configured reviewers while PR feedback is unresolved',
+      );
+    }
   }
 
   private scheduleRateLimitProbe(
