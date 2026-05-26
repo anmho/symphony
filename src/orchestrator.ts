@@ -28,11 +28,14 @@ import {
 import { renderIssuePrompt } from './prompt.js';
 import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
+import { resolvePrIdentity, type ResolvedPrIdentity } from './prIdentity.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
 import {
+  fetchPullRequestMetadata,
   fetchPullRequestReviewFeedback,
   fetchPullRequestStatus,
+  requestPullRequestReviewers,
 } from './github.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
@@ -61,6 +64,7 @@ import type {
   LiveSession,
   NormalizedIssue,
   OrchestratorSnapshot,
+  PullRequestMetadata,
   PullRequestStatus,
   PullRequestReviewFeedback,
   RunAttempt,
@@ -97,9 +101,19 @@ export interface OrchestratorDependencies {
   fetchPullRequestStatus: (
     url: string,
   ) => Promise<PullRequestStatus | null>;
+  fetchPullRequestMetadata: (
+    url: string,
+    cwd?: string,
+  ) => Promise<PullRequestMetadata>;
   fetchPullRequestReviewFeedback: (
     url: string,
   ) => Promise<PullRequestReviewFeedback | null>;
+  requestPullRequestReviewers: (
+    url: string,
+    reviewers: string[],
+    cwd?: string,
+    env?: NodeJS.ProcessEnv,
+  ) => Promise<void>;
   prepareWorkspace: (
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
@@ -128,6 +142,9 @@ export interface OrchestratorDependencies {
     input: CodexRunInput,
     options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void },
   ) => Promise<CodexTurnResult>;
+  resolvePrIdentity: (
+    config: Pick<EffectiveWorkflowConfig, 'github'>,
+  ) => Promise<ResolvedPrIdentity | null>;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   logger: Pick<typeof defaultLogger, 'info' | 'warn' | 'error' | 'debug'>;
@@ -235,7 +252,7 @@ function formatUnresolvedReviewFeedback(
   });
 
   return [
-    'Unresolved GitHub PR review comments were found.',
+    'GitHub PR review feedback requiring agent rework was found.',
     '',
     `PR: ${feedback.url}`,
     '',
@@ -312,7 +329,9 @@ export class Orchestrator {
       writeRunnerComment,
       moveIssueToState,
       fetchPullRequestStatus,
+      fetchPullRequestMetadata,
       fetchPullRequestReviewFeedback,
+      requestPullRequestReviewers,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
       workspaceInfoForIssue,
@@ -320,6 +339,7 @@ export class Orchestrator {
       runHook,
       renderIssuePrompt,
       runCodexTurn,
+      resolvePrIdentity,
       now,
       sleep,
       logger: defaultLogger,
@@ -1084,14 +1104,19 @@ export class Orchestrator {
       const prompt = queuedSteer
         ? `${basePrompt}\n\n## Operator Guidance\n\n${queuedSteer.text}`
         : basePrompt;
+      const prIdentity = await this.deps.resolvePrIdentity(config);
+      const codexInput: CodexRunInput = {
+        config,
+        issue,
+        workspacePath: workspace.path,
+        prompt,
+        threadId,
+      };
+      if (prIdentity) {
+        codexInput.env = prIdentity.env;
+      }
       const result = await this.deps.runCodexTurn(
-        {
-          config,
-          issue,
-          workspacePath: workspace.path,
-          prompt,
-          threadId,
-        },
+        codexInput,
         {
           signal: entry.abortController.signal,
           onEvent: (event) => this.recordCodexEvent(entry, event),
@@ -1145,6 +1170,14 @@ export class Orchestrator {
       }
 
       if (this.shouldMoveToHandoff(config, entry)) {
+        const latestIssue =
+          (await this.deps.fetchIssueById(config, issue.id)) ?? issue;
+        const goalStatus = entry.session.goalStatus?.toLowerCase();
+        const requiresPrUrl = goalStatus !== 'blocked';
+        if (!(await this.ensurePrIdentityHandoffGate(config, latestIssue, entry, null, requiresPrUrl))) {
+          this.releaseIssue(issue.id);
+          return;
+        }
         await this.deps.moveIssueToState(
           config,
           issue.id,
@@ -1154,8 +1187,8 @@ export class Orchestrator {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
-        this.handoff.set(issue.identifier, issueSummary(config, issue));
-        this.rework.delete(issue.identifier);
+        this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        this.rework.delete(latestIssue.identifier);
         this.reworkIssues.delete(issue.id);
         this.releaseIssue(issue.id);
         return;
@@ -1235,6 +1268,9 @@ export class Orchestrator {
     if (await this.syncMergedPrLinkedIssueToTerminal(config, issue, entry)) {
       return true;
     }
+    if (!(await this.ensurePrIdentityHandoffGate(config, issue, entry, prUrl))) {
+      return false;
+    }
 
     await this.deps.moveIssueToState(config, issue.id, handoffState);
     const handedOffIssue = { ...issue, state: handoffState };
@@ -1255,6 +1291,183 @@ export class Orchestrator {
       'moved PR-linked issue to handoff state',
     );
     return true;
+  }
+
+  private async ensurePrIdentityHandoffGate(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    entry: RunningEntry | null = null,
+    prUrl: string | null = null,
+    requiresPrUrl = true,
+  ): Promise<boolean> {
+    const expectedAuthor = expectedPrAuthorLogin(config);
+    const requiredReviewers = requiredPrReviewerLogins(config);
+    if (!expectedAuthor && requiredReviewers.length === 0) {
+      return true;
+    }
+
+    const resolvedPrUrl = prUrl ?? githubPullRequestUrlFromIssue(issue);
+    if (!resolvedPrUrl) {
+      if (!requiresPrUrl) {
+        return true;
+      }
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because github.pr_identity is configured but no GitHub PR link was found.',
+          expectedAuthor ? `Expected PR author: ${expectedAuthor}` : null,
+          requiredReviewers.length > 0 ? `Required reviewers: ${requiredReviewers.join(', ')}` : null,
+        ].filter(Boolean).join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          expectedAuthor,
+          requiredReviewers,
+          actualAuthor: null,
+          reason: 'missing_pr_url',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    let metadata: PullRequestMetadata;
+    try {
+      metadata = await this.deps.fetchPullRequestMetadata(
+        resolvedPrUrl,
+        config.workspace.repoPath,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because PR metadata was unavailable for the configured github.pr_identity gate.',
+          expectedAuthor ? `Expected PR author: ${expectedAuthor}` : null,
+          requiredReviewers.length > 0 ? `Required reviewers: ${requiredReviewers.join(', ')}` : null,
+          'Actual PR author: unavailable',
+          `PR: ${resolvedPrUrl}`,
+          `Error: ${message}`,
+        ].filter(Boolean).join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          expectedAuthor,
+          requiredReviewers,
+          actualAuthor: null,
+          prUrl: resolvedPrUrl,
+          reason: 'metadata_unavailable',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    if (expectedAuthor && metadata.authorLogin !== expectedAuthor) {
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because the PR author does not match the configured github.pr_identity.',
+          `Expected PR author: ${expectedAuthor}`,
+          `Actual PR author: ${metadata.authorLogin ?? 'unavailable'}`,
+          `PR: ${metadata.url}`,
+        ].join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          expectedAuthor,
+          actualAuthor: metadata.authorLogin,
+          prUrl: metadata.url,
+          reason: 'author_mismatch',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    const missingReviewers = missingRequiredReviewers(
+      requiredReviewers,
+      metadata.reviewRequestLogins,
+    );
+    if (missingReviewers.length > 0) {
+      try {
+        const identity = await this.deps.resolvePrIdentity(config);
+        await this.deps.requestPullRequestReviewers(
+          metadata.url,
+          missingReviewers,
+          config.workspace.repoPath,
+          identity?.env,
+        );
+        metadata = await this.deps.fetchPullRequestMetadata(
+          metadata.url,
+          config.workspace.repoPath,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.writePrIdentityBlockerComment(
+          config,
+          issue,
+          [
+            'Symphony blocked PR handoff because configured reviewers could not be requested automatically.',
+            `Required reviewers: ${requiredReviewers.join(', ')}`,
+            `Missing reviewers: ${missingReviewers.join(', ')}`,
+            `PR: ${metadata.url}`,
+            `Error: ${message}`,
+          ].join('\n'),
+        );
+        if (entry) {
+          this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+            requiredReviewers,
+            missingReviewers,
+            reviewRequestLogins: metadata.reviewRequestLogins,
+            prUrl: metadata.url,
+            reason: 'reviewer_request_failed',
+          }, 'warn');
+        }
+        return false;
+      }
+    }
+
+    const stillMissingReviewers = missingRequiredReviewers(
+      requiredReviewers,
+      metadata.reviewRequestLogins,
+    );
+    if (stillMissingReviewers.length > 0) {
+      await this.writePrIdentityBlockerComment(
+        config,
+        issue,
+        [
+          'Symphony blocked PR handoff because configured reviewers were not requested.',
+          `Required reviewers: ${requiredReviewers.join(', ')}`,
+          `Missing reviewers: ${stillMissingReviewers.join(', ')}`,
+          `PR: ${metadata.url}`,
+        ].join('\n'),
+      );
+      if (entry) {
+        this.appendRunnerEvent(entry, 'PR identity gate blocked handoff', {
+          requiredReviewers,
+          missingReviewers: stillMissingReviewers,
+          reviewRequestLogins: metadata.reviewRequestLogins,
+          prUrl: metadata.url,
+          reason: 'reviewer_not_requested',
+        }, 'warn');
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  private async writePrIdentityBlockerComment(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    body: string,
+  ): Promise<void> {
+    const marker = body.split('\n')[0] ?? body;
+    if (issue.comments.some((comment) => comment.includes(marker))) {
+      return;
+    }
+    await this.deps.writeRunnerComment(config, issue.id, body);
   }
 
   private async syncMergedPrLinkedIssueToTerminal(
@@ -1549,6 +1762,34 @@ export class Orchestrator {
 
 export function createDefaultOrchestrator(workflowPath: string): Orchestrator {
   return new Orchestrator({ workflowPath });
+}
+
+function expectedPrAuthorLogin(
+  config: EffectiveWorkflowConfig,
+): string | null {
+  const identity = config.github.prIdentity;
+  if (!identity || identity.kind !== 'github_app') {
+    return null;
+  }
+  return `app/${identity.appSlug}`;
+}
+
+function requiredPrReviewerLogins(
+  config: EffectiveWorkflowConfig,
+): string[] {
+  const identity = config.github.prIdentity;
+  if (!identity || identity.kind !== 'github_app') {
+    return [];
+  }
+  return identity.reviewerLogins;
+}
+
+function missingRequiredReviewers(
+  requiredReviewers: string[],
+  requestedReviewers: string[],
+): string[] {
+  const requested = new Set(requestedReviewers.map((reviewer) => reviewer.toLowerCase()));
+  return requiredReviewers.filter((reviewer) => !requested.has(reviewer.toLowerCase()));
 }
 
 function sleep(ms: number): Promise<void> {

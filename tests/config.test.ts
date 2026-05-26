@@ -223,7 +223,9 @@ Prompt
       tokenCommand:
         "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
       authorName: "anmho Symphony",
-      authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com"
+      authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com",
+      reviewerLogin: null,
+      reviewerLogins: []
     });
   });
 
@@ -249,6 +251,38 @@ Prompt
       tokenCommand: "vault kv get -mount=secret -field=token prod/providers/github/symphony",
       authorName: "Symphony",
       authorEmail: "anmho-symphony@users.noreply.github.com"
+    });
+  });
+
+  it("parses GitHub App PR identity config with a required reviewer", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+github:
+  pr_identity:
+    kind: github_app
+    app_slug: anmho-symphony
+    token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
+    author_name: anmho Symphony
+    author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
+    reviewer_logins:
+      - anmho
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.github.prIdentity).toEqual({
+      kind: "github_app",
+      appSlug: "anmho-symphony",
+      tokenCommand:
+        "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
+      authorName: "anmho Symphony",
+      authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com",
+      reviewerLogin: null,
+      reviewerLogins: ["anmho"]
     });
   });
 

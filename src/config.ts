@@ -109,7 +109,9 @@ const RawWorkflowConfigSchema = z
               app_slug: z.string().min(1),
               token_command: z.string().min(1),
               author_name: z.string().min(1),
-              author_email: z.string().min(1)
+              author_email: z.string().min(1),
+              reviewer_login: z.string().min(1).optional(),
+              reviewer_logins: z.array(z.string().min(1)).optional()
             })
           ])
           .optional()
@@ -254,7 +256,6 @@ export function resolveWorkflowConfig(
   if (!repoPath) {
     throw new Error("missing_workspace_repo_path");
   }
-
   return {
     workflowPath: path.resolve(workflowPath),
     workflowDir,
@@ -313,7 +314,12 @@ export function resolveWorkflowConfig(
               appSlug: github.pr_identity.app_slug,
               tokenCommand: github.pr_identity.token_command,
               authorName: github.pr_identity.author_name,
-              authorEmail: github.pr_identity.author_email
+              authorEmail: github.pr_identity.author_email,
+              reviewerLogin: github.pr_identity.reviewer_login ?? null,
+              reviewerLogins: normalizeReviewerLogins(
+                github.pr_identity.reviewer_login,
+                github.pr_identity.reviewer_logins ?? []
+              )
             }
           : {
               kind: github.pr_identity.kind,
@@ -380,6 +386,23 @@ function normalizeConcurrencyMap(input: Record<string, number>): Record<string, 
 
 function normalizeLabels(input: string[]): string[] {
   return input.map((label) => label.trim().toLowerCase()).filter(Boolean);
+}
+
+function normalizeReviewerLogins(
+  legacyReviewer: string | undefined,
+  reviewers: string[]
+): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of [legacyReviewer, ...reviewers]) {
+    const reviewer = value?.trim();
+    if (!reviewer || seen.has(reviewer.toLowerCase())) {
+      continue;
+    }
+    seen.add(reviewer.toLowerCase());
+    normalized.push(reviewer);
+  }
+  return normalized;
 }
 
 function normalizeOptionalString(value: string | undefined): string | null {

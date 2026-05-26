@@ -441,6 +441,51 @@ describe('orchestrator', () => {
     );
   });
 
+  it('passes the configured GitHub App identity environment to Codex runs', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      github: {
+        prIdentity: githubAppPrIdentity(),
+      },
+    });
+    let codexEnv: NodeJS.ProcessEnv | undefined;
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      resolvePrIdentity: async () => ({
+        login: 'app/anmho-symphony',
+        token: 'ghs_test',
+        env: {
+          ...process.env,
+          GH_TOKEN: 'ghs_test',
+          GITHUB_TOKEN: 'ghs_test',
+          GIT_AUTHOR_NAME: 'anmho Symphony',
+          GIT_AUTHOR_EMAIL: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+          GIT_COMMITTER_NAME: 'anmho Symphony',
+          GIT_COMMITTER_EMAIL: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+        },
+      }),
+      runCodexTurn: async (input) => {
+        codexEnv = input.env;
+        return new Promise<CodexTurnResult>(() => undefined);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(codexEnv).toMatchObject({
+      GH_TOKEN: 'ghs_test',
+      GITHUB_TOKEN: 'ghs_test',
+      GIT_AUTHOR_NAME: 'anmho Symphony',
+      GIT_COMMITTER_EMAIL: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+    });
+  });
+
   it('moves blocked Codex goals to the configured handoff state', async () => {
     const issue = makeIssue('APP-1');
     const config = makeConfig({
@@ -748,9 +793,71 @@ describe('orchestrator', () => {
 
     await orchestrator.tick();
 
-    expect(comments[0]).toContain('Unresolved GitHub PR review comments were found.');
+    expect(comments[0]).toContain('GitHub PR review feedback requiring agent rework was found.');
     expect(comments[0]).toContain('package.json:23 by @anmho');
     expect(comments[0]).toContain('Why did we need `assets`');
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('moves handoff issues with PR-level comments or changes requested back to active work', async () => {
+    const issue = makeIssue('ANM-379', {
+      id: 'issue-379',
+      title: 'symphony: rename GitHub App identity',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/49'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/49',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 49,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'Review state: CHANGES_REQUESTED.',
+            path: null,
+            line: null,
+            url: 'https://github.com/anmho/symphony/pull/49#pullrequestreview-1',
+            createdAt: '2026-05-26T02:51:00Z',
+          },
+          {
+            author: 'anmho',
+            body: 'Can you also update the docs?',
+            path: null,
+            line: null,
+            url: 'https://github.com/anmho/symphony/pull/49#issuecomment-1',
+            createdAt: '2026-05-26T02:52:00Z',
+          },
+        ],
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(comments[0]).toContain('Review state: CHANGES_REQUESTED.');
+    expect(comments[0]).toContain('Can you also update the docs?');
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Progress');
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
@@ -845,7 +952,9 @@ describe('orchestrator', () => {
       },
     });
     const moved = vi.fn(async () => undefined);
-    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const runCodexTurn = vi.fn(
+      async () => new Promise<CodexTurnResult>(() => undefined),
+    );
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => [issue],
@@ -862,6 +971,199 @@ describe('orchestrator', () => {
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
     expect(runCodexTurn).not.toHaveBeenCalled();
     expect(orchestrator.snapshot().running).toHaveLength(0);
+    expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
+  });
+
+  it('keeps PR-linked candidate issues active when the GitHub App author is wrong', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const runCodexTurn = vi.fn(
+      async () => new Promise<CodexTurnResult>(() => undefined),
+    );
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/41',
+        baseRefName: 'main',
+        headRefName: 'symphony/APP-1',
+        body: 'Linear: https://linear.app/anmho/issue/APP-1/x',
+        authorLogin: 'anmho',
+        reviewRequestLogins: ['anmho'],
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+      runCodexTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).not.toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(comments[0]).toContain('PR author does not match');
+    expect(comments[0]).toContain('Expected PR author: app/anmho-symphony');
+    expect(runCodexTurn).toHaveBeenCalledTimes(1);
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('keeps PR-linked candidate issues active when the configured reviewer was not requested', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const runCodexTurn = vi.fn(
+      async () => new Promise<CodexTurnResult>(() => undefined),
+    );
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/41',
+        baseRefName: 'main',
+        headRefName: 'symphony/APP-1',
+        body: 'Linear: https://linear.app/anmho/issue/APP-1/x',
+        authorLogin: 'app/anmho-symphony',
+        reviewRequestLogins: [],
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+      runCodexTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).not.toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(comments[0]).toContain('configured reviewers were not requested');
+    expect(comments[0]).toContain('Required reviewers: anmho');
+    expect(comments[0]).toContain('Missing reviewers: anmho');
+    expect(runCodexTurn).toHaveBeenCalledTimes(1);
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('moves GitHub App-authored PR-linked candidate issues to review after requesting the configured reviewer', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/41',
+        baseRefName: 'main',
+        headRefName: 'symphony/APP-1',
+        body: 'Linear: https://linear.app/anmho/issue/APP-1/x',
+        authorLogin: 'app/anmho-symphony',
+        reviewRequestLogins: ['anmho'],
+      }),
+      moveIssueToState: moved,
+      runCodexTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(runCodexTurn).not.toHaveBeenCalled();
+    expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
+  });
+
+  it('automatically requests configured GitHub reviewers before handoff', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(['anmho']),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const requested = vi.fn(async () => undefined);
+    let metadataFetches = 0;
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => {
+        metadataFetches += 1;
+        return {
+          url: 'https://github.com/anmho/symphony/pull/41',
+          baseRefName: 'main',
+          headRefName: 'symphony/APP-1',
+          body: 'Linear: https://linear.app/anmho/issue/APP-1/x',
+          authorLogin: 'app/anmho-symphony',
+          reviewRequestLogins: metadataFetches === 1 ? [] : ['anmho'],
+        };
+      },
+      resolvePrIdentity: async () => ({
+        login: 'app/anmho-symphony',
+        token: 'ghs_test',
+        env: { ...process.env, GH_TOKEN: 'ghs_test', GITHUB_TOKEN: 'ghs_test' },
+      }),
+      requestPullRequestReviewers: requested,
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(requested).toHaveBeenCalledWith(
+      'https://github.com/anmho/symphony/pull/41',
+      ['anmho'],
+      '/tmp/repo',
+      expect.objectContaining({ GH_TOKEN: 'ghs_test' }),
+    );
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
     expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
   });
 
@@ -1159,6 +1461,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     moveIssueToState: async () => undefined,
     fetchPullRequestStatus: async () => null,
     fetchPullRequestReviewFeedback: async () => null,
+    requestPullRequestReviewers: async () => undefined,
     prepareWorkspace: async (_config, issue) => makeWorkspace(issue),
     removeWorkspace: async () => undefined,
     workspaceInfoForIssue: (_config, issue) => makeWorkspace(issue),
@@ -1172,6 +1475,7 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
         onEvent: (event: CodexRunEvent) => void;
       },
     ) => completedTurn('thread', 'turn'),
+    resolvePrIdentity: async () => null,
     now: () => 1000,
     sleep: async () => undefined,
     logger: {
@@ -1190,6 +1494,7 @@ function makeConfig(
     workspace?: Partial<EffectiveWorkflowConfig['workspace']>;
     digest?: Partial<EffectiveWorkflowConfig['digest']>;
     agent?: Partial<EffectiveWorkflowConfig['agent']>;
+    github?: Partial<EffectiveWorkflowConfig['github']>;
   } = {},
 ): EffectiveWorkflowConfig {
   const config: EffectiveWorkflowConfig = {
@@ -1275,6 +1580,25 @@ function makeConfig(
       ...config.digest,
       ...overrides.digest,
     },
+    github: {
+      ...config.github,
+      ...overrides.github,
+    },
+  };
+}
+
+function githubAppPrIdentity(
+  reviewerLogins: string[] = ['anmho'],
+): NonNullable<EffectiveWorkflowConfig['github']['prIdentity']> {
+  return {
+    kind: 'github_app',
+    appSlug: 'anmho-symphony',
+    tokenCommand:
+      "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
+    authorName: 'anmho Symphony',
+    authorEmail: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+    reviewerLogin: reviewerLogins[0] ?? null,
+    reviewerLogins,
   };
 }
 
