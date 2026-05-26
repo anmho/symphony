@@ -24,6 +24,7 @@ describe('watch', () => {
     expect(screen).toContain('ISSUE');
     expect(screen).toContain('ANM-1');
     expect(screen).toContain('running');
+    expect(screen).toContain('running=1/5');
   });
 
   it('renders help and filter modes', () => {
@@ -44,6 +45,7 @@ describe('watch', () => {
 
     expect(help).toContain(':agents');
     expect(help).toContain(':describe');
+    expect(help).toContain(':concurrency N');
     expect(filtered).toContain('/ANM');
     expect(filtered).toContain('filter=ANM');
   });
@@ -263,6 +265,15 @@ function makeSnapshot(): OrchestratorSnapshot {
       resumeAfterMs: null,
       reason: null,
       updatedAtMs: null,
+    },
+    concurrency: {
+      running: 1,
+      configuredMax: 5,
+      effectiveMax: 5,
+      source: 'workflow',
+      overrideActive: false,
+      overrideMax: null,
+      overrideUpdatedAtMs: null,
     },
     lastTickAtMs: 19_500,
     lastConfigError: null,

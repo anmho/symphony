@@ -1,15 +1,31 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
+import type { Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { runCommand } from "../src/process.js";
+import { startStatusServer } from "../src/status.js";
+import type { OrchestratorSnapshot } from "../src/types.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("cli", () => {
+  let server: Server | null = null;
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) {
+        resolve();
+        return;
+      }
+      server.close(() => resolve());
+      server = null;
+    });
+  });
+
   it("prints help", async () => {
-    const result = await runCommand("node", ["--import", "tsx", "src/index.ts", "--help"], {
+    const result = await runCommand("bun", ["src/index.ts", "--help"], {
       cwd: repoRoot,
       timeoutMs: 30000
     });
@@ -21,9 +37,47 @@ describe("cli", () => {
     expect(result.stdout).toContain("logs");
     expect(result.stdout).toContain("steer");
     expect(result.stdout).toContain("resume");
+    expect(result.stdout).toContain("concurrency");
     expect(result.stdout).toContain("validate-config");
     expect(result.stdout).toContain("doctor");
     expect(result.stdout).toContain("ticket");
+  });
+
+  it("views and sets daemon concurrency from the CLI", async () => {
+    let override: number | null = null;
+    server = await startStatusServer(() => cliSnapshot(override), 0, {
+      setMaxConcurrencyOverride: (maxConcurrentAgents) => {
+        override = maxConcurrentAgents;
+        return cliSnapshot(override).concurrency;
+      }
+    });
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+
+    const getResult = await runCommand(
+      "bun",
+      ["src/index.ts", "--status-port", String(port), "concurrency"],
+      {
+        cwd: repoRoot,
+        timeoutMs: 30000
+      }
+    );
+
+    expect(getResult.exitCode).toBe(0);
+    expect(getResult.stdout).toContain("running=1 configured=5 effective=5 source=workflow override=none");
+
+    const setResult = await runCommand(
+      "bun",
+      ["src/index.ts", "--status-port", String(port), "concurrency", "set", "2"],
+      {
+        cwd: repoRoot,
+        timeoutMs: 30000
+      }
+    );
+
+    expect(setResult.exitCode).toBe(0);
+    expect(setResult.stdout).toContain("running=1 configured=5 effective=2 source=override override=2");
+    expect(override).toBe(2);
   });
 
   it("validates workflow config", async () => {
@@ -42,7 +96,7 @@ Prompt
 `
     );
 
-    const result = await runCommand("node", ["--import", "tsx", "src/index.ts", "validate-config", "--workflow", workflowPath], {
+    const result = await runCommand("bun", ["src/index.ts", "validate-config", "--workflow", workflowPath], {
       cwd: repoRoot,
       timeoutMs: 30000
     });
@@ -91,8 +145,8 @@ Prompt
     );
 
     const result = await runCommand(
-      "node",
-      ["--import", "tsx", "--import", fetchMockPath, "src/index.ts", "validate-config", "--workflow", workflowPath],
+      "bun",
+      ["--preload", fetchMockPath, "src/index.ts", "validate-config", "--workflow", workflowPath],
       {
         cwd: repoRoot,
         timeoutMs: 30000
@@ -174,8 +228,8 @@ Prompt
     );
 
     const result = await runCommand(
-      "node",
-      ["--import", "tsx", "--import", fetchMockPath, "src/index.ts", "labels", "sync", "--workflow", workflowPath],
+      "bun",
+      ["--preload", fetchMockPath, "src/index.ts", "labels", "sync", "--workflow", workflowPath],
       {
         cwd: repoRoot,
         timeoutMs: 30000
@@ -186,3 +240,69 @@ Prompt
     expect(result.stdout).toContain("Created Linear label repo:auth");
   });
 });
+
+function cliSnapshot(override: number | null): OrchestratorSnapshot {
+  return {
+    startedAtMs: 1000,
+    workflowPath: "/tmp/WORKFLOW.md",
+    running: [
+      {
+        issueId: "issue-1",
+        identifier: "ANM-1",
+        title: "Example",
+        repoKey: null,
+        workspacePath: "/tmp/workspaces/ANM-1",
+        eventLogPath: "/tmp/.symphony/events/ANM-1.jsonl",
+        latestEventCursor: null,
+        queuedSteerCount: 0,
+        threadId: null,
+        turnId: null,
+        codexAppServerPid: null,
+        lastCodexEvent: null,
+        lastCodexTimestamp: null,
+        lastCodexMessage: null,
+        currentWork: null,
+        currentWorkKind: null,
+        currentWorkUpdatedAtMs: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        goalStatus: null,
+        goalObjective: null,
+        goalUpdatedAtMs: null,
+        turnCount: 0,
+        startedAtMs: 1000
+      }
+    ],
+    claimed: ["issue-1"],
+    retryAttempts: [],
+    handoff: [],
+    handoffDetails: [],
+    completed: [],
+    completedDetails: [],
+    codexTotals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      runtimeMs: 0
+    },
+    codexRateLimit: {
+      resumeAfterMs: null,
+      reason: null,
+      updatedAtMs: null
+    },
+    concurrency: {
+      running: 1,
+      configuredMax: 5,
+      effectiveMax: override ?? 5,
+      source: override === null ? "workflow" : "override",
+      overrideActive: override !== null,
+      overrideMax: override,
+      overrideUpdatedAtMs: override === null ? null : 2000
+    },
+    lastTickAtMs: 1000,
+    lastConfigError: null,
+    paused: false,
+    pausedAtMs: null
+  };
+}

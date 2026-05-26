@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { AgentWorkEventStore } from '../src/events.js';
@@ -35,6 +35,89 @@ describe('orchestrator', () => {
 
     expect(orchestrator.snapshot().running).toHaveLength(5);
     expect(orchestrator.snapshot().claimed).toHaveLength(5);
+    expect(orchestrator.snapshot().concurrency).toMatchObject({
+      running: 5,
+      configuredMax: 5,
+      effectiveMax: 5,
+      source: 'workflow',
+      overrideActive: false,
+    });
+  });
+
+  it('honors max concurrency override on subsequent ticks without restart', async () => {
+    const issues = Array.from({ length: 3 }, (_, index) =>
+      makeIssue(`APP-${index + 1}`),
+    );
+    const config = makeConfig({
+      agent: {
+        maxConcurrentAgents: 1,
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => issues,
+      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    expect(orchestrator.snapshot().running).toHaveLength(1);
+
+    const concurrency = orchestrator.setMaxConcurrencyOverride(3);
+    await orchestrator.tick();
+
+    expect(concurrency).toMatchObject({
+      configuredMax: 1,
+      effectiveMax: 3,
+      source: 'override',
+      overrideActive: true,
+    });
+    expect(orchestrator.snapshot().running).toHaveLength(3);
+  });
+
+  it('persists max concurrency override across daemon restarts', async () => {
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), 'symphony-orchestrator-concurrency-'),
+    );
+    const workflowPath = path.join(dir, 'WORKFLOW.md');
+    await writeFile(workflowPath, 'Prompt');
+    const config = makeConfig({
+      agent: {
+        maxConcurrentAgents: 1,
+      },
+    });
+    const first = new Orchestrator(
+      { workflowPath },
+      makeDeps({
+        loadWorkflowConfig: async () => config,
+        fetchCandidateIssues: async () => [],
+      }),
+    );
+
+    first.setMaxConcurrencyOverride(2);
+
+    const issues = [makeIssue('APP-1'), makeIssue('APP-2')];
+    const restarted = new Orchestrator(
+      { workflowPath },
+      makeDeps({
+        loadWorkflowConfig: async () => config,
+        fetchCandidateIssues: async () => issues,
+        runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
+      }),
+    );
+
+    await restarted.tick();
+
+    expect(restarted.snapshot().concurrency).toMatchObject({
+      configuredMax: 1,
+      effectiveMax: 2,
+      source: 'override',
+      overrideActive: true,
+    });
+    expect(restarted.snapshot().running).toHaveLength(2);
   });
 
   it('skips issues without required label and repo route', async () => {
@@ -1050,6 +1133,7 @@ function makeConfig(
     tracker?: Partial<EffectiveWorkflowConfig['tracker']>;
     workspace?: Partial<EffectiveWorkflowConfig['workspace']>;
     digest?: Partial<EffectiveWorkflowConfig['digest']>;
+    agent?: Partial<EffectiveWorkflowConfig['agent']>;
   } = {},
 ): EffectiveWorkflowConfig {
   const config: EffectiveWorkflowConfig = {
@@ -1126,6 +1210,10 @@ function makeConfig(
     workspace: {
       ...config.workspace,
       ...overrides.workspace,
+    },
+    agent: {
+      ...config.agent,
+      ...overrides.agent,
     },
     digest: {
       ...config.digest,
