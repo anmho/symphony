@@ -30,7 +30,10 @@ import { isGateParked, isRateLimitError } from './rateLimit.js';
 import { runCodexTurn } from './codexRpc.js';
 import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
-import { fetchPullRequestStatus } from './github.js';
+import {
+  fetchPullRequestReviewFeedback,
+  fetchPullRequestStatus,
+} from './github.js';
 import { latestVisibleWorkEvents } from './status.js';
 import { runHook, type HookName } from './hooks.js';
 import {
@@ -59,6 +62,7 @@ import type {
   NormalizedIssue,
   OrchestratorSnapshot,
   PullRequestStatus,
+  PullRequestReviewFeedback,
   RunAttempt,
   WorkspaceInfo,
 } from './types.js';
@@ -93,6 +97,9 @@ export interface OrchestratorDependencies {
   fetchPullRequestStatus: (
     url: string,
   ) => Promise<PullRequestStatus | null>;
+  fetchPullRequestReviewFeedback: (
+    url: string,
+  ) => Promise<PullRequestReviewFeedback | null>;
   prepareWorkspace: (
     config: EffectiveWorkflowConfig,
     issue: NormalizedIssue,
@@ -209,6 +216,35 @@ function preferredTerminalState(
   );
 }
 
+function formatUnresolvedReviewFeedback(
+  feedback: PullRequestReviewFeedback,
+  targetState: string,
+): string {
+  const comments = feedback.unresolvedComments.map((comment, index) => {
+    const location = comment.path
+      ? `${comment.path}${comment.line ? `:${comment.line}` : ''}`
+      : 'PR review thread';
+    const author = comment.author ? ` by @${comment.author}` : '';
+    const url = comment.url ? `\n${comment.url}` : '';
+    return [
+      `${index + 1}. ${location}${author}`,
+      '',
+      comment.body,
+      url,
+    ].filter(Boolean).join('\n');
+  });
+
+  return [
+    'Unresolved GitHub PR review comments were found.',
+    '',
+    `PR: ${feedback.url}`,
+    '',
+    ...comments,
+    '',
+    `Symphony moved this issue back to ${targetState} for agent rework.`,
+  ].join('\n');
+}
+
 export interface OrchestratorOptions {
   workflowPath: string;
   pollOnce?: boolean;
@@ -276,6 +312,7 @@ export class Orchestrator {
       writeRunnerComment,
       moveIssueToState,
       fetchPullRequestStatus,
+      fetchPullRequestReviewFeedback,
       prepareWorkspace: ensureWorkspace,
       removeWorkspace,
       workspaceInfoForIssue,
@@ -705,6 +742,9 @@ export class Orchestrator {
         continue;
       }
       if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
+        continue;
+      }
+      if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
         continue;
       }
       this.handoff.set(issue.identifier, issueSummary(config, issue));
@@ -1280,6 +1320,67 @@ export class Orchestrator {
     this.deps.logger.info(
       { issue: issue.identifier, prUrl: prStatus.url, state: terminalState },
       'moved merged-PR issue to terminal state',
+    );
+    return true;
+  }
+
+  private async syncReviewFeedbackLinkedIssueToActive(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+  ): Promise<boolean> {
+    if (!isHandoffState(issue.state, config)) {
+      return false;
+    }
+    const prUrl = githubPullRequestUrlFromIssue(issue);
+    if (!prUrl) {
+      return false;
+    }
+
+    let feedback: PullRequestReviewFeedback | null;
+    try {
+      feedback = await this.deps.fetchPullRequestReviewFeedback(prUrl);
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'failed to fetch linked GitHub PR review feedback',
+      );
+      return false;
+    }
+    if (!feedback?.unresolvedComments.length) {
+      return false;
+    }
+
+    const targetState =
+      config.tracker.activeStates.find(
+        (state) => state.toLowerCase() === 'in progress',
+      ) ?? config.tracker.activeStates[0];
+    if (!targetState) {
+      this.deps.logger.warn(
+        { issue: issue.identifier, prUrl },
+        'unresolved PR comments found but no active state is configured',
+      );
+      return false;
+    }
+
+    await this.deps.writeRunnerComment(
+      config,
+      issue.id,
+      formatUnresolvedReviewFeedback(feedback, targetState),
+    );
+    await this.deps.moveIssueToState(config, issue.id, targetState);
+    this.reworkIssues.add(issue.id);
+    this.handoff.delete(issue.identifier);
+    this.completed.delete(issue.identifier);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+    this.deps.logger.info(
+      {
+        issue: issue.identifier,
+        prUrl,
+        state: targetState,
+        commentCount: feedback.unresolvedComments.length,
+      },
+      'moved PR-linked issue back to active state for unresolved review comments',
     );
     return true;
   }
