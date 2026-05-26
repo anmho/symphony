@@ -31,6 +31,13 @@ import {
   workspaceInfoForIssue,
   workspacePathExists,
 } from './workspace.js';
+import {
+  buildDigestEmail,
+  FileDigestStateStore,
+  sendDigestEmail,
+  type DigestEmail,
+  type DigestStateStore,
+} from './digest.js';
 import type {
   CodexRunEvent,
   CodexRunInput,
@@ -109,6 +116,11 @@ export interface OrchestratorDependencies {
   sleep: (ms: number) => Promise<void>;
   logger: Pick<typeof defaultLogger, 'info' | 'warn' | 'error' | 'debug'>;
   eventStore: AgentWorkEventStore;
+  digestStateStore: DigestStateStore;
+  sendDigestEmail: (
+    config: EffectiveWorkflowConfig,
+    email: DigestEmail,
+  ) => Promise<void>;
 }
 
 function isHandoffState(
@@ -205,6 +217,7 @@ interface RunningEntry {
 export class Orchestrator {
   private readonly deps: OrchestratorDependencies;
   private readonly eventStore: AgentWorkEventStore;
+  private readonly digestStateStore: DigestStateStore;
   private readonly workflowPath: string;
   private readonly startedAtMs: number;
   private lastKnownGoodConfig: EffectiveWorkflowConfig | null = null;
@@ -222,6 +235,7 @@ export class Orchestrator {
   private readonly retryAttempts = new Map<string, RunAttempt>();
   private readonly handoff = new Map<string, IssueSummary>();
   private readonly completed = new Map<string, IssueSummary>();
+  private readonly rework = new Map<string, IssueSummary>();
   private readonly reworkIssues = new Set<string>();
   private readonly codexTotals: CodexUsageTotals = {
     inputTokens: 0,
@@ -263,9 +277,14 @@ export class Orchestrator {
       logger: defaultLogger,
       eventStore:
         deps.eventStore ?? new AgentWorkEventStore(this.workflowPath, now),
+      digestStateStore:
+        deps.digestStateStore ?? new FileDigestStateStore(this.workflowPath),
+      sendDigestEmail: (config, email) =>
+        sendDigestEmail(config.digest, email),
       ...deps,
     };
     this.eventStore = this.deps.eventStore;
+    this.digestStateStore = this.deps.digestStateStore;
   }
 
   async start(): Promise<void> {
@@ -430,6 +449,10 @@ export class Orchestrator {
     );
     await this.deps.moveIssueToState(config, issue.id, targetState);
     this.reworkIssues.add(issue.id);
+    this.rework.set(
+      issue.identifier,
+      issueSummary(config, { ...issue, state: targetState }),
+    );
     this.handoff.delete(issue.identifier);
     this.completed.delete(issue.identifier);
     this.retryAttempts.delete(issue.id);
@@ -468,6 +491,7 @@ export class Orchestrator {
     }
 
     await this.reconcileRunning(config);
+    await this.maybeSendDigest(config);
 
     if (this.operatorPaused) {
       this.deps.logger.debug('operator pause active; skipping dispatch');
@@ -500,6 +524,70 @@ export class Orchestrator {
       }
       this.dispatchIssue(config, issue, 0);
     }
+  }
+
+  private async maybeSendDigest(config: EffectiveWorkflowConfig): Promise<void> {
+    if (!config.digest.enabled) {
+      return;
+    }
+
+    const state = this.digestStateStore.read();
+    const now = this.deps.now();
+    if (
+      state.lastSentAtMs !== null &&
+      now - state.lastSentAtMs < config.digest.intervalMs
+    ) {
+      return;
+    }
+
+    const events = this.eventStore.query({
+      cursor: state.lastProcessedCursor,
+      limit: 1000,
+    });
+    const email = buildDigestEmail({
+      running: [...this.running.values()].map((entry) => ({
+        ...entry.session,
+      })),
+      needsReview: [...this.handoff.values()],
+      needsRework: [...this.rework.values()],
+      blockedOrRetry: [...this.retryAttempts.values()],
+      completed: [...this.completed.values()],
+      events,
+      generatedAtMs: now,
+      windowMs: config.digest.windowMs,
+    });
+
+    if (!email) {
+      return;
+    }
+
+    const nextProcessedCursor = Math.max(
+      state.lastProcessedCursor,
+      email.lastProcessedCursor,
+    );
+    if (!email.text) {
+      this.digestStateStore.write({
+        lastSentAtMs: state.lastSentAtMs,
+        lastProcessedCursor: nextProcessedCursor,
+      });
+      return;
+    }
+
+    try {
+      await this.deps.sendDigestEmail(config, email);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.logger.warn(
+        { error: message },
+        'failed to send Symphony digest email',
+      );
+      return;
+    }
+
+    this.digestStateStore.write({
+      lastSentAtMs: now,
+      lastProcessedCursor: nextProcessedCursor,
+    });
   }
 
   private async reloadConfig(
@@ -567,6 +655,7 @@ export class Orchestrator {
       this.handoff.delete(issue.identifier);
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
+      this.rework.delete(issue.identifier);
     }
     return terminalIssues;
   }
@@ -584,6 +673,7 @@ export class Orchestrator {
         continue;
       }
       this.handoff.set(issue.identifier, issueSummary(config, issue));
+      this.rework.delete(issue.identifier);
       this.retryAttempts.delete(issue.id);
       this.claimed.delete(issue.id);
     }
@@ -606,6 +696,7 @@ export class Orchestrator {
 
       if (latestIssue && isTerminalState(latestIssue.state, config)) {
         this.completed.set(latestIssue.identifier, issueSummary(config, latestIssue));
+        this.rework.delete(latestIssue.identifier);
         this.reworkIssues.delete(latestIssue.id);
         entry.cancelReason = `state_${latestIssue.state}`;
         entry.abortController.abort();
@@ -619,6 +710,7 @@ export class Orchestrator {
       if (!latestIssue || !isActiveState(latestIssue.state, config)) {
         if (latestIssue && isHandoffState(latestIssue.state, config)) {
           this.handoff.set(latestIssue.identifier, issueSummary(config, latestIssue));
+          this.rework.delete(latestIssue.identifier);
           this.reworkIssues.delete(latestIssue.id);
         }
         entry.cancelReason = latestIssue
@@ -786,6 +878,7 @@ export class Orchestrator {
       if (isTerminalState(issue.state, config)) {
         await this.cleanupIssueWorkspace(config, issue);
         this.completed.set(issue.identifier, issueSummary(config, issue));
+        this.rework.delete(issue.identifier);
         this.reworkIssues.delete(issue.id);
         this.releaseIssue(issue.id);
         return;
@@ -797,6 +890,7 @@ export class Orchestrator {
       if (!isActiveState(issue.state, config)) {
         if (isHandoffState(issue.state, config)) {
           this.handoff.set(issue.identifier, issueSummary(config, issue));
+          this.rework.delete(issue.identifier);
           this.reworkIssues.delete(issue.id);
         }
         this.releaseIssue(issue.id);
@@ -913,6 +1007,7 @@ export class Orchestrator {
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
         });
         this.handoff.set(issue.identifier, issueSummary(config, issue));
+        this.rework.delete(issue.identifier);
         this.reworkIssues.delete(issue.id);
         this.releaseIssue(issue.id);
         return;
@@ -996,6 +1091,7 @@ export class Orchestrator {
     await this.deps.moveIssueToState(config, issue.id, handoffState);
     const handedOffIssue = { ...issue, state: handoffState };
     this.handoff.set(issue.identifier, issueSummary(config, handedOffIssue));
+    this.rework.delete(issue.identifier);
     this.retryAttempts.delete(issue.id);
     this.claimed.delete(issue.id);
     if (entry) {
@@ -1060,6 +1156,7 @@ export class Orchestrator {
     const completedIssue = { ...issue, state: terminalState };
     this.completed.set(issue.identifier, issueSummary(config, completedIssue));
     this.handoff.delete(issue.identifier);
+    this.rework.delete(issue.identifier);
     this.retryAttempts.delete(issue.id);
     this.claimed.delete(issue.id);
     this.reworkIssues.delete(issue.id);

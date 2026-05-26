@@ -241,6 +241,15 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
     pullRequest: {
       backend: "github",
       graphiteFallback: "fail"
+    },
+    digest: {
+      enabled: false,
+      recipient: "andyminhtuanho@gmail.com",
+      sender: "Symphony <agent@anmho.com>",
+      intervalMs: 3600000,
+      windowMs: 3600000,
+      resendApiKey: null,
+      resendEndpoint: "https://api.resend.com/emails"
     }
   };
 }

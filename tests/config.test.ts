@@ -11,6 +11,7 @@ describe("workflow config", () => {
 
   it("parses front matter and applies defaults", () => {
     vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("RESEND_API_KEY", "");
     const definition = parseWorkflowMarkdown(`---
 tracker:
   project_slug: project-one
@@ -31,6 +32,15 @@ Hello {{ issue.identifier }}
     expect(config.codex.threadSandbox).toBe("workspace-write");
     expect(config.github.prIdentity).toBeNull();
     expect(config.pullRequest).toEqual({ backend: "github", graphiteFallback: "fail" });
+    expect(config.digest).toMatchObject({
+      enabled: false,
+      recipient: "andyminhtuanho@gmail.com",
+      sender: "Symphony <agent@anmho.com>",
+      intervalMs: 3600000,
+      windowMs: 3600000,
+      resendApiKey: null,
+      resendEndpoint: "https://api.resend.com/emails"
+    });
     expect(config.workspace.repoPath).toBe(path.resolve("/tmp/symphony"));
     expect(config.promptTemplate).toContain("Hello");
   });
@@ -229,5 +239,41 @@ Prompt
 `);
 
     expect(() => resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition)).toThrow();
+  });
+
+  it("parses deterministic digest config and resolves the Resend key from user config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("RESEND_API_KEY", "");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+digest:
+  enabled: true
+  recipient: digest@example.com
+  sender: Symphony <symphony@example.com>
+  interval_ms: 600000
+  window_ms: 300000
+  resend_api_key: $RESEND_API_KEY
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition, {
+      workflow: null,
+      env: {
+        RESEND_API_KEY: "re_test"
+      },
+      secrets: {}
+    });
+
+    expect(config.digest).toEqual({
+      enabled: true,
+      recipient: "digest@example.com",
+      sender: "Symphony <symphony@example.com>",
+      intervalMs: 600000,
+      windowMs: 300000,
+      resendApiKey: "re_test",
+      resendEndpoint: "https://api.resend.com/emails"
+    });
   });
 });

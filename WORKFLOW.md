@@ -20,6 +20,14 @@ tracker:
 polling:
   interval_ms: 30000
 
+digest:
+  enabled: false
+  recipient: $NOTIFICATION_TO
+  sender: $NOTIFICATION_FROM
+  interval_ms: 3600000
+  window_ms: 3600000
+  resend_api_key: $RESEND_API_KEY
+
 workspace:
   root: ./.symphony/workspaces
   repo_path: .
