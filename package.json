@@ -20,7 +20,6 @@
     "worktrees"
   ],
   "files": [
-    "assets",
     "dist",
     "templates",
     "README.md",
