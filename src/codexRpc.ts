@@ -34,7 +34,7 @@ export interface CodexRunOptions {
 }
 
 export async function runCodexTurn(input: CodexRunInput, options: CodexRunOptions = {}): Promise<CodexTurnResult> {
-  const client = await CodexJsonRpcClient.start(input.config.codex.command, input.workspacePath, options);
+  const client = await CodexJsonRpcClient.start(input.config.codex.command, input.workspacePath, input.env, options);
   try {
     await client.initialize();
     const threadId = input.threadId
@@ -94,10 +94,15 @@ class CodexJsonRpcClient {
     });
   }
 
-  static async start(command: string, cwd: string, options: CodexRunOptions): Promise<CodexJsonRpcClient> {
+  static async start(
+    command: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv | undefined,
+    options: CodexRunOptions,
+  ): Promise<CodexJsonRpcClient> {
     const child = spawn("/bin/bash", ["-lc", command], {
       cwd,
-      env: process.env,
+      env: env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"]
     });
     return new CodexJsonRpcClient(child, options);

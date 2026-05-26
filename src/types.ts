@@ -113,12 +113,23 @@ export interface GithubAppPrIdentityConfig {
   tokenCommand: string;
   authorName: string;
   authorEmail: string;
+  reviewerLogin: string | null;
+  reviewerLogins: string[];
 }
 
 export type GithubPrIdentityConfig = GithubMachineUserPrIdentityConfig | GithubAppPrIdentityConfig;
 
 export interface GithubConfig {
   prIdentity: GithubPrIdentityConfig | null;
+}
+
+export interface PullRequestMetadata {
+  url: string;
+  baseRefName: string;
+  headRefName: string;
+  body: string;
+  authorLogin: string | null;
+  reviewRequestLogins: string[];
 }
 
 export interface EffectiveWorkflowConfig {
@@ -321,6 +332,7 @@ export interface CodexRunInput {
   workspacePath: string;
   prompt: string;
   threadId: string | null;
+  env?: NodeJS.ProcessEnv;
 }
 
 export type CodexRunEvent =

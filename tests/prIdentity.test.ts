@@ -118,6 +118,8 @@ function makeConfig(options: { githubApp?: boolean } = {}): Pick<EffectiveWorkfl
             tokenCommand: 'vault token',
             authorName: 'anmho Symphony',
             authorEmail: '3862765+anmho-symphony[bot]@users.noreply.github.com',
+            reviewerLogin: null,
+            reviewerLogins: [],
           }
         : makeIdentity(),
     },

@@ -17,6 +17,7 @@ export interface VerifiedPullRequestMetadata {
   headRefName: string;
   body: string;
   authorLogin: string | null;
+  reviewRequestLogins: string[];
 }
 
 export async function preparePrHandoffBackend(
@@ -82,6 +83,8 @@ export async function submitGraphiteStackAndVerify(input: {
   branch: string;
   expectedBaseBranch: string;
   linearTicketUrl: string;
+  expectedAuthorLogin?: string | null;
+  expectedReviewerLogin?: string | null;
   runner?: CommandRunner;
 }): Promise<VerifiedPullRequestMetadata> {
   const runner = input.runner ?? runCommand;
@@ -96,10 +99,11 @@ export async function verifyPullRequestMetadata(input: {
   linearTicketUrl: string;
   graphitePrUrl?: string | null;
   expectedAuthorLogin?: string | null;
+  expectedReviewerLogin?: string | null;
   runner?: CommandRunner;
 }): Promise<VerifiedPullRequestMetadata> {
   const runner = input.runner ?? runCommand;
-  const result = await runner("gh", ["pr", "view", input.branch, "--json", "url,author,baseRefName,headRefName,body"], {
+  const result = await runner("gh", ["pr", "view", input.branch, "--json", "url,author,baseRefName,headRefName,body,reviewRequests"], {
     cwd: input.cwd,
     timeoutMs: 60000
   });
@@ -123,6 +127,9 @@ export async function verifyPullRequestMetadata(input: {
   if (input.expectedAuthorLogin && metadata.authorLogin !== input.expectedAuthorLogin) {
     throw new Error(`github_pr_author_mismatch: expected ${input.expectedAuthorLogin}, got ${metadata.authorLogin ?? ""}`);
   }
+  if (input.expectedReviewerLogin && !metadata.reviewRequestLogins.includes(input.expectedReviewerLogin)) {
+    throw new Error(`github_pr_reviewer_missing: expected ${input.expectedReviewerLogin}`);
+  }
 
   return metadata;
 }
@@ -138,7 +145,22 @@ export function buildPrHandoffInstructions(
       "",
       "Use the default GitHub PR flow for handoff.",
       identityInstructions,
-      "Push the current branch, open or update the PR with GitHub tooling, keep the Linear and Graphite links in the PR body, and verify the PR author/head/base/body with `gh pr view --json url,author,baseRefName,headRefName,body` before leaving the handoff.",
+      "Push the current branch, open or update the PR with GitHub tooling, keep the Linear and Graphite links in the PR body, request any configured reviewer, and verify the PR author/head/base/body/review requests with `gh pr view --json url,author,baseRefName,headRefName,body,reviewRequests` before leaving the handoff.",
+      issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
+      "Graphite: after the PR exists, add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
+    ].join("\n");
+  }
+
+  if (config.github.prIdentity) {
+    return [
+      "## PR Handoff Backend",
+      "",
+      "This workflow is configured for Graphite stacked PR handoff, but a GitHub PR identity is also configured.",
+      identityInstructions,
+      "Use Graphite only for stack inspection before handoff: `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`.",
+      "Do not run mutating `gt submit` while a GitHub PR identity is configured because it may create or update GitHub PRs as the local Graphite/GitHub user.",
+      "Push the current branch, open or update the PR with GitHub tooling under the configured identity, keep the Linear and Graphite links in the PR body, request any configured reviewer, and verify the PR author/head/base/body/review requests with `gh pr view --json url,author,baseRefName,headRefName,body,reviewRequests` before leaving the handoff.",
+      "Set the PR base to the expected parent stack branch from Graphite stack inspection.",
       issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
       "Graphite: after the PR exists, add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
     ].join("\n");
@@ -160,8 +182,8 @@ export function buildPrHandoffInstructions(
       : "",
     fallbackSentence,
     "Submit the stack with `gt submit --stack --no-interactive --no-edit --no-ai`.",
-    "After submit, verify the resulting GitHub PR metadata with `gh pr view --json url,author,baseRefName,headRefName,body`.",
-    "The PR head must match the current branch, the PR base must match the expected parent stack branch, and the PR body must include the Linear and Graphite links.",
+    "After submit, verify the resulting GitHub PR metadata with `gh pr view --json url,author,baseRefName,headRefName,body,reviewRequests`.",
+    "The PR head must match the current branch, the PR base must match the expected parent stack branch, the PR body must include the Linear and Graphite links, and any configured reviewer must be requested.",
     issue.url ? `Linear: ${issue.url}` : "Linear: use the issue URL from this prompt.",
     "Graphite: add `https://app.graphite.com/github/pr/<owner>/<repo>/<number>` to the PR body."
   ].filter(Boolean).join("\n");
@@ -194,16 +216,20 @@ async function runBackendProbe(
 function parsePullRequestMetadata(raw: string): VerifiedPullRequestMetadata {
   const parsed = JSON.parse(raw) as Partial<VerifiedPullRequestMetadata> & {
     author?: { login?: string | null } | null;
+    reviewRequests?: Array<{ login?: string | null }> | null;
   };
   const url = typeof parsed.url === "string" ? parsed.url : "";
   const baseRefName = typeof parsed.baseRefName === "string" ? parsed.baseRefName : "";
   const headRefName = typeof parsed.headRefName === "string" ? parsed.headRefName : "";
   const body = typeof parsed.body === "string" ? parsed.body : "";
   const authorLogin = typeof parsed.author?.login === "string" ? parsed.author.login : null;
+  const reviewRequestLogins = (parsed.reviewRequests ?? [])
+    .map((request) => request?.login)
+    .filter((login): login is string => Boolean(login));
   if (!url || !baseRefName || !headRefName) {
     throw new Error("github_pr_metadata_incomplete");
   }
-  return { url, baseRefName, headRefName, body, authorLogin };
+  return { url, baseRefName, headRefName, body, authorLogin, reviewRequestLogins };
 }
 
 function commandFailure(code: string, command: string, result: CommandResult): string {
@@ -223,11 +249,17 @@ function buildIdentityInstructions(identity: GithubPrIdentityConfig | null): str
     identity.kind === "github_app"
       ? `Expected GitHub PR author login: app/${identity.appSlug}.`
       : "";
+  const reviewRequest =
+    identity.kind === "github_app" && identity.reviewerLogins.length > 0
+      ? `Request review from ${identity.reviewerLogins.join(", ")} before moving Linear to review. Symphony will also request any missing configured reviewers during the handoff gate.`
+      : "";
   return [
     `Use the configured ${identityName} for handoff commands, not the default local GitHub user.`,
-    `Before PR handoff, resolve the token with: \`${identity.tokenCommand}\`.`,
-    "Use that token only in-process as `GH_TOKEN` and `GITHUB_TOKEN` for `gh` commands and for the authenticated push remote; do not write it to git config, PR bodies, Linear comments, logs, or files.",
+    `Symphony injects the configured token into worker turns; if \`GH_TOKEN\` or \`GITHUB_TOKEN\` is missing, resolve it with: \`${identity.tokenCommand}\`.`,
+    "Use that token only in-process as `GH_TOKEN` and `GITHUB_TOKEN` for every GitHub operation: pushing, opening PRs, editing PR bodies, requesting reviewers, replying to review comments, posting PR comments, and closing or reopening superseded PRs.",
+    "Do not use the default local GitHub user for PR edits or comments, and do not write the token to git config, PR bodies, Linear comments, logs, or files.",
     expectedAuthor,
+    reviewRequest,
     `Use Git author and committer identity: ${identity.authorName} <${identity.authorEmail}>.`
   ].filter(Boolean).join("\n");
 }

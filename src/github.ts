@@ -1,4 +1,5 @@
 import type {
+  PullRequestMetadata,
   PullRequestReviewComment,
   PullRequestReviewFeedback,
   PullRequestStatus,
@@ -8,7 +9,7 @@ import { runCommand, type CommandResult } from './process.js';
 type CommandRunner = (
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number },
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
 ) => Promise<CommandResult>;
 
 export function parseGithubPullRequestUrl(
@@ -85,6 +86,91 @@ export async function fetchPullRequestStatus(
   };
 }
 
+export async function fetchPullRequestMetadata(
+  url: string,
+  cwd?: string,
+  runner: CommandRunner = runCommand,
+): Promise<PullRequestMetadata> {
+  const options: { cwd?: string; timeoutMs: number } = { timeoutMs: 60000 };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  const result = await runner(
+    'gh',
+    [
+      'pr',
+      'view',
+      url,
+      '--json',
+      'author,url,headRefName,baseRefName,body,reviewRequests',
+    ],
+    options,
+  );
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      detail
+        ? `github_pr_metadata_unavailable: gh pr view ${url} failed: ${detail}`
+        : `github_pr_metadata_unavailable: gh pr view ${url} failed`,
+    );
+  }
+  return parsePullRequestMetadata(result.stdout);
+}
+
+export function parsePullRequestMetadata(raw: string): PullRequestMetadata {
+  const parsed = JSON.parse(raw) as Partial<PullRequestMetadata> & {
+    author?: { login?: string | null } | null;
+    reviewRequests?: Array<{ login?: string | null }> | null;
+  };
+  const url = typeof parsed.url === 'string' ? parsed.url : '';
+  const baseRefName = typeof parsed.baseRefName === 'string' ? parsed.baseRefName : '';
+  const headRefName = typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
+  const body = typeof parsed.body === 'string' ? parsed.body : '';
+  const authorLogin = typeof parsed.author?.login === 'string' ? parsed.author.login : null;
+  const reviewRequestLogins = (parsed.reviewRequests ?? [])
+    .map((request) => request?.login)
+    .filter((login): login is string => Boolean(login));
+  if (!url || !baseRefName || !headRefName) {
+    throw new Error('github_pr_metadata_incomplete');
+  }
+  return { url, baseRefName, headRefName, body, authorLogin, reviewRequestLogins };
+}
+
+export async function requestPullRequestReviewers(
+  url: string,
+  reviewers: string[],
+  cwd?: string,
+  env?: NodeJS.ProcessEnv,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  const uniqueReviewers = uniqueReviewerLogins(reviewers);
+  const options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number } = {
+    timeoutMs: 60000,
+  };
+  if (cwd) {
+    options.cwd = cwd;
+  }
+  if (env) {
+    options.env = env;
+  }
+
+  if (uniqueReviewers.length > 0) {
+    const args = ['pr', 'edit', url];
+    for (const reviewer of uniqueReviewers) {
+      args.push('--add-reviewer', reviewer);
+    }
+    const result = await runner('gh', args, options);
+    if (result.exitCode !== 0) {
+      const detail = (result.stderr || result.stdout).trim();
+      throw new Error(
+        detail
+          ? `github_pr_reviewer_request_failed: gh ${args.join(' ')} failed: ${detail}`
+          : `github_pr_reviewer_request_failed: gh ${args.join(' ')} failed`,
+      );
+    }
+  }
+}
+
 export async function fetchPullRequestReviewFeedback(
   url: string,
   runner: CommandRunner = runCommand,
@@ -114,6 +200,23 @@ export async function fetchPullRequestReviewFeedback(
               }
             }
           }
+          reviews(first: 50) {
+            nodes {
+              author { login }
+              body
+              url
+              submittedAt
+              state
+            }
+          }
+          comments(first: 50) {
+            nodes {
+              author { login }
+              body
+              url
+              createdAt
+            }
+          }
         }
       }
     }
@@ -135,6 +238,25 @@ export async function fetchPullRequestReviewFeedback(
   }
 
   const unresolvedComments: PullRequestReviewComment[] = [];
+  let latestBotActivityAt = '';
+  for (const thread of pullRequest.reviewThreads?.nodes ?? []) {
+    for (const comment of thread?.comments?.nodes ?? []) {
+      if (isBotAuthor(comment?.author?.login) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
+        latestBotActivityAt = comment.createdAt;
+      }
+    }
+  }
+  for (const review of pullRequest.reviews?.nodes ?? []) {
+    if (isBotAuthor(review?.author?.login) && review?.submittedAt && review.submittedAt > latestBotActivityAt) {
+      latestBotActivityAt = review.submittedAt;
+    }
+  }
+  for (const comment of pullRequest.comments?.nodes ?? []) {
+    if (isBotAuthor(comment?.author?.login) && comment?.createdAt && comment.createdAt > latestBotActivityAt) {
+      latestBotActivityAt = comment.createdAt;
+    }
+  }
+
   for (const thread of pullRequest.reviewThreads?.nodes ?? []) {
     if (!thread || thread.isResolved) {
       continue;
@@ -142,12 +264,11 @@ export async function fetchPullRequestReviewFeedback(
     const comments = (thread.comments?.nodes ?? []).filter((comment) =>
       comment?.body?.trim(),
     );
-    const latestReviewerComment =
-      [...comments]
-        .reverse()
-        .find((comment) => !comment?.author?.login?.endsWith('[bot]')) ??
-      [...comments].reverse()[0];
+    const latestReviewerComment = [...comments].reverse()[0];
     if (!latestReviewerComment?.body?.trim()) {
+      continue;
+    }
+    if (isBotAuthor(latestReviewerComment.author?.login)) {
       continue;
     }
     unresolvedComments.push({
@@ -157,6 +278,43 @@ export async function fetchPullRequestReviewFeedback(
       line: typeof thread.line === 'number' ? thread.line : null,
       url: latestReviewerComment.url ?? null,
       createdAt: latestReviewerComment.createdAt ?? null,
+    });
+  }
+  for (const review of pullRequest.reviews?.nodes ?? []) {
+    if (!review || isBotAuthor(review.author?.login)) {
+      continue;
+    }
+    const state = review.state ?? null;
+    if (state !== 'CHANGES_REQUESTED' && state !== 'COMMENTED') {
+      continue;
+    }
+    if (review.submittedAt && latestBotActivityAt && review.submittedAt <= latestBotActivityAt) {
+      continue;
+    }
+    const body = review.body?.trim() || `Review state: ${state}.`;
+    unresolvedComments.push({
+      author: review.author?.login ?? null,
+      body,
+      path: null,
+      line: null,
+      url: review.url ?? null,
+      createdAt: review.submittedAt ?? null,
+    });
+  }
+  for (const comment of pullRequest.comments?.nodes ?? []) {
+    if (!comment?.body?.trim() || isBotAuthor(comment.author?.login)) {
+      continue;
+    }
+    if (comment.createdAt && latestBotActivityAt && comment.createdAt <= latestBotActivityAt) {
+      continue;
+    }
+    unresolvedComments.push({
+      author: comment.author?.login ?? null,
+      body: comment.body.trim(),
+      path: null,
+      line: null,
+      url: comment.url ?? null,
+      createdAt: comment.createdAt ?? null,
     });
   }
 
@@ -185,7 +343,43 @@ interface GithubReviewRepository {
         } | null;
       } | null> | null;
     } | null;
+    reviews?: {
+      nodes?: Array<{
+        author?: { login?: string | null } | null;
+        body?: string | null;
+        url?: string | null;
+        submittedAt?: string | null;
+        state?: string | null;
+      } | null> | null;
+    } | null;
+    comments?: {
+      nodes?: Array<{
+        author?: { login?: string | null } | null;
+        body?: string | null;
+        url?: string | null;
+        createdAt?: string | null;
+      } | null> | null;
+    } | null;
   } | null;
+}
+
+function isBotAuthor(login: string | null | undefined): boolean {
+  return Boolean(login?.endsWith('[bot]'));
+}
+
+function uniqueReviewerLogins(reviewers: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of reviewers) {
+    const reviewer = value.trim();
+    const key = reviewer.toLowerCase();
+    if (!reviewer || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(reviewer);
+  }
+  return unique;
 }
 
 async function fetchGraphql<T>(

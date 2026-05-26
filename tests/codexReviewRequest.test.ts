@@ -37,6 +37,34 @@ describe("Codex review request", () => {
     });
   });
 
+  it("posts review requests with the configured GitHub PR identity", async () => {
+    const envs: Array<NodeJS.ProcessEnv | undefined> = [];
+
+    await requestCodexReviewForIssue(makeConfig({ identity: true }), "ANM-123", {
+      fetchIssues: async () => [makeIssue()],
+      resolveIdentity: async () => ({
+        login: "app/anmho-symphony",
+        token: "token",
+        env: {
+          GH_TOKEN: "token",
+          GITHUB_TOKEN: "token",
+          GIT_AUTHOR_NAME: "anmho-symphony[bot]",
+          GIT_AUTHOR_EMAIL: "3862765+anmho-symphony[bot]@users.noreply.github.com",
+          GIT_COMMITTER_NAME: "anmho-symphony[bot]",
+          GIT_COMMITTER_EMAIL: "3862765+anmho-symphony[bot]@users.noreply.github.com"
+        }
+      }),
+      runner: async (_command, _args, options) => {
+        envs.push(options?.env);
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+      writeComment: async () => undefined
+    });
+
+    expect(envs[0]?.GH_TOKEN).toBe("token");
+    expect(envs[0]?.GIT_AUTHOR_EMAIL).toBe("3862765+anmho-symphony[bot]@users.noreply.github.com");
+  });
+
   it("dry-runs without mutating GitHub or Linear", async () => {
     const result = await requestCodexReviewForIssue(makeConfig(), "issue-123", {
       dryRun: true,
@@ -84,7 +112,7 @@ function makeIssue(overrides: Partial<NormalizedIssue> = {}): NormalizedIssue {
   };
 }
 
-function makeConfig(): EffectiveWorkflowConfig {
+function makeConfig(options: { identity?: boolean } = {}): EffectiveWorkflowConfig {
   return {
     workflowPath: "/tmp/WORKFLOW.md",
     workflowDir: "/tmp",
@@ -134,7 +162,17 @@ function makeConfig(): EffectiveWorkflowConfig {
       model: null
     },
     github: {
-      prIdentity: null
+      prIdentity: options.identity
+        ? {
+            kind: "github_app",
+            appSlug: "anmho-symphony",
+            tokenCommand: "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
+            authorName: "anmho-symphony[bot]",
+            authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com",
+            reviewerLogin: "anmho",
+            reviewerLogins: ["anmho"]
+          }
+        : null
     },
     pullRequest: {
       backend: "github",

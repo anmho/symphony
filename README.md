@@ -214,7 +214,7 @@ gt auth
 gt init --trunk main
 ```
 
-In Graphite mode, Symphony adds PR handoff instructions to each agent prompt. The worker must verify Graphite with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`, submit with `gt submit --stack --no-interactive --no-edit --no-ai`, and then verify the GitHub PR metadata with `gh pr view --json url,baseRefName,headRefName,body`. Handoff is not complete unless the PR head matches the Symphony branch, the PR base matches the expected parent stack branch, and the PR body still contains the Linear Ticket link.
+In Graphite mode, Symphony adds PR handoff instructions to each agent prompt. Without a configured GitHub PR identity, the worker must verify Graphite with `gt --version`, `gt log --stack --no-interactive`, and `gt submit --dry-run --stack --no-interactive --no-edit --no-ai`, submit with `gt submit --stack --no-interactive --no-edit --no-ai`, and then verify the GitHub PR metadata with `gh pr view --json url,author,baseRefName,headRefName,body,reviewRequests`. With a configured GitHub PR identity, Graphite is used only for stack inspection and dry-run proof; mutating PR creation or updates must use GitHub tooling under the configured identity because Graphite submit may use the locally authenticated Graphite/GitHub user. Handoff is not complete unless the PR author matches the configured identity, the PR head matches the Symphony branch, the PR base matches the expected parent stack branch, the PR body still contains the Linear and Graphite links, and any configured reviewer was requested.
 
 If `fallback: fail`, a missing or uninitialized Graphite setup is a clear blocker and the worker should leave a Linear handoff explaining it. If `fallback: github`, the worker may use the normal GitHub PR flow and note the fallback in Linear.
 
@@ -236,15 +236,19 @@ github:
     token_command: symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'
     author_name: anmho Symphony
     author_email: 3862765+anmho-symphony[bot]@users.noreply.github.com
+    reviewer_logins:
+      - anmho
 ```
 
-The token is minted only during PR handoff. Agents are instructed to set `GH_TOKEN` and `GITHUB_TOKEN` for `gh` commands, push with a token-backed remote, and keep the PR body linked to both Linear and Graphite. Check the setup with:
+When configured, Symphony injects a fresh GitHub App token into each Codex worker turn as `GH_TOKEN` and `GITHUB_TOKEN` so every GitHub operation defaults to the app identity, including pushing, opening PRs, editing PR bodies, requesting reviewers, replying to review comments, posting PR comments, and closing superseded PRs. The handoff gate automatically requests missing configured GitHub reviewers before moving Linear to review and blocks unless the resulting PR is authored by the configured app identity and all configured reviewers are requested. Codex review can still be requested explicitly with `@codex review` when useful. Check the setup with:
 
 ```sh
 symphony doctor github-pr-identity --workflow WORKFLOW.md
 ```
 
-Graphite submit may still use the locally authenticated Graphite/GitHub identity; use the GitHub backend for GitHub App PR authorship until Graphite bot identity support is verified.
+Graphite submit may still use the locally authenticated Graphite/GitHub identity. When `github.pr_identity` is configured, Symphony prompts agents to use Graphite only for stack inspection/dry-run proof and to create, edit, comment on, and review-request PRs through GitHub tooling with the app token.
+
+While an issue is in the handoff state, Symphony polls linked PR feedback. New human review threads, top-level PR comments, or `CHANGES_REQUESTED`/`COMMENTED` reviews move the Linear issue back to active work with the feedback copied into a runner comment.
 
 GitHub App display names and icons are managed in GitHub's app settings UI. The production app uses display name `anmho Symphony` with PR author login `app/anmho-symphony`; upload `assets/anmho-symphony-github-app-icon.png` as the app logo.
 

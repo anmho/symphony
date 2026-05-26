@@ -69,14 +69,15 @@ describe("PR handoff backend", () => {
 
   it("enforces PR base/head metadata and the Linear Ticket link", async () => {
     const runner = fakeRunner({
-      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body": {
+      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body,reviewRequests": {
         exitCode: 0,
         stdout: JSON.stringify({
           url: "https://github.com/anmho/symphony/pull/295",
           author: { login: "anmho" },
           baseRefName: "symphony/ANM-294",
           headRefName: "symphony/ANM-295",
-          body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.com/github/pr/anmho/symphony/295"
+          body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.com/github/pr/anmho/symphony/295",
+          reviewRequests: [{ login: "anmho" }]
         })
       }
     });
@@ -89,6 +90,7 @@ describe("PR handoff backend", () => {
         linearTicketUrl: "https://linear.app/anmho/issue/ANM-295/x",
         graphitePrUrl: "https://app.graphite.com/github/pr/anmho/symphony/295",
         expectedAuthorLogin: "anmho",
+        expectedReviewerLogin: "anmho",
         runner
       })
     ).resolves.toEqual({
@@ -96,8 +98,91 @@ describe("PR handoff backend", () => {
       baseRefName: "symphony/ANM-294",
       headRefName: "symphony/ANM-295",
       authorLogin: "anmho",
-      body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.com/github/pr/anmho/symphony/295"
+      body: "Linear: https://linear.app/anmho/issue/ANM-295/x\nGraphite: https://app.graphite.com/github/pr/anmho/symphony/295",
+      reviewRequestLogins: ["anmho"]
     });
+  });
+
+  it("accepts the configured GitHub App PR author", async () => {
+    const runner = fakeRunner({
+      "gh pr view symphony/ANM-391 --json url,author,baseRefName,headRefName,body,reviewRequests": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          url: "https://github.com/anmho/symphony/pull/391",
+          author: { login: "app/anmho-symphony" },
+          baseRefName: "main",
+          headRefName: "symphony/ANM-391",
+          body: "Linear: https://linear.app/anmho/issue/ANM-391/x",
+          reviewRequests: [{ login: "anmho" }]
+        })
+      }
+    });
+
+    await expect(
+      verifyPullRequestMetadata({
+        cwd: "/repo",
+        branch: "symphony/ANM-391",
+        expectedBaseBranch: "main",
+        linearTicketUrl: "https://linear.app/anmho/issue/ANM-391/x",
+        expectedAuthorLogin: "app/anmho-symphony",
+        expectedReviewerLogin: "anmho",
+        runner
+      })
+    ).resolves.toMatchObject({
+      authorLogin: "app/anmho-symphony"
+    });
+  });
+
+  it("rejects the local GitHub user when a GitHub App PR author is required", async () => {
+    const runner = fakeRunner({
+      "gh pr view symphony/ANM-391 --json url,author,baseRefName,headRefName,body,reviewRequests": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          url: "https://github.com/anmho/symphony/pull/391",
+          author: { login: "anmho" },
+          baseRefName: "main",
+          headRefName: "symphony/ANM-391",
+          body: "Linear: https://linear.app/anmho/issue/ANM-391/x"
+        })
+      }
+    });
+
+    await expect(
+      verifyPullRequestMetadata({
+        cwd: "/repo",
+        branch: "symphony/ANM-391",
+        expectedBaseBranch: "main",
+        linearTicketUrl: "https://linear.app/anmho/issue/ANM-391/x",
+        expectedAuthorLogin: "app/anmho-symphony",
+        runner
+      })
+    ).rejects.toThrow("github_pr_author_mismatch: expected app/anmho-symphony, got anmho");
+  });
+
+  it("rejects missing PR author metadata when an expected author is configured", async () => {
+    const runner = fakeRunner({
+      "gh pr view symphony/ANM-391 --json url,author,baseRefName,headRefName,body,reviewRequests": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          url: "https://github.com/anmho/symphony/pull/391",
+          author: null,
+          baseRefName: "main",
+          headRefName: "symphony/ANM-391",
+          body: "Linear: https://linear.app/anmho/issue/ANM-391/x"
+        })
+      }
+    });
+
+    await expect(
+      verifyPullRequestMetadata({
+        cwd: "/repo",
+        branch: "symphony/ANM-391",
+        expectedBaseBranch: "main",
+        linearTicketUrl: "https://linear.app/anmho/issue/ANM-391/x",
+        expectedAuthorLogin: "app/anmho-symphony",
+        runner
+      })
+    ).rejects.toThrow("github_pr_author_mismatch: expected app/anmho-symphony, got ");
   });
 
   it("verifies PR metadata immediately after Graphite submit", async () => {
@@ -107,7 +192,7 @@ describe("PR handoff backend", () => {
         exitCode: 0,
         stdout: "Submitted stack\n"
       },
-      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body": {
+      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body,reviewRequests": {
         exitCode: 0,
         stdout: JSON.stringify({
           url: "https://github.com/anmho/symphony/pull/295",
@@ -129,8 +214,66 @@ describe("PR handoff backend", () => {
 
     expect(calls).toEqual([
       "gt submit --stack --no-interactive --no-edit --no-ai",
-      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body"
+      "gh pr view symphony/ANM-295 --json url,author,baseRefName,headRefName,body,reviewRequests"
     ]);
+  });
+
+  it("blocks Graphite local-auth fallback when the PR author is not the configured identity", async () => {
+    const runner = fakeRunner({
+      "gt submit --stack --no-interactive --no-edit --no-ai": {
+        exitCode: 0,
+        stdout: "Submitted stack\n"
+      },
+      "gh pr view symphony/ANM-391 --json url,author,baseRefName,headRefName,body,reviewRequests": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          url: "https://github.com/anmho/symphony/pull/391",
+          author: { login: "anmho" },
+          baseRefName: "main",
+          headRefName: "symphony/ANM-391",
+          body: "Linear: https://linear.app/anmho/issue/ANM-391/x"
+        })
+      }
+    });
+
+    await expect(
+      submitGraphiteStackAndVerify({
+        cwd: "/repo",
+        branch: "symphony/ANM-391",
+        expectedBaseBranch: "main",
+        linearTicketUrl: "https://linear.app/anmho/issue/ANM-391/x",
+        expectedAuthorLogin: "app/anmho-symphony",
+        runner
+      })
+    ).rejects.toThrow("github_pr_author_mismatch: expected app/anmho-symphony, got anmho");
+  });
+
+  it("rejects PR handoff when the configured reviewer was not requested", async () => {
+    const runner = fakeRunner({
+      "gh pr view symphony/ANM-391 --json url,author,baseRefName,headRefName,body,reviewRequests": {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          url: "https://github.com/anmho/symphony/pull/391",
+          author: { login: "app/anmho-symphony" },
+          baseRefName: "main",
+          headRefName: "symphony/ANM-391",
+          body: "Linear: https://linear.app/anmho/issue/ANM-391/x",
+          reviewRequests: []
+        })
+      }
+    });
+
+    await expect(
+      verifyPullRequestMetadata({
+        cwd: "/repo",
+        branch: "symphony/ANM-391",
+        expectedBaseBranch: "main",
+        linearTicketUrl: "https://linear.app/anmho/issue/ANM-391/x",
+        expectedAuthorLogin: "app/anmho-symphony",
+        expectedReviewerLogin: "anmho",
+        runner
+      })
+    ).rejects.toThrow("github_pr_reviewer_missing: expected anmho");
   });
 
   it("adds Graphite handoff instructions to the prompt", () => {
@@ -153,7 +296,7 @@ describe("PR handoff backend", () => {
     expect(instructions).toContain("configured GitHub machine-user PR identity");
     expect(instructions).toContain("vault kv get -mount=secret -field=token prod/providers/github/symphony");
     expect(instructions).toContain("Graphite: after the PR exists");
-    expect(instructions).toContain("gh pr view --json url,author,baseRefName,headRefName,body");
+    expect(instructions).toContain("gh pr view --json url,author,baseRefName,headRefName,body,reviewRequests");
   });
 
   it("adds GitHub App author expectations to GitHub prompts", () => {
@@ -164,17 +307,21 @@ describe("PR handoff backend", () => {
 
     expect(instructions).toContain("configured GitHub App PR identity (anmho-symphony)");
     expect(instructions).toContain("Expected GitHub PR author login: app/anmho-symphony.");
+    expect(instructions).toContain("Request review from anmho before moving Linear to review.");
     expect(instructions).toContain("GH_TOKEN` and `GITHUB_TOKEN");
     expect(instructions).toContain("3862765+anmho-symphony[bot]@users.noreply.github.com");
   });
 
-  it("warns that Graphite may use the local identity when service account is configured", () => {
+  it("routes Graphite handoff through GitHub tooling when a PR identity is configured", () => {
     const instructions = buildPrHandoffInstructions(
       makeConfig({ backend: "graphite", fallback: "fail", identity: true }),
       makeIssue()
     );
 
-    expect(instructions).toContain("Graphite submit may still use the local Graphite/GitHub identity");
+    expect(instructions).toContain("Use Graphite only for stack inspection before handoff");
+    expect(instructions).toContain("Do not run mutating `gt submit` while a GitHub PR identity is configured");
+    expect(instructions).toContain("open or update the PR with GitHub tooling under the configured identity");
+    expect(instructions).toContain("Graphite: after the PR exists");
   });
 });
 
@@ -208,7 +355,9 @@ function makeConfig(pr: {
             tokenCommand:
               "symphony github-app-token --app-id 3862765 --installation-id 135623998 --private-key-command 'vault kv get -mount=secret -field=private_key prod/providers/github/symphony'",
             authorName: "anmho Symphony",
-            authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com"
+            authorEmail: "3862765+anmho-symphony[bot]@users.noreply.github.com",
+            reviewerLogin: "anmho",
+            reviewerLogins: ["anmho"]
           }
         : pr.identity
         ? {
