@@ -113,4 +113,11 @@ Expected workflow:
 6. Leave a Linear handoff comment with the PR link, verification performed, and any remaining blocker.
 7. When the PR handoff is ready, move the Linear issue to In Review so Symphony stops dispatching it as active work.
 
+**Merge Conflict Resolution**: If the issue involves a PR that is behind main or has merge conflicts, automatically resolve them:
+- Fetch latest main: `git fetch origin main`
+- Rebase or merge main into your branch: `git rebase origin/main` or `git merge origin/main`
+- If conflicts arise, carefully resolve them by understanding both change sets and preserving the intent of both
+- Test thoroughly after conflict resolution to ensure functionality is preserved
+- Push the resolved branch and update the PR
+
 If the issue requires human-only console work, missing product decisions, unavailable secrets, unsafe repo boundaries, or an environment failure that blocks validation, stop early, comment the blocker in Linear, and move the issue to In Review instead of guessing or retrying the same failing step.
