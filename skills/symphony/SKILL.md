@@ -127,7 +127,7 @@ After editing `templates/linear-symphony-*.md`, run sync to push to Linear.
 
 ## Operate the runner
 
-Config: `~/.config/symphony/config.json` or env (`LINEAR_API_KEY`, `PROJECTS_ROOT`).
+Config: `~/.config/symphony/config.json` or env (`LINEAR_API_KEY`, `PROJECTS_ROOT`). Cursor backend: `cursor.command: agent acp` (like `codex.command`). Auth via `agent login` by default; optional `cursor.api_key: $CURSOR_API_KEY` from Vault (same as Linear).
 
 ```bash
 symphony validate-config --workflow WORKFLOW.md

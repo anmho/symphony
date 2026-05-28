@@ -76,11 +76,21 @@ const RawWorkflowConfigSchema = z
       .optional(),
     agent: z
       .object({
+        backend: z.enum(["codex", "cursor"]).optional(),
         max_concurrent_agents: z.number().int().positive().optional(),
         max_turns: z.number().int().positive().optional(),
         max_retry_backoff_ms: z.number().int().positive().optional(),
         rate_limit_probe_interval_ms: z.number().int().positive().optional(),
         max_concurrent_agents_by_state: z.record(z.string(), z.number().int().positive()).optional()
+      })
+      .optional(),
+    cursor: z
+      .object({
+        command: z.string().optional(),
+        model: z.string().nullable().optional(),
+        api_key: z.string().optional(),
+        turn_timeout_ms: z.number().int().positive().optional(),
+        read_timeout_ms: z.number().int().nonnegative().optional()
       })
       .optional(),
     codex: z
@@ -90,7 +100,7 @@ const RawWorkflowConfigSchema = z
         thread_sandbox: z.unknown().nullable().optional(),
         turn_sandbox_policy: z.unknown().nullable().optional(),
         turn_timeout_ms: z.number().int().positive().optional(),
-        read_timeout_ms: z.number().int().positive().optional(),
+        read_timeout_ms: z.number().int().nonnegative().optional(),
         stall_timeout_ms: z.number().int().optional(),
         model: z.string().nullable().optional()
       })
@@ -235,6 +245,7 @@ export function resolveWorkflowConfig(
   const agent = raw.agent ?? {};
   const hooks = raw.hooks ?? {};
   const codex = raw.codex ?? {};
+  const cursor = raw.cursor ?? {};
   const github = raw.github ?? {};
   const pullRequest = raw.pull_request ?? {};
   const digest = raw.digest ?? {};
@@ -292,6 +303,7 @@ export function resolveWorkflowConfig(
       timeoutMs: hooks.timeout_ms ?? 60000
     },
     agent: {
+      backend: agent.backend ?? "codex",
       maxConcurrentAgents: agent.max_concurrent_agents ?? 5,
       maxTurns: agent.max_turns ?? 20,
       maxRetryBackoffMs: agent.max_retry_backoff_ms ?? 300000,
@@ -307,6 +319,15 @@ export function resolveWorkflowConfig(
       readTimeoutMs: codex.read_timeout_ms ?? 5000,
       stallTimeoutMs: codex.stall_timeout_ms ?? 300000,
       model: codex.model ?? null
+    },
+    cursor: {
+      command: cursor.command ?? "agent acp",
+      model: cursor.model ?? null,
+      turnTimeoutMs: cursor.turn_timeout_ms ?? codex.turn_timeout_ms ?? 3600000,
+      readTimeoutMs: cursor.read_timeout_ms ?? codex.read_timeout_ms ?? 5000,
+      apiKey: cursor.api_key
+        ? normalizeOptionalString(resolveEnvValue(cursor.api_key, userConfig))
+        : null
     },
     github: {
       prIdentity: github.pr_identity

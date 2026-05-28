@@ -388,14 +388,23 @@ struct SymphonyPanelView: View {
     }
 
     private var settingsContent: some View {
-        SettingsInlineView(settings: service.settings) { updated in
-            service.settings = updated
-            updated.save()
-            if updated.notificationsEnabled {
-                NotificationService.shared.requestAuthorizationIfNeeded()
+        VStack(alignment: .leading, spacing: 14) {
+            if service.isOnline, let snapshot = service.snapshot {
+                backendPicker(snapshot: snapshot)
             }
-            service.start()
+            SettingsInlineView(settings: service.settings) { updated in
+                service.settings = updated
+                updated.save()
+                if updated.notificationsEnabled {
+                    NotificationService.shared.requestAuthorizationIfNeeded()
+                }
+                service.start()
+            }
         }
+    }
+
+    private func backendPicker(snapshot: OrchestratorSnapshot) -> some View {
+        AgentRuntimeSettingsView(service: service, backend: snapshot.backend)
     }
 
     private var panelFooter: some View {
@@ -598,6 +607,85 @@ struct SymphonyPanelView: View {
         case .review: return .purple
         case .completed: return .blue
         }
+    }
+}
+
+struct AgentRuntimeSettingsView: View {
+    @ObservedObject var service: StatusService
+    let backend: BackendSnapshot
+    @State private var modelDraft: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Agent provider")
+                .font(.subheadline.weight(.semibold))
+            Text(runtimeSubtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                backendButton("Codex", kind: "codex")
+                backendButton("Cursor", kind: "cursor")
+            }
+            TextField("Model (e.g. composer-2.5)", text: $modelDraft)
+                .textFieldStyle(.roundedBorder)
+                .disabled(service.isBusy)
+            HStack(spacing: 8) {
+                Button("Apply model") {
+                    service.setAgentModel(modelDraft)
+                }
+                .controlSize(.small)
+                .disabled(service.isBusy || modelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if backend.modelOverrideActive {
+                    Button("Clear model override") {
+                        modelDraft = backend.configuredModel ?? ""
+                        service.clearAgentModel()
+                    }
+                    .controlSize(.small)
+                    .disabled(service.isBusy)
+                }
+                if backend.overrideActive || backend.modelOverrideActive {
+                    Button("Use workflow defaults") {
+                        modelDraft = backend.configuredModel ?? ""
+                        service.clearAgentBackend()
+                    }
+                    .controlSize(.small)
+                    .disabled(service.isBusy)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+        .onAppear {
+            modelDraft = backend.effectiveModel ?? backend.configuredModel ?? ""
+        }
+        .onChange(of: backend.effectiveModel) { newValue in
+            if !backend.modelOverrideActive {
+                modelDraft = newValue ?? backend.configuredModel ?? ""
+            }
+        }
+    }
+
+    private var runtimeSubtitle: String {
+        let provider = backend.effective ?? "unknown"
+        let model = backend.effectiveModel ?? "default"
+        let providerSource = backend.overrideActive ? "override" : "workflow"
+        let modelSource = backend.modelOverrideActive ? "override" : "workflow"
+        return "\(provider) (\(providerSource)) · model \(model) (\(modelSource))"
+    }
+
+    private func backendButton(_ title: String, kind: String) -> some View {
+        let selected = (backend.effective ?? backend.configured) == kind
+        return Button(title) {
+            let trimmed = modelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            service.setAgentBackend(
+                kind,
+                model: trimmed.isEmpty ? nil : trimmed
+            )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(selected ? .accentColor : .secondary)
+        .disabled(service.isBusy || selected)
     }
 }
 

@@ -2,15 +2,15 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { goalObjectiveForIssue, runCodexTurn } from "../src/codexRpc.js";
-import type { CodexRunInput, EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
+import { goalObjectiveForIssue, runAgentTurn } from "../src/backends/codexBackend.js";
+import type { AgentRunInput, EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
 
 describe("codex app-server RPC", () => {
   it("sets an active goal after starting a thread and before starting a turn", async () => {
     const { command, requestLogPath, workspacePath } = await createFakeAppServer();
     const issue = makeIssue("ANM-123", "Validate configured repo routes");
 
-    await runCodexTurn(makeInput({ command, issue, threadId: null, workspacePath }));
+    await runAgentTurn(makeInput({ command, issue, threadId: null, workspacePath }));
 
     const requests = await readRequests(requestLogPath);
     expect(requests.map((request) => request.method)).toEqual([
@@ -31,7 +31,7 @@ describe("codex app-server RPC", () => {
     const { command, requestLogPath, workspacePath } = await createFakeAppServer();
     const issue = makeIssue("ANM-124", "Make arrow navigation deterministic");
 
-    await runCodexTurn(makeInput({ command, issue, threadId: "thread-existing", workspacePath }));
+    await runAgentTurn(makeInput({ command, issue, threadId: "thread-existing", workspacePath }));
 
     const requests = await readRequests(requestLogPath);
     expect(requests.map((request) => request.method)).toEqual([
@@ -51,7 +51,7 @@ describe("codex app-server RPC", () => {
     const { command, workspacePath } = await createFakeAppServer({ completedTurnId: "turn-notification" });
     const issue = makeIssue("ANM-125", "Stop stale running sessions");
 
-    const result = await runCodexTurn(makeInput({ command, issue, threadId: null, workspacePath }));
+    const result = await runAgentTurn(makeInput({ command, issue, threadId: null, workspacePath }));
 
     expect(result.status).toBe("completed");
     expect(result.turnId).toBe("turn-1");
@@ -154,7 +154,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 }
 
-function makeInput(input: { command: string; issue: NormalizedIssue; threadId: string | null; workspacePath: string }): CodexRunInput {
+function makeInput(input: { command: string; issue: NormalizedIssue; threadId: string | null; workspacePath: string }): AgentRunInput {
   return {
     config: makeConfig(input.command),
     issue: input.issue,
@@ -198,11 +198,19 @@ function makeConfig(command: string): EffectiveWorkflowConfig {
       timeoutMs: 60000
     },
     agent: {
+      backend: "codex",
       maxConcurrentAgents: 5,
       maxTurns: 20,
       maxRetryBackoffMs: 300000,
       rateLimitProbeIntervalMs: 300000,
       maxConcurrentAgentsByState: {}
+    },
+    cursor: {
+      command: "agent acp",
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
+      apiKey: null
     },
     codex: {
       command,

@@ -39,9 +39,45 @@ public enum StatusControl {
         try await postControl(path: "request-changes", body: ["issue": issue, "feedback": feedback], port: port)
     }
 
+    public static func setBackend(
+        _ backend: String,
+        model: String?,
+        port: Int
+    ) async throws -> SetBackendResult {
+        var payload: [String: Any] = ["backend": backend]
+        if let model {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                payload["model"] = trimmed
+            }
+        }
+        return try await postControl(path: "backend", json: payload, port: port)
+    }
+
+    public static func setModel(_ model: String, port: Int) async throws -> SetBackendResult {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await postControl(
+            path: "backend",
+            json: ["model": trimmed],
+            port: port
+        )
+    }
+
+    public static func clearBackend(port: Int) async throws -> SetBackendResult {
+        return try await postControl(
+            path: "backend",
+            json: ["backend": NSNull(), "model": NSNull()],
+            port: port
+        )
+    }
+
+    public static func clearModel(port: Int) async throws -> SetBackendResult {
+        return try await postControl(path: "backend", json: ["model": NSNull()], port: port)
+    }
+
     private static func postControl<T: Decodable>(
         path: String,
-        body: [String: String],
+        json: [String: Any],
         port: Int
     ) async throws -> T {
         guard let url = URL(string: "http://127.0.0.1:\(port)/control/\(path)") else {
@@ -51,7 +87,7 @@ public enum StatusControl {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = try JSONSerialization.data(withJSONObject: json)
         request.timeoutInterval = 10
 
         let data: Data
@@ -80,6 +116,14 @@ public enum StatusControl {
             throw StatusControlError.requestFailed("Failed to decode Symphony response.")
         }
     }
+
+    private static func postControl<T: Decodable>(
+        path: String,
+        body: [String: String],
+        port: Int
+    ) async throws -> T {
+        try await postControl(path: path, json: body, port: port)
+    }
 }
 
 public struct ResumeIssueResult: Codable {
@@ -107,4 +151,23 @@ public struct SteerResult: Codable {
 public struct RequestChangesResult: Codable {
     public let issue: String
     public let state: String
+}
+
+public struct SetBackendResult: Codable {
+    public let backend: BackendSnapshot
+}
+
+public struct BackendSnapshot: Codable, Equatable {
+    public let configured: String?
+    public let effective: String?
+    public let source: String
+    public let overrideActive: Bool
+    public let overrideBackend: String?
+    public let overrideUpdatedAtMs: Int?
+    public let configuredModel: String?
+    public let effectiveModel: String?
+    public let modelSource: String
+    public let modelOverrideActive: Bool
+    public let modelOverride: String?
+    public let modelOverrideUpdatedAtMs: Int?
 }

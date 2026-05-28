@@ -71,12 +71,23 @@ export interface HooksConfig {
   timeoutMs: number;
 }
 
+export type AgentBackendKind = 'codex' | 'cursor';
+
 export interface AgentConfig {
+  backend: AgentBackendKind;
   maxConcurrentAgents: number;
   maxTurns: number;
   maxRetryBackoffMs: number;
   rateLimitProbeIntervalMs: number;
   maxConcurrentAgentsByState: Record<string, number>;
+}
+
+export interface CursorConfig {
+  command: string;
+  model: string | null;
+  turnTimeoutMs: number;
+  readTimeoutMs: number;
+  apiKey: string | null;
 }
 
 export interface CodexConfig {
@@ -150,6 +161,7 @@ export interface EffectiveWorkflowConfig {
   hooks: HooksConfig;
   agent: AgentConfig;
   codex: CodexConfig;
+  cursor: CursorConfig;
   github: GithubConfig;
   pullRequest: PullRequestConfig;
   digest: DigestConfig;
@@ -193,7 +205,27 @@ export interface ConcurrencySnapshot {
   overrideUpdatedAtMs: number | null;
 }
 
-export interface CodexTurnResult {
+export interface AgentRuntimeOverridePatch {
+  backend?: AgentBackendKind | null;
+  model?: string | null;
+}
+
+export interface BackendSnapshot {
+  configured: AgentBackendKind | null;
+  effective: AgentBackendKind | null;
+  source: 'workflow' | 'override' | 'unknown';
+  overrideActive: boolean;
+  overrideBackend: AgentBackendKind | null;
+  overrideUpdatedAtMs: number | null;
+  configuredModel: string | null;
+  effectiveModel: string | null;
+  modelSource: 'workflow' | 'override' | 'unknown';
+  modelOverrideActive: boolean;
+  modelOverride: string | null;
+  modelOverrideUpdatedAtMs: number | null;
+}
+
+export interface AgentTurnResult {
   status: 'completed' | 'failed' | 'rate_limited';
   threadId: string;
   turnId: string | null;
@@ -301,6 +333,7 @@ export interface OrchestratorSnapshot {
   codexTotals: CodexUsageTotals;
   codexRateLimit: CodexRateLimitSnapshot;
   concurrency: ConcurrencySnapshot;
+  backend: BackendSnapshot;
   lastTickAtMs: number | null;
   lastConfigError: string | null;
   paused: boolean;
@@ -345,7 +378,7 @@ export interface QueuedSteer {
   queuedAtMs: number;
 }
 
-export interface CodexRunInput {
+export interface AgentRunInput {
   config: EffectiveWorkflowConfig;
   issue: NormalizedIssue;
   workspacePath: string;
@@ -354,7 +387,7 @@ export interface CodexRunInput {
   env?: NodeJS.ProcessEnv;
 }
 
-export type CodexRunEvent =
+export type AgentRunEvent =
   | { type: 'process_started'; pid: number | null }
   | { type: 'stderr'; bytes: number }
   | { type: 'thread_started'; threadId: string }

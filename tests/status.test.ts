@@ -6,6 +6,8 @@ import {
   queueSteer,
   requestChanges,
   resumeIssue,
+  setDaemonAgentRuntime,
+  setDaemonBackend,
   setDaemonMaxConcurrency,
   startStatusServer,
 } from '../src/status.js';
@@ -27,6 +29,22 @@ describe('status server', () => {
 
   it('serves work events and selected-agent controls', async () => {
     let maxConcurrencyOverride: number | null = null;
+    let backendOverride: 'codex' | 'cursor' | null = null;
+    let modelOverride: string | null = null;
+    const runtimeBackendSnapshot = () => ({
+      configured: 'codex' as const,
+      effective: backendOverride ?? 'codex',
+      source: backendOverride === null ? ('workflow' as const) : ('override' as const),
+      overrideActive: backendOverride !== null,
+      overrideBackend: backendOverride,
+      overrideUpdatedAtMs: backendOverride === null ? null : 2000,
+      configuredModel: null,
+      effectiveModel: modelOverride,
+      modelSource: modelOverride === null ? ('workflow' as const) : ('override' as const),
+      modelOverrideActive: modelOverride !== null,
+      modelOverride,
+      modelOverrideUpdatedAtMs: modelOverride === null ? null : 2000,
+    });
     server = await startStatusServer(() => snapshot(), 0, {
       getEvents: () => [
         {
@@ -58,6 +76,28 @@ describe('status server', () => {
           overrideMax: maxConcurrentAgents,
           overrideUpdatedAtMs: maxConcurrentAgents === null ? null : 2000,
         };
+      },
+      setBackendOverride: (backend) => {
+        backendOverride = backend;
+        if (backend === null) {
+          modelOverride = null;
+        }
+        return runtimeBackendSnapshot();
+      },
+      setAgentRuntimeOverride: (patch) => {
+        if ('backend' in patch) {
+          backendOverride = patch.backend ?? null;
+          if (backendOverride === null) {
+            modelOverride = null;
+          }
+        }
+        if ('model' in patch) {
+          modelOverride =
+            patch.model === null || patch.model === undefined
+              ? null
+              : patch.model;
+        }
+        return runtimeBackendSnapshot();
       },
     });
     const address = server.address();
@@ -94,6 +134,30 @@ describe('status server', () => {
         overrideActive: false,
       },
     });
+    await expect(setDaemonBackend(port, 'cursor')).resolves.toMatchObject({
+      backend: {
+        effective: 'cursor',
+        source: 'override',
+        overrideActive: true,
+      },
+    });
+    expect(backendOverride).toBe('cursor');
+    await expect(setDaemonBackend(port, null)).resolves.toMatchObject({
+      backend: {
+        effective: 'codex',
+        source: 'workflow',
+        overrideActive: false,
+      },
+    });
+    await expect(
+      setDaemonAgentRuntime(port, { model: 'composer-2.5' }),
+    ).resolves.toMatchObject({
+      backend: {
+        effectiveModel: 'composer-2.5',
+        modelOverrideActive: true,
+      },
+    });
+    expect(modelOverride).toBe('composer-2.5');
   });
 
   it('can select latest visible events from a noisy raw tail', () => {
@@ -162,6 +226,20 @@ function snapshot(): OrchestratorSnapshot {
       overrideActive: false,
       overrideMax: null,
       overrideUpdatedAtMs: null,
+    },
+    backend: {
+      configured: 'codex',
+      effective: 'codex',
+      source: 'workflow',
+      overrideActive: false,
+      overrideBackend: null,
+      overrideUpdatedAtMs: null,
+      configuredModel: null,
+      effectiveModel: null,
+      modelSource: 'workflow',
+      modelOverrideActive: false,
+      modelOverride: null,
+      modelOverrideUpdatedAtMs: null,
     },
     lastTickAtMs: null,
     lastConfigError: null,

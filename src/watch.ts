@@ -6,12 +6,14 @@ import {
   type LogViewportKey,
   type LogViewportState,
 } from './eventDisplay.js';
+import { parseAgentBackendKind } from './agentBackends.js';
 import type { AgentWorkEvent, OrchestratorSnapshot } from './types.js';
 import {
   fetchDaemonEvents,
   fetchDaemonStatus,
   queueSteer,
   resumeIssue,
+  setDaemonBackend,
   setDaemonMaxConcurrency,
 } from './status.js';
 import { isRateLimitError } from './rateLimit.js';
@@ -309,6 +311,32 @@ async function runOpenTuiStatusWatch(
                 )
                 .then(() => render());
             } else if (
+              command === 'backend clear' ||
+              command === 'agent-backend clear'
+            ) {
+              void setDaemonBackend(options.port, null).then(() => render());
+            } else if (
+              command === 'backend codex' ||
+              command === 'agent-backend codex'
+            ) {
+              void setDaemonBackend(options.port, 'codex').then(() => render());
+            } else if (
+              command === 'backend cursor' ||
+              command === 'agent-backend cursor'
+            ) {
+              void setDaemonBackend(options.port, 'cursor').then(() => render());
+            } else if (
+              command.startsWith('backend ') ||
+              command.startsWith('agent-backend ')
+            ) {
+              const rawKind = command.split(/\s+/, 2)[1] ?? '';
+              try {
+                const kind = parseAgentBackendKind(rawKind);
+                void setDaemonBackend(options.port, kind).then(() => render());
+              } catch {
+                // ignore invalid backend in TUI
+              }
+            } else if (
               command === 'concurrency clear' ||
               command === 'max-concurrency clear'
             ) {
@@ -514,7 +542,7 @@ export function renderStatusScreen(
     });
 
   const headerLine = padLineToWidth(
-    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(`${snapshot.concurrency.running}/${snapshot.concurrency.effectiveMax ?? '?'}`)}  ${theme.dim('max-source=')}${snapshot.concurrency.overrideActive ? theme.warn('override') : theme.ok(snapshot.concurrency.source)}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('handoff=')}${snapshot.handoff.length}  ${theme.dim('completed=')}${snapshot.completed.length}`,
+    `${theme.title('symphony@local')}  ${theme.dim('view=')}${theme.accent(view)}  ${theme.dim('port=')}${options.port}  ${theme.dim('uptime=')}${formatDuration(options.nowMs - snapshot.startedAtMs)}  ${theme.dim('running=')}${theme.ok(`${snapshot.concurrency.running}/${snapshot.concurrency.effectiveMax ?? '?'}`)}  ${theme.dim('backend=')}${snapshot.backend.overrideActive ? theme.warn(snapshot.backend.effective ?? '?') : theme.ok(snapshot.backend.effective ?? '?')}  ${theme.dim('max-source=')}${snapshot.concurrency.overrideActive ? theme.warn('override') : theme.ok(snapshot.concurrency.source)}  ${theme.dim('retries=')}${snapshot.retryAttempts.length > 0 ? theme.warn(String(snapshot.retryAttempts.length)) : '0'}  ${theme.dim('handoff=')}${snapshot.handoff.length}  ${theme.dim('completed=')}${snapshot.completed.length}`,
     terminalWidth,
   );
   const workflowLine = padLineToWidth(
@@ -846,6 +874,8 @@ function renderView(
       `  ${theme.accent(':steer text')}    queue guidance for selected agent`,
       `  ${theme.accent(':concurrency N')} set max concurrent agents`,
       `  ${theme.accent(':concurrency clear')} use WORKFLOW.md concurrency`,
+      `  ${theme.accent(':backend codex|cursor')} set agent backend override`,
+      `  ${theme.accent(':backend clear')} use WORKFLOW.md agent.backend`,
       `  ${theme.accent(':clear')}         clear filter`,
       `  ${theme.accent('/text')}          filter rows`,
       `  ${theme.accent('Up/Down j/k')}    move selection`,

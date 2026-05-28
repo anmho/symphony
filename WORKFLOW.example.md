@@ -34,10 +34,20 @@ hooks:
   timeout_ms: 60000
 
 agent:
+  backend: codex
   max_concurrent_agents: 5
   max_turns: 20
   max_retry_backoff_ms: 300000
   rate_limit_probe_interval_ms: 15000
+
+cursor:
+  command: agent acp
+  model: auto
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 0
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 5000
+  # api_key: $CURSOR_API_KEY   # optional; default auth is agent login
 
 codex:
   command: codex app-server --listen stdio://

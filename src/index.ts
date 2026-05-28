@@ -18,6 +18,7 @@ import {
   resolveWorkflowPath,
 } from './config.js';
 import { logger } from './logger.js';
+import { parseAgentBackendKind } from './agentBackends.js';
 import { createDefaultOrchestrator } from './orchestrator.js';
 import { runCommand } from './process.js';
 import {
@@ -30,6 +31,8 @@ import {
   resumeIssue,
   resumeOrchestrator,
   resumeRateLimitedRuns,
+  setDaemonAgentRuntime,
+  setDaemonBackend,
   setDaemonMaxConcurrency,
   startStatusServer,
 } from './status.js';
@@ -53,6 +56,8 @@ import {
 interface CliOptions {
   workflow?: string;
   statusPort: string;
+  backend?: string;
+  model?: string;
 }
 
 const program = new Command();
@@ -70,6 +75,14 @@ program
     '--status-port <port>',
     'local status server port',
     String(DEFAULT_STATUS_PORT),
+  )
+  .option(
+    '--backend <kind>',
+    'agent backend override for this run (codex or cursor)',
+  )
+  .option(
+    '--model <id>',
+    'agent model override for this run (applies to the effective backend)',
   );
 
 program
@@ -325,6 +338,109 @@ concurrency
     console.log(formatConcurrencyStatus(result.concurrency));
   });
 
+const backend = program
+  .command('backend')
+  .description('View or change the running daemon agent backend.');
+
+backend
+  .command('get', { isDefault: true })
+  .description('Show effective daemon agent backend.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const status = await fetchDaemonStatus(port);
+    if (!status) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}.`);
+      return;
+    }
+    console.log(formatBackendStatus(status.backend));
+  });
+
+backend
+  .command('set')
+  .description('Set a persisted agent backend override for the running daemon.')
+  .argument('<kind>', 'codex or cursor')
+  .option('--model <id>', 'model override for the effective backend')
+  .action(async (kind: string, options: { model?: string }) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonAgentRuntime(port, {
+      backend: parseAgentBackendKind(kind),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+    });
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support backend controls.`,
+      );
+      return;
+    }
+    console.log(formatBackendStatus(result.backend));
+  });
+
+backend
+  .command('clear')
+  .description('Clear persisted agent backend and model overrides.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonAgentRuntime(port, {
+      backend: null,
+      model: null,
+    });
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support backend controls.`,
+      );
+      return;
+    }
+    console.log(formatBackendStatus(result.backend));
+  });
+
+const model = program
+  .command('model')
+  .description('View or change the running daemon agent model override.');
+
+model
+  .command('get', { isDefault: true })
+  .description('Show effective daemon agent model.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const status = await fetchDaemonStatus(port);
+    if (!status) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}.`);
+      return;
+    }
+    console.log(formatModelStatus(status.backend));
+  });
+
+model
+  .command('set')
+  .description('Set a persisted model override for the effective backend.')
+  .argument('<id>', 'model id (e.g. composer-2.5 or a Codex model name)')
+  .action(async (id: string) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonAgentRuntime(port, { model: id });
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support model controls.`,
+      );
+      return;
+    }
+    console.log(formatModelStatus(result.backend));
+  });
+
+model
+  .command('clear')
+  .description('Clear the persisted model override.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonAgentRuntime(port, { model: null });
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support model controls.`,
+      );
+      return;
+    }
+    console.log(formatModelStatus(result.backend));
+  });
+
 program
   .command('logs')
   .description('Show the public work stream for an agent.')
@@ -514,7 +630,7 @@ async function startBackground(options: CliOptions): Promise<void> {
   mkdirSync(stateDir(), { recursive: true });
 
   const logFd = openSync(logPath(statusPort), 'a');
-  const background = backgroundCommand(workflowPath, statusPort);
+  const background = backgroundCommand(workflowPath, statusPort, options);
   const child = spawn(background.command, background.args, {
     cwd: process.cwd(),
     detached: true,
@@ -538,6 +654,7 @@ async function startBackground(options: CliOptions): Promise<void> {
 function backgroundCommand(
   workflowPath: string,
   statusPort: number,
+  options: CliOptions,
 ): { command: string; args: string[]; argv0: string } {
   const entrypoint = entrypointPath();
   const runArgs = [
@@ -547,6 +664,12 @@ function backgroundCommand(
     '--status-port',
     String(statusPort),
   ];
+  if (options.backend) {
+    runArgs.push('--backend', options.backend);
+  }
+  if (options.model) {
+    runArgs.push('--model', options.model);
+  }
   if (entrypoint.endsWith('.ts')) {
     return {
       command: 'bun',
@@ -562,6 +685,14 @@ async function runForeground(options: CliOptions): Promise<void> {
   const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
   const orchestrator = createDefaultOrchestrator(workflowPath);
+  if (options.backend || options.model) {
+    orchestrator.setAgentRuntimeOverride({
+      ...(options.backend
+        ? { backend: parseAgentBackendKind(options.backend) }
+        : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+    });
+  }
   const statusServer = await startStatusServer(
     () => orchestrator.snapshot(),
     statusPort,
@@ -586,6 +717,9 @@ async function runForeground(options: CliOptions): Promise<void> {
       resumeDispatch: () => orchestrator.resume(),
       setMaxConcurrencyOverride: (maxConcurrentAgents) =>
         orchestrator.setMaxConcurrencyOverride(maxConcurrentAgents),
+      setBackendOverride: (backend) => orchestrator.setBackendOverride(backend),
+      setAgentRuntimeOverride: (patch) =>
+        orchestrator.setAgentRuntimeOverride(patch),
     },
   );
 
@@ -717,6 +851,46 @@ function readPositiveInteger(value: string, name: string): number {
     throw new Error(`invalid_${name}: ${value}`);
   }
   return parsed;
+}
+
+function formatBackendStatus(backend: {
+  configured: string | null;
+  effective: string | null;
+  source: string;
+  overrideActive: boolean;
+  overrideBackend: string | null;
+  configuredModel?: string | null;
+  effectiveModel?: string | null;
+  modelSource?: string;
+  modelOverrideActive?: boolean;
+  modelOverride?: string | null;
+}): string {
+  return [
+    `configured=${backend.configured ?? 'unknown'}`,
+    `effective=${backend.effective ?? 'unknown'}`,
+    `source=${backend.source}`,
+    `override=${backend.overrideActive ? backend.overrideBackend : 'none'}`,
+    `model=${backend.effectiveModel ?? 'default'}`,
+    `model_source=${backend.modelSource ?? 'unknown'}`,
+    `model_override=${backend.modelOverrideActive ? backend.modelOverride : 'none'}`,
+  ].join(' ');
+}
+
+function formatModelStatus(backend: {
+  configuredModel: string | null;
+  effectiveModel: string | null;
+  modelSource: string;
+  modelOverrideActive: boolean;
+  modelOverride: string | null;
+  effective: string | null;
+}): string {
+  return [
+    `backend=${backend.effective ?? 'unknown'}`,
+    `configured=${backend.configuredModel ?? 'default'}`,
+    `effective=${backend.effectiveModel ?? 'default'}`,
+    `source=${backend.modelSource}`,
+    `override=${backend.modelOverrideActive ? backend.modelOverride : 'none'}`,
+  ].join(' ');
 }
 
 function formatConcurrencyStatus(concurrency: {

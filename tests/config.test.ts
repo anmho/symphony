@@ -45,6 +45,95 @@ Hello {{ issue.identifier }}
     expect(config.promptTemplate).toContain("Hello");
   });
 
+  it("parses agent.backend and cursor config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("CURSOR_API_KEY", "cur_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+agent:
+  backend: cursor
+cursor:
+  api_key: $CURSOR_API_KEY
+  model: composer-latest
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.agent.backend).toBe("cursor");
+    expect(config.cursor.apiKey).toBe("cur_test");
+    expect(config.cursor.model).toBe("composer-latest");
+    expect(config.cursor.command).toBe("agent acp");
+  });
+
+  it("does not load CURSOR_API_KEY from env when cursor.api_key is omitted", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("CURSOR_API_KEY", "cur_from_env");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+agent:
+  backend: cursor
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.cursor.apiKey).toBeNull();
+    expect(config.cursor.model).toBeNull();
+    expect(config.cursor.command).toBe("agent acp");
+  });
+
+  it("resolves CURSOR_API_KEY from vault secret command in user config", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("CURSOR_API_KEY", "");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+agent:
+  backend: cursor
+cursor:
+  api_key: $CURSOR_API_KEY
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition, {
+      workflow: null,
+      env: {
+        LINEAR_API_KEY: "lin_test"
+      },
+      secrets: {
+        CURSOR_API_KEY: {
+          command: "echo cur_from_vault"
+        }
+      }
+    });
+
+    expect(config.cursor.apiKey).toBe("cur_from_vault");
+  });
+
+  it("defaults agent.backend to codex with cursor acp command defaults", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    vi.stubEnv("CURSOR_API_KEY", "");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.agent.backend).toBe("codex");
+    expect(config.cursor.apiKey).toBeNull();
+    expect(config.cursor.model).toBeNull();
+    expect(config.cursor.command).toBe("agent acp");
+  });
+
   it("requires a Linear project slug or team key", () => {
     vi.stubEnv("LINEAR_API_KEY", "lin_test");
     const definition = parseWorkflowMarkdown(`---

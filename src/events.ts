@@ -3,7 +3,7 @@ import path from "node:path";
 import type {
   AgentWorkEvent,
   AgentWorkEventType,
-  CodexRunEvent,
+  AgentRunEvent,
   JsonObject,
   QueuedSteer
 } from "./types.js";
@@ -180,7 +180,7 @@ export class AgentWorkEventStore {
   }
 }
 
-export function workEventFromCodexEvent(context: AgentWorkContext, event: CodexRunEvent): Omit<AppendAgentWorkEventInput, keyof AgentWorkContext> {
+export function workEventFromAgentEvent(context: AgentWorkContext, event: AgentRunEvent): Omit<AppendAgentWorkEventInput, keyof AgentWorkContext> {
   if (event.type === "process_started") {
     return {
       type: "process",

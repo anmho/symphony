@@ -55,7 +55,22 @@ tracker:
   repo_label_prefix: "repo:"
   active_states: [Todo, In Progress]
   terminal_states: [Done, Closed, Canceled, Cancelled, Duplicate]
+
+agent:
+  backend: codex   # or cursor
+
+cursor:
+  command: agent acp
+  model: composer-2.5
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 5000
+  # api_key: $CURSOR_API_KEY   # optional; default auth is `agent login`
+
+codex:
+  command: codex app-server --listen stdio://
 ```
+
+Cursor uses the `agent acp` subprocess (ACP over stdio), same shape as Codex + `codex app-server`. Auth is `agent login` / IDE session by default. Set `cursor.api_key: $CURSOR_API_KEY` only for CI, resolved via `~/.config/symphony/config.json` secrets (like `LINEAR_API_KEY`).
 
 ## Missing repo route label
 

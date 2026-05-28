@@ -146,11 +146,19 @@ function makeConfig(options: { identity?: boolean } = {}): EffectiveWorkflowConf
       timeoutMs: 60000
     },
     agent: {
+      backend: "codex",
       maxConcurrentAgents: 5,
       maxTurns: 20,
       maxRetryBackoffMs: 300000,
       rateLimitProbeIntervalMs: 300000,
       maxConcurrentAgentsByState: {}
+    },
+    cursor: {
+      command: "agent acp",
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
+      apiKey: null
     },
     codex: {
       command: "codex app-server --listen stdio://",

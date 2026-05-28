@@ -301,6 +301,20 @@ function cliSnapshot(override: number | null): OrchestratorSnapshot {
       overrideMax: override,
       overrideUpdatedAtMs: override === null ? null : 2000
     },
+    backend: {
+      configured: "codex",
+      effective: "codex",
+      source: "workflow",
+      overrideActive: false,
+      overrideBackend: null,
+      overrideUpdatedAtMs: null,
+      configuredModel: null,
+      effectiveModel: null,
+      modelSource: "workflow",
+      modelOverrideActive: false,
+      modelOverride: null,
+      modelOverrideUpdatedAtMs: null
+    },
     lastTickAtMs: 1000,
     lastConfigError: null,
     paused: false,

@@ -67,6 +67,14 @@ Example user config:
 }
 ```
 
+With `agent.backend: cursor`, Symphony spawns `agent acp` (ACP over stdio), parallel to `codex app-server` for Codex. Auth is your local Cursor login (`agent login`); no API key in `WORKFLOW.md` is required.
+
+Optional CI override: set `cursor.api_key: $CURSOR_API_KEY` in the workflow and add a Vault-backed secret in user config (same pattern as `LINEAR_API_KEY`):
+
+```sh
+alias cursor-api-key='vault kv get -mount=secret -field=api_key prod/providers/cursor'
+```
+
 User config lives under `~/.config/symphony` because it is machine-local configuration. The repo `.symphony/` directory is reserved for runtime workspaces and state.
 
 Validate the workflow config:
