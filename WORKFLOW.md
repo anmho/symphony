@@ -77,6 +77,12 @@ codex:
   stall_timeout_ms: 300000
   model:
 
+cursor:
+  command: agent acp
+  model: composer-2.5
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 999999999
+
 github:
   pr_identity:
     kind: github_app
