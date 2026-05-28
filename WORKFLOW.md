@@ -79,9 +79,9 @@ codex:
 
 cursor:
   command: agent acp
-  model: composer-2.5
+  model: auto
   turn_timeout_ms: 3600000
-  read_timeout_ms: 999999999
+  read_timeout_ms: 0
 
 github:
   pr_identity:

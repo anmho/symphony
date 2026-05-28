@@ -90,7 +90,7 @@ const RawWorkflowConfigSchema = z
         model: z.string().nullable().optional(),
         api_key: z.string().optional(),
         turn_timeout_ms: z.number().int().positive().optional(),
-        read_timeout_ms: z.number().int().positive().optional()
+        read_timeout_ms: z.number().int().nonnegative().optional()
       })
       .optional(),
     codex: z
@@ -100,7 +100,7 @@ const RawWorkflowConfigSchema = z
         thread_sandbox: z.unknown().nullable().optional(),
         turn_sandbox_policy: z.unknown().nullable().optional(),
         turn_timeout_ms: z.number().int().positive().optional(),
-        read_timeout_ms: z.number().int().positive().optional(),
+        read_timeout_ms: z.number().int().nonnegative().optional(),
         stall_timeout_ms: z.number().int().optional(),
         model: z.string().nullable().optional()
       })
