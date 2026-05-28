@@ -23,11 +23,36 @@ public struct SymphonyCLIResult {
 }
 
 public enum SymphonyCLI {
+    private static let shellEnvironment: [String: String] = {
+        var env = ProcessInfo.processInfo.environment
+        let task = Process()
+        let pipe = Pipe()
+        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        task.arguments = ["-lc", "printenv PATH"]
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+                env["PATH"] = path
+                return env
+            }
+        } catch {}
+        
+        let currentPath = env["PATH"] ?? ""
+        let home = NSHomeDirectory()
+        env["PATH"] = "\(home)/.bun/bin:/opt/homebrew/bin:/usr/local/bin:\(currentPath)"
+        return env
+    }()
+
     public static func isAvailable() -> Bool {
         let task = Process()
         let pipe = Pipe()
+        task.environment = shellEnvironment
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["sh", "-lc", "command -v symphony"]
+        task.arguments = ["sh", "-c", "command -v symphony"]
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
         do {
@@ -59,6 +84,7 @@ public enum SymphonyCLI {
         }
 
         let task = Process()
+        task.environment = shellEnvironment
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         task.arguments = ["symphony"] + arguments + ["--status-port", String(statusPort)]
         if wait {
