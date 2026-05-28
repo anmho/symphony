@@ -59,18 +59,18 @@ tracker:
 agent:
   backend: codex   # or cursor
 
-# Cursor: local @cursor/sdk uses your Cursor login — no api_key in WORKFLOW required.
-# Optional model alias (see Cursor.models.list()): composer-latest, composer-2.5, etc.
-# cursor:
-#   model: composer-latest
+cursor:
+  command: agent acp
+  model: composer-2.5
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 5000
+  # api_key: $CURSOR_API_KEY   # optional; default auth is `agent login`
 
-# Optional CI / explicit API-key auth (same pattern as LINEAR_API_KEY):
-#   alias cursor-api-key='vault kv get -mount=secret -field=api_key prod/providers/cursor'
-# cursor:
-#   api_key: $CURSOR_API_KEY
+codex:
+  command: codex app-server --listen stdio://
 ```
 
-Resolve `$CURSOR_API_KEY` only when `WORKFLOW.md` sets `cursor.api_key: $CURSOR_API_KEY`, via `~/.config/symphony/config.json` env or Vault `secrets` (like `LINEAR_API_KEY`). Otherwise the SDK uses the local Cursor install session (`agent login` / IDE).
+Cursor uses the `agent acp` subprocess (ACP over stdio), same shape as Codex + `codex app-server`. Auth is `agent login` / IDE session by default. Set `cursor.api_key: $CURSOR_API_KEY` only for CI, resolved via `~/.config/symphony/config.json` secrets (like `LINEAR_API_KEY`).
 
 ## Missing repo route label
 

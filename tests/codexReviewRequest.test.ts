@@ -154,8 +154,11 @@ function makeConfig(options: { identity?: boolean } = {}): EffectiveWorkflowConf
       maxConcurrentAgentsByState: {}
     },
     cursor: {
-      apiKey: null,
-      model: "composer-2.5"
+      command: "agent acp",
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
+      apiKey: null
     },
     codex: {
       command: "codex app-server --listen stdio://",

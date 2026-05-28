@@ -203,8 +203,11 @@ function makeConfig(
       maxConcurrentAgentsByState: {},
     },
     cursor: {
+      command: 'agent acp',
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
       apiKey: null,
-      model: 'composer-2.5',
     },
     codex: {
       command: 'codex app-server --listen stdio://',

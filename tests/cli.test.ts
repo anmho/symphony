@@ -307,7 +307,13 @@ function cliSnapshot(override: number | null): OrchestratorSnapshot {
       source: "workflow",
       overrideActive: false,
       overrideBackend: null,
-      overrideUpdatedAtMs: null
+      overrideUpdatedAtMs: null,
+      configuredModel: null,
+      effectiveModel: null,
+      modelSource: "workflow",
+      modelOverrideActive: false,
+      modelOverride: null,
+      modelOverrideUpdatedAtMs: null
     },
     lastTickAtMs: 1000,
     lastConfigError: null,

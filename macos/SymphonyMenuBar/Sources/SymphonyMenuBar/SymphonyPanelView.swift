@@ -404,49 +404,7 @@ struct SymphonyPanelView: View {
     }
 
     private func backendPicker(snapshot: OrchestratorSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Agent backend")
-                .font(.subheadline.weight(.semibold))
-            Text(backendSubtitle(snapshot.backend))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                backendButton("Codex", backend: "codex", current: snapshot.backend)
-                backendButton("Cursor", backend: "cursor", current: snapshot.backend)
-                if snapshot.backend.overrideActive {
-                    Button("Use workflow default") {
-                        service.clearAgentBackend()
-                    }
-                    .controlSize(.small)
-                    .disabled(service.isBusy)
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
-    }
-
-    private func backendSubtitle(_ backend: BackendSnapshot) -> String {
-        let effective = backend.effective ?? "unknown"
-        if backend.overrideActive {
-            return "Override active · effective \(effective)"
-        }
-        return "From WORKFLOW.md · effective \(effective)"
-    }
-
-    private func backendButton(
-        _ title: String,
-        backend: String,
-        current: BackendSnapshot
-    ) -> some View {
-        let selected = (current.effective ?? current.configured) == backend
-        return Button(title) {
-            service.setAgentBackend(backend)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(selected ? .accentColor : .secondary)
-        .disabled(service.isBusy || selected)
+        AgentRuntimeSettingsView(service: service, backend: snapshot.backend)
     }
 
     private var panelFooter: some View {
@@ -649,6 +607,85 @@ struct SymphonyPanelView: View {
         case .review: return .purple
         case .completed: return .blue
         }
+    }
+}
+
+struct AgentRuntimeSettingsView: View {
+    @ObservedObject var service: StatusService
+    let backend: BackendSnapshot
+    @State private var modelDraft: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Agent provider")
+                .font(.subheadline.weight(.semibold))
+            Text(runtimeSubtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                backendButton("Codex", kind: "codex")
+                backendButton("Cursor", kind: "cursor")
+            }
+            TextField("Model (e.g. composer-2.5)", text: $modelDraft)
+                .textFieldStyle(.roundedBorder)
+                .disabled(service.isBusy)
+            HStack(spacing: 8) {
+                Button("Apply model") {
+                    service.setAgentModel(modelDraft)
+                }
+                .controlSize(.small)
+                .disabled(service.isBusy || modelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if backend.modelOverrideActive {
+                    Button("Clear model override") {
+                        modelDraft = backend.configuredModel ?? ""
+                        service.clearAgentModel()
+                    }
+                    .controlSize(.small)
+                    .disabled(service.isBusy)
+                }
+                if backend.overrideActive || backend.modelOverrideActive {
+                    Button("Use workflow defaults") {
+                        modelDraft = backend.configuredModel ?? ""
+                        service.clearAgentBackend()
+                    }
+                    .controlSize(.small)
+                    .disabled(service.isBusy)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+        .onAppear {
+            modelDraft = backend.effectiveModel ?? backend.configuredModel ?? ""
+        }
+        .onChange(of: backend.effectiveModel) { newValue in
+            if !backend.modelOverrideActive {
+                modelDraft = newValue ?? backend.configuredModel ?? ""
+            }
+        }
+    }
+
+    private var runtimeSubtitle: String {
+        let provider = backend.effective ?? "unknown"
+        let model = backend.effectiveModel ?? "default"
+        let providerSource = backend.overrideActive ? "override" : "workflow"
+        let modelSource = backend.modelOverrideActive ? "override" : "workflow"
+        return "\(provider) (\(providerSource)) · model \(model) (\(modelSource))"
+    }
+
+    private func backendButton(_ title: String, kind: String) -> some View {
+        let selected = (backend.effective ?? backend.configured) == kind
+        return Button(title) {
+            let trimmed = modelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            service.setAgentBackend(
+                kind,
+                model: trimmed.isEmpty ? nil : trimmed
+            )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(selected ? .accentColor : .secondary)
+        .disabled(service.isBusy || selected)
     }
 }
 

@@ -160,6 +160,44 @@ describe('orchestrator', () => {
     });
   });
 
+  it('persists agent model override across daemon restarts', async () => {
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), 'symphony-orchestrator-model-'),
+    );
+    const workflowPath = path.join(dir, 'WORKFLOW.md');
+    await writeFile(workflowPath, 'Prompt');
+    const base = makeConfig({ agent: { backend: 'cursor' } });
+    const config = {
+      ...base,
+      cursor: { ...base.cursor, model: 'composer-2.5' },
+    };
+    const first = new Orchestrator(
+      { workflowPath },
+      makeDeps({
+        loadWorkflowConfig: async () => config,
+        fetchCandidateIssues: async () => [],
+      }),
+    );
+
+    first.setAgentRuntimeOverride({ model: 'composer-2' });
+
+    const restarted = new Orchestrator(
+      { workflowPath },
+      makeDeps({
+        loadWorkflowConfig: async () => config,
+        fetchCandidateIssues: async () => [],
+      }),
+    );
+
+    await restarted.tick();
+
+    expect(restarted.snapshot().backend).toMatchObject({
+      effectiveModel: 'composer-2',
+      modelOverrideActive: true,
+      modelOverride: 'composer-2',
+    });
+  });
+
   it('skips issues without required label and repo route', async () => {
     const config = makeConfig({
       tracker: {
@@ -2417,8 +2455,11 @@ function makeConfig(
       maxConcurrentAgentsByState: {},
     },
     cursor: {
+      command: 'agent acp',
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
       apiKey: null,
-      model: 'composer-2.5',
     },
     codex: {
       command: 'codex app-server --listen stdio://',

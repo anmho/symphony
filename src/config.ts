@@ -86,8 +86,11 @@ const RawWorkflowConfigSchema = z
       .optional(),
     cursor: z
       .object({
+        command: z.string().optional(),
+        model: z.string().nullable().optional(),
         api_key: z.string().optional(),
-        model: z.string().optional()
+        turn_timeout_ms: z.number().int().positive().optional(),
+        read_timeout_ms: z.number().int().positive().optional()
       })
       .optional(),
     codex: z
@@ -318,10 +321,13 @@ export function resolveWorkflowConfig(
       model: codex.model ?? null
     },
     cursor: {
+      command: cursor.command ?? "agent acp",
+      model: cursor.model ?? null,
+      turnTimeoutMs: cursor.turn_timeout_ms ?? codex.turn_timeout_ms ?? 3600000,
+      readTimeoutMs: cursor.read_timeout_ms ?? codex.read_timeout_ms ?? 5000,
       apiKey: cursor.api_key
         ? normalizeOptionalString(resolveEnvValue(cursor.api_key, userConfig))
-        : null,
-      model: cursor.model ?? "composer-latest"
+        : null
     },
     github: {
       prIdentity: github.pr_identity

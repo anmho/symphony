@@ -46,7 +46,13 @@ public struct OrchestratorSnapshot: Codable {
                 source: "unknown",
                 overrideActive: false,
                 overrideBackend: nil,
-                overrideUpdatedAtMs: nil
+                overrideUpdatedAtMs: nil,
+                configuredModel: nil,
+                effectiveModel: nil,
+                modelSource: "unknown",
+                modelOverrideActive: false,
+                modelOverride: nil,
+                modelOverrideUpdatedAtMs: nil
             )
         lastConfigError = try container.decodeIfPresent(String.self, forKey: .lastConfigError)
         paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false

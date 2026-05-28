@@ -67,6 +67,7 @@ import type {
   AgentBackendKind,
   AgentRunEvent,
   AgentRunInput,
+  AgentRuntimeOverridePatch,
   AgentTurnResult,
   BackendSnapshot,
   CodexUsageTotals,
@@ -337,6 +338,8 @@ export class Orchestrator {
   private maxConcurrencyOverrideUpdatedAtMs: number | null = null;
   private backendOverride: AgentBackendKind | null = null;
   private backendOverrideUpdatedAtMs: number | null = null;
+  private modelOverride: string | null = null;
+  private modelOverrideUpdatedAtMs: number | null = null;
 
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
@@ -389,7 +392,13 @@ export class Orchestrator {
       runHook,
       renderIssuePrompt,
       runAgentTurn: (input, options) =>
-        runAgentTurnForConfig(input.config, this.backendOverride, input, options),
+        runAgentTurnForConfig(
+          input.config,
+          this.backendOverride,
+          this.modelOverride,
+          input,
+          options,
+        ),
       resolvePrIdentity,
       now,
       sleep,
@@ -493,18 +502,40 @@ export class Orchestrator {
   }
 
   setBackendOverride(backend: AgentBackendKind | null): BackendSnapshot {
-    if (backend !== null) {
-      parseAgentBackendKind(backend);
+    return this.setAgentRuntimeOverride({ backend });
+  }
+
+  setAgentRuntimeOverride(patch: AgentRuntimeOverridePatch): BackendSnapshot {
+    const now = this.deps.now();
+    if ('backend' in patch) {
+      const backend = patch.backend ?? null;
+      if (backend !== null) {
+        parseAgentBackendKind(backend);
+      }
+      this.backendOverride = backend;
+      this.backendOverrideUpdatedAtMs = backend === null ? null : now;
+      if (backend === null) {
+        this.modelOverride = null;
+        this.modelOverrideUpdatedAtMs = null;
+      }
     }
-    this.backendOverride = backend;
-    this.backendOverrideUpdatedAtMs = backend === null ? null : this.deps.now();
-    this.persistBackendOverride();
+    if ('model' in patch) {
+      const model =
+        patch.model === null || patch.model === undefined
+          ? null
+          : patch.model.trim() || null;
+      this.modelOverride = model;
+      this.modelOverrideUpdatedAtMs = model === null ? null : now;
+    }
+    this.persistAgentRuntimeOverride();
     this.deps.logger.info(
       {
-        backend,
-        source: backend === null ? 'workflow' : 'override',
+        backend: this.backendOverride,
+        model: this.modelOverride,
+        backendSource: this.backendOverride === null ? 'workflow' : 'override',
+        modelSource: this.modelOverride === null ? 'workflow' : 'override',
       },
-      'updated agent backend override',
+      'updated agent runtime override',
     );
     void this.tick();
     return this.backendSnapshot(this.lastKnownGoodConfig);
@@ -1266,6 +1297,14 @@ export class Orchestrator {
     const effective =
       this.backendOverride ?? configured ?? null;
     const overrideActive = this.backendOverride !== null;
+    const configuredModel =
+      config && effective
+        ? effective === 'cursor'
+          ? config.cursor.model
+          : config.codex.model
+        : null;
+    const effectiveModel = this.modelOverride ?? configuredModel;
+    const modelOverrideActive = this.modelOverride !== null;
     return {
       configured,
       effective,
@@ -1277,6 +1316,16 @@ export class Orchestrator {
       overrideActive,
       overrideBackend: this.backendOverride,
       overrideUpdatedAtMs: this.backendOverrideUpdatedAtMs,
+      configuredModel,
+      effectiveModel,
+      modelSource: modelOverrideActive
+        ? 'override'
+        : configuredModel === null
+          ? 'unknown'
+          : 'workflow',
+      modelOverrideActive,
+      modelOverride: this.modelOverride,
+      modelOverrideUpdatedAtMs: this.modelOverrideUpdatedAtMs,
     };
   }
 
@@ -1297,7 +1346,9 @@ export class Orchestrator {
     try {
       const parsed = JSON.parse(readFileSync(overridePath, 'utf8')) as {
         backend?: unknown;
+        model?: unknown;
         updatedAtMs?: unknown;
+        modelUpdatedAtMs?: unknown;
       };
       if (
         parsed.backend === 'codex' ||
@@ -1307,15 +1358,24 @@ export class Orchestrator {
         this.backendOverrideUpdatedAtMs =
           typeof parsed.updatedAtMs === 'number' ? parsed.updatedAtMs : null;
       }
+      if (typeof parsed.model === 'string' && parsed.model.trim()) {
+        this.modelOverride = parsed.model.trim();
+        this.modelOverrideUpdatedAtMs =
+          typeof parsed.modelUpdatedAtMs === 'number'
+            ? parsed.modelUpdatedAtMs
+            : null;
+      }
     } catch {
       this.backendOverride = null;
       this.backendOverrideUpdatedAtMs = null;
+      this.modelOverride = null;
+      this.modelOverrideUpdatedAtMs = null;
     }
   }
 
-  private persistBackendOverride(): void {
+  private persistAgentRuntimeOverride(): void {
     const overridePath = this.backendOverridePath();
-    if (this.backendOverride === null) {
+    if (this.backendOverride === null && this.modelOverride === null) {
       rmSync(overridePath, { force: true });
       return;
     }
@@ -1325,7 +1385,9 @@ export class Orchestrator {
       `${JSON.stringify(
         {
           backend: this.backendOverride,
+          model: this.modelOverride,
           updatedAtMs: this.backendOverrideUpdatedAtMs,
+          modelUpdatedAtMs: this.modelOverrideUpdatedAtMs,
         },
         null,
         2,

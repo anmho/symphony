@@ -48,7 +48,6 @@
     "validate": "bun run typecheck && bun run test"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.14",
     "@opentui/core": "0.2.15",
     "commander": "^14.0.2",
     "liquidjs": "^10.27.0",

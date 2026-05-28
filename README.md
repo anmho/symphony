@@ -67,9 +67,9 @@ Example user config:
 }
 ```
 
-Optional: add `CURSOR_API_KEY` to `secrets` only when `WORKFLOW.md` sets `cursor.api_key: $CURSOR_API_KEY` (CI or explicit API-key auth). The default **cursor** backend uses `@cursor/sdk` with your local Cursor login (`agent login` / IDE session) and does not need an API key in the workflow.
+With `agent.backend: cursor`, Symphony spawns `agent acp` (ACP over stdio), parallel to `codex app-server` for Codex. Auth is your local Cursor login (`agent login`); no API key in `WORKFLOW.md` is required.
 
-Shell helpers (same pattern as `neon-api-key` in `~/.zshrc`):
+Optional CI override: set `cursor.api_key: $CURSOR_API_KEY` in the workflow and add a Vault-backed secret in user config (same pattern as `LINEAR_API_KEY`):
 
 ```sh
 alias cursor-api-key='vault kv get -mount=secret -field=api_key prod/providers/cursor'

@@ -35,6 +35,9 @@ export interface StatusServerControls {
     maxConcurrentAgents: number | null,
   ) => ConcurrencySnapshot;
   setBackendOverride?: (backend: AgentBackendKind | null) => BackendSnapshot;
+  setAgentRuntimeOverride?: (
+    patch: import('./types.js').AgentRuntimeOverridePatch,
+  ) => BackendSnapshot;
 }
 
 export function startStatusServer(
@@ -179,26 +182,55 @@ export function startStatusServer(
     if (
       url.pathname === '/control/backend' &&
       request.method === 'POST' &&
-      controls.setBackendOverride
+      (controls.setAgentRuntimeOverride || controls.setBackendOverride)
     ) {
       const body = await readJsonBody(request);
-      const backend =
-        body.backend === null
-          ? null
-          : typeof body.backend === 'string'
-            ? body.backend
-            : undefined;
-      if (
-        backend === undefined ||
-        (backend !== null && backend !== 'codex' && backend !== 'cursor')
-      ) {
+      const hasBackend = Object.prototype.hasOwnProperty.call(body, 'backend');
+      const hasModel = Object.prototype.hasOwnProperty.call(body, 'model');
+      if (!hasBackend && !hasModel) {
         response.writeHead(400, { 'content-type': 'application/json' });
         response.end(
-          JSON.stringify({ error: 'codex_or_cursor_backend_required' }),
+          JSON.stringify({ error: 'backend_or_model_required' }),
         );
         return;
       }
-      const backendSnapshot = controls.setBackendOverride(backend);
+      const patch: import('./types.js').AgentRuntimeOverridePatch = {};
+      if (hasBackend) {
+        const backend =
+          body.backend === null
+            ? null
+            : typeof body.backend === 'string'
+              ? body.backend
+              : undefined;
+        if (
+          backend === undefined ||
+          (backend !== null && backend !== 'codex' && backend !== 'cursor')
+        ) {
+          response.writeHead(400, { 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify({ error: 'codex_or_cursor_backend_required' }),
+          );
+          return;
+        }
+        patch.backend = backend;
+      }
+      if (hasModel) {
+        const model =
+          body.model === null
+            ? null
+            : typeof body.model === 'string'
+              ? body.model
+              : undefined;
+        if (model === undefined) {
+          response.writeHead(400, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ error: 'string_or_null_model_required' }));
+          return;
+        }
+        patch.model = model;
+      }
+      const backendSnapshot = controls.setAgentRuntimeOverride
+        ? controls.setAgentRuntimeOverride(patch)
+        : controls.setBackendOverride!(patch.backend ?? null);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
         JSON.stringify({ backend: backendSnapshot, snapshot: getSnapshot() }, null, 2),
@@ -306,12 +338,23 @@ export async function resumeOrchestrator(
 export async function setDaemonBackend(
   port = DEFAULT_STATUS_PORT,
   backend: AgentBackendKind | null,
+  model: string | null | undefined = undefined,
+): Promise<{ backend: BackendSnapshot } | null> {
+  return setDaemonAgentRuntime(
+    port,
+    model === undefined ? { backend } : { backend, model },
+  );
+}
+
+export async function setDaemonAgentRuntime(
+  port = DEFAULT_STATUS_PORT,
+  patch: import('./types.js').AgentRuntimeOverridePatch,
 ): Promise<{ backend: BackendSnapshot } | null> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/control/backend`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ backend }),
+      body: JSON.stringify(patch),
     });
     if (!response.ok) {
       return null;

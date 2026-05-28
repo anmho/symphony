@@ -228,8 +228,11 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       maxConcurrentAgentsByState: {}
     },
     cursor: {
-      apiKey: null,
-      model: "composer-2.5"
+      command: "agent acp",
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
+      apiKey: null
     },
     codex: {
       command,

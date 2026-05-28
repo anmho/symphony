@@ -40,13 +40,12 @@ agent:
   max_retry_backoff_ms: 300000
   rate_limit_probe_interval_ms: 15000
 
-# Cursor backend uses local Cursor login via @cursor/sdk — no api_key required.
-# Optional for CI or explicit API-key auth (same pattern as LINEAR_API_KEY):
-#   alias cursor-api-key='vault kv get -mount=secret -field=api_key prod/providers/cursor'
-#   # then in ~/.config/symphony/config.json secrets.CURSOR_API_KEY.command
-# cursor:
-#   api_key: $CURSOR_API_KEY
-#   model: composer-latest
+cursor:
+  command: agent acp
+  model: composer-2.5
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 5000
+  # api_key: $CURSOR_API_KEY   # optional; default auth is agent login
 
 codex:
   command: codex app-server --listen stdio://

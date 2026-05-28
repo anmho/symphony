@@ -174,18 +174,38 @@ final class StatusService: ObservableObject {
         }
     }
 
-    func setAgentBackend(_ backend: String) {
-        performControl(success: "Agent backend updated.") {
-            let result = try await StatusControl.setBackend(backend, port: self.settings.statusPort)
+    func setAgentBackend(_ backend: String, model: String?) {
+        performControl(success: "Agent runtime updated.") {
+            let result = try await StatusControl.setBackend(
+                backend,
+                model: model,
+                port: self.settings.statusPort
+            )
             let effective = result.backend.effective ?? backend
-            return "Agent backend set to \(effective)."
+            let modelText = result.backend.effectiveModel ?? "default"
+            return "Agent backend \(effective), model \(modelText)."
+        }
+    }
+
+    func setAgentModel(_ model: String) {
+        performControl(success: "Agent model updated.") {
+            let result = try await StatusControl.setModel(model, port: self.settings.statusPort)
+            let effective = result.backend.effectiveModel ?? model
+            return "Agent model set to \(effective)."
         }
     }
 
     func clearAgentBackend() {
-        performControl(success: "Agent backend override cleared.") {
+        performControl(success: "Agent runtime overrides cleared.") {
             _ = try await StatusControl.clearBackend(port: self.settings.statusPort)
-            return "Using WORKFLOW.md agent.backend."
+            return "Using WORKFLOW.md agent.backend and model."
+        }
+    }
+
+    func clearAgentModel() {
+        performControl(success: "Agent model override cleared.") {
+            _ = try await StatusControl.clearModel(port: self.settings.statusPort)
+            return "Using WORKFLOW.md model for the active backend."
         }
     }
 

@@ -83,8 +83,11 @@ export interface AgentConfig {
 }
 
 export interface CursorConfig {
+  command: string;
+  model: string | null;
+  turnTimeoutMs: number;
+  readTimeoutMs: number;
   apiKey: string | null;
-  model: string;
 }
 
 export interface CodexConfig {
@@ -202,6 +205,11 @@ export interface ConcurrencySnapshot {
   overrideUpdatedAtMs: number | null;
 }
 
+export interface AgentRuntimeOverridePatch {
+  backend?: AgentBackendKind | null;
+  model?: string | null;
+}
+
 export interface BackendSnapshot {
   configured: AgentBackendKind | null;
   effective: AgentBackendKind | null;
@@ -209,6 +217,12 @@ export interface BackendSnapshot {
   overrideActive: boolean;
   overrideBackend: AgentBackendKind | null;
   overrideUpdatedAtMs: number | null;
+  configuredModel: string | null;
+  effectiveModel: string | null;
+  modelSource: 'workflow' | 'override' | 'unknown';
+  modelOverrideActive: boolean;
+  modelOverride: string | null;
+  modelOverrideUpdatedAtMs: number | null;
 }
 
 export interface AgentTurnResult {

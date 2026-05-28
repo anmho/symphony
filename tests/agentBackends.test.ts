@@ -61,8 +61,11 @@ function minimalConfig(backend: 'codex' | 'cursor'): EffectiveWorkflowConfig {
       model: null,
     },
     cursor: {
+      command: 'agent acp',
+      model: null,
+      turnTimeoutMs: 3600000,
+      readTimeoutMs: 5000,
       apiKey: null,
-      model: 'composer-2.5',
     },
     github: { prIdentity: null },
     pullRequest: { backend: 'github', graphiteFallback: 'fail' },
@@ -91,8 +94,15 @@ describe('agentBackends', () => {
     expect(backend).toBe(cursorBackend);
   });
 
-  it('assertAgentBackendReady does not require cursor api key', () => {
+  it('assertAgentBackendReady requires cursor command', () => {
     expect(() => assertAgentBackendReady(minimalConfig('cursor'), 'cursor')).not.toThrow();
+    const config = minimalConfig('cursor');
+    expect(() =>
+      assertAgentBackendReady(
+        { ...config, cursor: { ...config.cursor, command: '  ' } },
+        'cursor',
+      ),
+    ).toThrow('cursor_command_missing');
   });
 
   it('effectiveAgentBackendKind prefers override over workflow config', () => {

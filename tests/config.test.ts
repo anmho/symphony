@@ -65,6 +65,7 @@ Prompt
     expect(config.agent.backend).toBe("cursor");
     expect(config.cursor.apiKey).toBe("cur_test");
     expect(config.cursor.model).toBe("composer-latest");
+    expect(config.cursor.command).toBe("agent acp");
   });
 
   it("does not load CURSOR_API_KEY from env when cursor.api_key is omitted", () => {
@@ -82,7 +83,8 @@ Prompt
     const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
 
     expect(config.cursor.apiKey).toBeNull();
-    expect(config.cursor.model).toBe("composer-latest");
+    expect(config.cursor.model).toBeNull();
+    expect(config.cursor.command).toBe("agent acp");
   });
 
   it("resolves CURSOR_API_KEY from vault secret command in user config", () => {
@@ -114,7 +116,7 @@ Prompt
     expect(config.cursor.apiKey).toBe("cur_from_vault");
   });
 
-  it("defaults agent.backend to codex with a default cursor model", () => {
+  it("defaults agent.backend to codex with cursor acp command defaults", () => {
     vi.stubEnv("LINEAR_API_KEY", "lin_test");
     vi.stubEnv("CURSOR_API_KEY", "");
     const definition = parseWorkflowMarkdown(`---
@@ -128,7 +130,8 @@ Prompt
 
     expect(config.agent.backend).toBe("codex");
     expect(config.cursor.apiKey).toBeNull();
-    expect(config.cursor.model).toBe("composer-latest");
+    expect(config.cursor.model).toBeNull();
+    expect(config.cursor.command).toBe("agent acp");
   });
 
   it("requires a Linear project slug or team key", () => {

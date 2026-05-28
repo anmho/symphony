@@ -31,6 +31,7 @@ import {
   resumeIssue,
   resumeOrchestrator,
   resumeRateLimitedRuns,
+  setDaemonAgentRuntime,
   setDaemonBackend,
   setDaemonMaxConcurrency,
   startStatusServer,
@@ -56,6 +57,7 @@ interface CliOptions {
   workflow?: string;
   statusPort: string;
   backend?: string;
+  model?: string;
 }
 
 const program = new Command();
@@ -77,6 +79,10 @@ program
   .option(
     '--backend <kind>',
     'agent backend override for this run (codex or cursor)',
+  )
+  .option(
+    '--model <id>',
+    'agent model override for this run (applies to the effective backend)',
   );
 
 program
@@ -353,9 +359,13 @@ backend
   .command('set')
   .description('Set a persisted agent backend override for the running daemon.')
   .argument('<kind>', 'codex or cursor')
-  .action(async (kind: string) => {
+  .option('--model <id>', 'model override for the effective backend')
+  .action(async (kind: string, options: { model?: string }) => {
     const port = readStatusPort(program.opts<CliOptions>());
-    const result = await setDaemonBackend(port, parseAgentBackendKind(kind));
+    const result = await setDaemonAgentRuntime(port, {
+      backend: parseAgentBackendKind(kind),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+    });
     if (!result) {
       console.log(
         `Symphony is not running on 127.0.0.1:${port}, or this runner does not support backend controls.`,
@@ -367,10 +377,13 @@ backend
 
 backend
   .command('clear')
-  .description('Clear the persisted agent backend override.')
+  .description('Clear persisted agent backend and model overrides.')
   .action(async () => {
     const port = readStatusPort(program.opts<CliOptions>());
-    const result = await setDaemonBackend(port, null);
+    const result = await setDaemonAgentRuntime(port, {
+      backend: null,
+      model: null,
+    });
     if (!result) {
       console.log(
         `Symphony is not running on 127.0.0.1:${port}, or this runner does not support backend controls.`,
@@ -378,6 +391,54 @@ backend
       return;
     }
     console.log(formatBackendStatus(result.backend));
+  });
+
+const model = program
+  .command('model')
+  .description('View or change the running daemon agent model override.');
+
+model
+  .command('get', { isDefault: true })
+  .description('Show effective daemon agent model.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const status = await fetchDaemonStatus(port);
+    if (!status) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}.`);
+      return;
+    }
+    console.log(formatModelStatus(status.backend));
+  });
+
+model
+  .command('set')
+  .description('Set a persisted model override for the effective backend.')
+  .argument('<id>', 'model id (e.g. composer-2.5 or a Codex model name)')
+  .action(async (id: string) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonAgentRuntime(port, { model: id });
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support model controls.`,
+      );
+      return;
+    }
+    console.log(formatModelStatus(result.backend));
+  });
+
+model
+  .command('clear')
+  .description('Clear the persisted model override.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonAgentRuntime(port, { model: null });
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support model controls.`,
+      );
+      return;
+    }
+    console.log(formatModelStatus(result.backend));
   });
 
 program
@@ -606,6 +667,9 @@ function backgroundCommand(
   if (options.backend) {
     runArgs.push('--backend', options.backend);
   }
+  if (options.model) {
+    runArgs.push('--model', options.model);
+  }
   if (entrypoint.endsWith('.ts')) {
     return {
       command: 'bun',
@@ -621,8 +685,13 @@ async function runForeground(options: CliOptions): Promise<void> {
   const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
   const orchestrator = createDefaultOrchestrator(workflowPath);
-  if (options.backend) {
-    orchestrator.setBackendOverride(parseAgentBackendKind(options.backend));
+  if (options.backend || options.model) {
+    orchestrator.setAgentRuntimeOverride({
+      ...(options.backend
+        ? { backend: parseAgentBackendKind(options.backend) }
+        : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+    });
   }
   const statusServer = await startStatusServer(
     () => orchestrator.snapshot(),
@@ -649,6 +718,8 @@ async function runForeground(options: CliOptions): Promise<void> {
       setMaxConcurrencyOverride: (maxConcurrentAgents) =>
         orchestrator.setMaxConcurrencyOverride(maxConcurrentAgents),
       setBackendOverride: (backend) => orchestrator.setBackendOverride(backend),
+      setAgentRuntimeOverride: (patch) =>
+        orchestrator.setAgentRuntimeOverride(patch),
     },
   );
 
@@ -788,12 +859,37 @@ function formatBackendStatus(backend: {
   source: string;
   overrideActive: boolean;
   overrideBackend: string | null;
+  configuredModel?: string | null;
+  effectiveModel?: string | null;
+  modelSource?: string;
+  modelOverrideActive?: boolean;
+  modelOverride?: string | null;
 }): string {
   return [
     `configured=${backend.configured ?? 'unknown'}`,
     `effective=${backend.effective ?? 'unknown'}`,
     `source=${backend.source}`,
     `override=${backend.overrideActive ? backend.overrideBackend : 'none'}`,
+    `model=${backend.effectiveModel ?? 'default'}`,
+    `model_source=${backend.modelSource ?? 'unknown'}`,
+    `model_override=${backend.modelOverrideActive ? backend.modelOverride : 'none'}`,
+  ].join(' ');
+}
+
+function formatModelStatus(backend: {
+  configuredModel: string | null;
+  effectiveModel: string | null;
+  modelSource: string;
+  modelOverrideActive: boolean;
+  modelOverride: string | null;
+  effective: string | null;
+}): string {
+  return [
+    `backend=${backend.effective ?? 'unknown'}`,
+    `configured=${backend.configuredModel ?? 'default'}`,
+    `effective=${backend.effectiveModel ?? 'default'}`,
+    `source=${backend.modelSource}`,
+    `override=${backend.modelOverrideActive ? backend.modelOverride : 'none'}`,
   ].join(' ');
 }
 

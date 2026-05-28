@@ -6,6 +6,7 @@ import {
   queueSteer,
   requestChanges,
   resumeIssue,
+  setDaemonAgentRuntime,
   setDaemonBackend,
   setDaemonMaxConcurrency,
   startStatusServer,
@@ -29,6 +30,21 @@ describe('status server', () => {
   it('serves work events and selected-agent controls', async () => {
     let maxConcurrencyOverride: number | null = null;
     let backendOverride: 'codex' | 'cursor' | null = null;
+    let modelOverride: string | null = null;
+    const runtimeBackendSnapshot = () => ({
+      configured: 'codex' as const,
+      effective: backendOverride ?? 'codex',
+      source: backendOverride === null ? ('workflow' as const) : ('override' as const),
+      overrideActive: backendOverride !== null,
+      overrideBackend: backendOverride,
+      overrideUpdatedAtMs: backendOverride === null ? null : 2000,
+      configuredModel: null,
+      effectiveModel: modelOverride,
+      modelSource: modelOverride === null ? ('workflow' as const) : ('override' as const),
+      modelOverrideActive: modelOverride !== null,
+      modelOverride,
+      modelOverrideUpdatedAtMs: modelOverride === null ? null : 2000,
+    });
     server = await startStatusServer(() => snapshot(), 0, {
       getEvents: () => [
         {
@@ -63,14 +79,25 @@ describe('status server', () => {
       },
       setBackendOverride: (backend) => {
         backendOverride = backend;
-        return {
-          configured: 'codex',
-          effective: backend ?? 'codex',
-          source: backend === null ? 'workflow' : 'override',
-          overrideActive: backend !== null,
-          overrideBackend: backend,
-          overrideUpdatedAtMs: backend === null ? null : 2000,
-        };
+        if (backend === null) {
+          modelOverride = null;
+        }
+        return runtimeBackendSnapshot();
+      },
+      setAgentRuntimeOverride: (patch) => {
+        if ('backend' in patch) {
+          backendOverride = patch.backend ?? null;
+          if (backendOverride === null) {
+            modelOverride = null;
+          }
+        }
+        if ('model' in patch) {
+          modelOverride =
+            patch.model === null || patch.model === undefined
+              ? null
+              : patch.model;
+        }
+        return runtimeBackendSnapshot();
       },
     });
     const address = server.address();
@@ -122,6 +149,15 @@ describe('status server', () => {
         overrideActive: false,
       },
     });
+    await expect(
+      setDaemonAgentRuntime(port, { model: 'composer-2.5' }),
+    ).resolves.toMatchObject({
+      backend: {
+        effectiveModel: 'composer-2.5',
+        modelOverrideActive: true,
+      },
+    });
+    expect(modelOverride).toBe('composer-2.5');
   });
 
   it('can select latest visible events from a noisy raw tail', () => {
@@ -198,6 +234,12 @@ function snapshot(): OrchestratorSnapshot {
       overrideActive: false,
       overrideBackend: null,
       overrideUpdatedAtMs: null,
+      configuredModel: null,
+      effectiveModel: null,
+      modelSource: 'workflow',
+      modelOverrideActive: false,
+      modelOverride: null,
+      modelOverrideUpdatedAtMs: null,
     },
     lastTickAtMs: null,
     lastConfigError: null,

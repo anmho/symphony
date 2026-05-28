@@ -19,6 +19,9 @@ export function assertAgentBackendReady(
   if (backend === 'codex' && !config.codex.command.trim()) {
     throw new Error('codex_command_missing');
   }
+  if (backend === 'cursor' && !config.cursor.command.trim()) {
+    throw new Error('cursor_command_missing');
+  }
 }
 
 export function effectiveAgentBackendKind(
@@ -28,15 +31,63 @@ export function effectiveAgentBackendKind(
   return override ?? config.agent.backend;
 }
 
+export function configuredModelForBackend(
+  config: EffectiveWorkflowConfig,
+  backend: AgentBackendKind,
+): string | null {
+  return backend === 'cursor' ? config.cursor.model : config.codex.model;
+}
+
+export function withAgentRuntimeOverrides(
+  config: EffectiveWorkflowConfig,
+  backendOverride: AgentBackendKind | null,
+  modelOverride: string | null,
+): EffectiveWorkflowConfig {
+  const backend = effectiveAgentBackendKind(config, backendOverride);
+  const effectiveModel =
+    modelOverride ?? configuredModelForBackend(config, backend);
+  if (
+    backendOverride === null &&
+    modelOverride === null
+  ) {
+    return config;
+  }
+  if (backend === 'cursor') {
+    if (effectiveModel === config.cursor.model) {
+      return config;
+    }
+    return {
+      ...config,
+      cursor: { ...config.cursor, model: effectiveModel },
+    };
+  }
+  if (effectiveModel === config.codex.model) {
+    return config;
+  }
+  return {
+    ...config,
+    codex: { ...config.codex, model: effectiveModel },
+  };
+}
+
 export function runAgentTurnForConfig(
   config: EffectiveWorkflowConfig,
-  override: AgentBackendKind | null,
+  backendOverride: AgentBackendKind | null,
+  modelOverride: string | null,
   input: Parameters<AgentBackend['runTurn']>[0],
   options?: Parameters<AgentBackend['runTurn']>[1],
 ): ReturnType<AgentBackend['runTurn']> {
-  const kind = effectiveAgentBackendKind(config, override);
-  assertAgentBackendReady(config, kind);
-  return createAgentBackend(kind).runTurn(input, options);
+  const runtimeConfig = withAgentRuntimeOverrides(
+    config,
+    backendOverride,
+    modelOverride,
+  );
+  const kind = effectiveAgentBackendKind(runtimeConfig, backendOverride);
+  assertAgentBackendReady(runtimeConfig, kind);
+  return createAgentBackend(kind).runTurn(
+    { ...input, config: runtimeConfig },
+    options,
+  );
 }
 
 export function parseAgentBackendKind(value: string): AgentBackendKind {
