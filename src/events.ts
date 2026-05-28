@@ -125,9 +125,12 @@ export class AgentWorkEventStore {
 
   private readIssueEvents(issue: string): AgentWorkEvent[] {
     const buffered = this.buffers.get(issue);
+    if (buffered && buffered.length > 0) {
+      return [...buffered];
+    }
     const filePath = this.logPathForIssue(issue);
     if (!existsSync(filePath)) {
-      return buffered ? [...buffered] : [];
+      return [];
     }
     return parseJsonl(readFileSync(filePath, "utf8"));
   }

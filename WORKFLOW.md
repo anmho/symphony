@@ -75,11 +75,10 @@ codex:
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 300000
-  model:
+  model: auto
 
 cursor:
   command: agent acp
-  model: auto
   turn_timeout_ms: 3600000
   read_timeout_ms: 0
 
