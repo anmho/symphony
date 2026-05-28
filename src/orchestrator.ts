@@ -1809,15 +1809,19 @@ export class Orchestrator {
       );
       return false;
     }
-    if (!isPullRequestConflicted(readiness)) {
+    if (!needsAutomaticConflictResolution(readiness)) {
       return false;
     }
 
+    const conflictType = readiness.mergeStateStatus === 'BEHIND' 
+      ? 'is behind main and needs rebasing/conflict resolution'
+      : 'has merge conflicts';
+    
     await this.moveMergeIssueBackToActive(
       config,
       issue,
       [
-        'Symphony found the linked PR has merge conflicts and needs agent rework.',
+        `Symphony found the linked PR ${conflictType} and moved it back for automatic agent resolution.`,
         `PR: ${readiness.url}`,
         `mergeStateStatus: ${readiness.mergeStateStatus ?? 'unknown'}`,
         `mergeable: ${readiness.mergeable ?? 'unknown'}`,
@@ -1907,12 +1911,16 @@ export class Orchestrator {
       return true;
     }
 
-    if (isPullRequestConflicted(readiness)) {
+    if (needsAutomaticConflictResolution(readiness)) {
+      const conflictType = readiness.mergeStateStatus === 'BEHIND' 
+        ? 'is behind main and needs rebasing/conflict resolution'
+        : 'is not mergeable and has conflicts';
+        
       await this.moveMergeIssueBackToActive(
         config,
         issue,
         [
-          'Symphony found the approved PR is not mergeable and needs agent rework.',
+          `Symphony found the approved PR ${conflictType} and moved it back for automatic agent resolution.`,
           `PR: ${readiness.url}`,
           `mergeStateStatus: ${readiness.mergeStateStatus ?? 'unknown'}`,
           `mergeable: ${readiness.mergeable ?? 'unknown'}`,
@@ -1923,7 +1931,7 @@ export class Orchestrator {
     if (!isPullRequestReadyToMerge(readiness, issue)) {
       if (
         isPullRequestApproved(readiness, issue) &&
-        !isPullRequestConflicted(readiness) &&
+        !needsAutomaticConflictResolution(readiness) &&
         (readiness.mergeStateStatus === 'UNSTABLE' ||
           readiness.mergeStateStatus === 'BLOCKED')
       ) {
@@ -2707,6 +2715,16 @@ function isPullRequestConflicted(
   return (
     readiness.mergeStateStatus === 'DIRTY' ||
     readiness.mergeable === 'CONFLICTING'
+  );
+}
+
+function needsAutomaticConflictResolution(
+  readiness: PullRequestMergeReadiness,
+): boolean {
+  return (
+    readiness.mergeStateStatus === 'DIRTY' ||
+    readiness.mergeable === 'CONFLICTING' ||
+    readiness.mergeStateStatus === 'BEHIND'
   );
 }
 
