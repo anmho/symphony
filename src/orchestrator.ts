@@ -1759,6 +1759,11 @@ export class Orchestrator {
       return false;
     }
 
+    // Check for unresolved review comments before moving to merge eligible
+    if (await this.hasUnresolvedPrReviewFeedback(config, issue, readiness.url)) {
+      return false;
+    }
+
     await this.deps.moveIssueToState(config, issue.id, mergeState);
     await this.deps.writeRunnerComment(
       config,
