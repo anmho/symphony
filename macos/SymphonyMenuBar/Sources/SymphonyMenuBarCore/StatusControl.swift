@@ -39,10 +39,19 @@ public enum StatusControl {
         try await postControl(path: "request-changes", body: ["issue": issue, "feedback": feedback], port: port)
     }
 
+    public static func setBackend(_ backend: String, port: Int) async throws -> SetBackendResult {
+        try await postControl(path: "backend", body: ["backend": backend], port: port)
+    }
+
+    public static func clearBackend(port: Int) async throws -> SetBackendResult {
+        try await postControl(path: "backend", body: [:], port: port, nullBackend: true)
+    }
+
     private static func postControl<T: Decodable>(
         path: String,
         body: [String: String],
-        port: Int
+        port: Int,
+        nullBackend: Bool = false
     ) async throws -> T {
         guard let url = URL(string: "http://127.0.0.1:\(port)/control/\(path)") else {
             throw StatusControlError.requestFailed("Invalid control URL.")
@@ -51,7 +60,11 @@ public enum StatusControl {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if nullBackend {
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["backend": NSNull()])
+        } else {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
         request.timeoutInterval = 10
 
         let data: Data
@@ -107,4 +120,17 @@ public struct SteerResult: Codable {
 public struct RequestChangesResult: Codable {
     public let issue: String
     public let state: String
+}
+
+public struct SetBackendResult: Codable {
+    public let backend: BackendSnapshot
+}
+
+public struct BackendSnapshot: Codable, Equatable {
+    public let configured: String?
+    public let effective: String?
+    public let source: String
+    public let overrideActive: Bool
+    public let overrideBackend: String?
+    public let overrideUpdatedAtMs: Int?
 }
