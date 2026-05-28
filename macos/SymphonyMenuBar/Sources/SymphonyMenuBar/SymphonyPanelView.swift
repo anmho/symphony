@@ -388,14 +388,65 @@ struct SymphonyPanelView: View {
     }
 
     private var settingsContent: some View {
-        SettingsInlineView(settings: service.settings) { updated in
-            service.settings = updated
-            updated.save()
-            if updated.notificationsEnabled {
-                NotificationService.shared.requestAuthorizationIfNeeded()
+        VStack(alignment: .leading, spacing: 14) {
+            if service.isOnline, let snapshot = service.snapshot {
+                backendPicker(snapshot: snapshot)
             }
-            service.start()
+            SettingsInlineView(settings: service.settings) { updated in
+                service.settings = updated
+                updated.save()
+                if updated.notificationsEnabled {
+                    NotificationService.shared.requestAuthorizationIfNeeded()
+                }
+                service.start()
+            }
         }
+    }
+
+    private func backendPicker(snapshot: OrchestratorSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Agent backend")
+                .font(.subheadline.weight(.semibold))
+            Text(backendSubtitle(snapshot.backend))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                backendButton("Codex", backend: "codex", current: snapshot.backend)
+                backendButton("Cursor", backend: "cursor", current: snapshot.backend)
+                if snapshot.backend.overrideActive {
+                    Button("Use workflow default") {
+                        service.clearAgentBackend()
+                    }
+                    .controlSize(.small)
+                    .disabled(service.isBusy)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+    }
+
+    private func backendSubtitle(_ backend: BackendSnapshot) -> String {
+        let effective = backend.effective ?? "unknown"
+        if backend.overrideActive {
+            return "Override active · effective \(effective)"
+        }
+        return "From WORKFLOW.md · effective \(effective)"
+    }
+
+    private func backendButton(
+        _ title: String,
+        backend: String,
+        current: BackendSnapshot
+    ) -> some View {
+        let selected = (current.effective ?? current.configured) == backend
+        return Button(title) {
+            service.setAgentBackend(backend)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(selected ? .accentColor : .secondary)
+        .disabled(service.isBusy || selected)
     }
 
     private var panelFooter: some View {

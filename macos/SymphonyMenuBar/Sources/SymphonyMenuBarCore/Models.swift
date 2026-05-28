@@ -9,6 +9,7 @@ public struct OrchestratorSnapshot: Codable {
     public let completed: [String]
     public let completedDetails: [IssueSummary]
     public let codexRateLimit: CodexRateLimitSnapshot
+    public let backend: BackendSnapshot
     public let lastConfigError: String?
     public let paused: Bool
     public let pausedAtMs: Int?
@@ -22,6 +23,7 @@ public struct OrchestratorSnapshot: Codable {
         case completed
         case completedDetails
         case codexRateLimit
+        case backend
         case lastConfigError
         case paused
         case pausedAtMs
@@ -37,6 +39,15 @@ public struct OrchestratorSnapshot: Codable {
         completed = try container.decode([String].self, forKey: .completed)
         completedDetails = try container.decodeIfPresent([IssueSummary].self, forKey: .completedDetails) ?? []
         codexRateLimit = try container.decode(CodexRateLimitSnapshot.self, forKey: .codexRateLimit)
+        backend = try container.decodeIfPresent(BackendSnapshot.self, forKey: .backend)
+            ?? BackendSnapshot(
+                configured: nil,
+                effective: nil,
+                source: "unknown",
+                overrideActive: false,
+                overrideBackend: nil,
+                overrideUpdatedAtMs: nil
+            )
         lastConfigError = try container.decodeIfPresent(String.self, forKey: .lastConfigError)
         paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         pausedAtMs = try container.decodeIfPresent(Int.self, forKey: .pausedAtMs)

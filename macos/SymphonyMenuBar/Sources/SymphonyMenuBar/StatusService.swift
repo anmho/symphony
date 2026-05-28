@@ -174,6 +174,21 @@ final class StatusService: ObservableObject {
         }
     }
 
+    func setAgentBackend(_ backend: String) {
+        performControl(success: "Agent backend updated.") {
+            let result = try await StatusControl.setBackend(backend, port: self.settings.statusPort)
+            let effective = result.backend.effective ?? backend
+            return "Agent backend set to \(effective)."
+        }
+    }
+
+    func clearAgentBackend() {
+        performControl(success: "Agent backend override cleared.") {
+            _ = try await StatusControl.clearBackend(port: self.settings.statusPort)
+            return "Using WORKFLOW.md agent.backend."
+        }
+    }
+
     func requestCodexReview(_ identifier: String, prUrl: String?) {
         var arguments = ["review", "request", identifier]
         if let prUrl {
