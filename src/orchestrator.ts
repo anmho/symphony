@@ -1893,6 +1893,20 @@ export class Orchestrator {
       );
       return true;
     }
+
+    // Check for unresolved review comments before merging approved PRs
+    if (await this.hasUnresolvedPrReviewFeedback(config, issue, readiness.url)) {
+      await this.moveMergeIssueBackToActive(
+        config,
+        issue,
+        [
+          'Symphony found unresolved review comments on the approved PR and moved it back for agent rework.',
+          `PR: ${readiness.url}`,
+        ].join('\n'),
+      );
+      return true;
+    }
+
     if (isPullRequestConflicted(readiness)) {
       await this.moveMergeIssueBackToActive(
         config,
