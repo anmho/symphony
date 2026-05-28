@@ -18,6 +18,7 @@ import {
   resolveWorkflowPath,
 } from './config.js';
 import { logger } from './logger.js';
+import { parseAgentBackendKind } from './agentBackends.js';
 import { createDefaultOrchestrator } from './orchestrator.js';
 import { runCommand } from './process.js';
 import {
@@ -30,6 +31,7 @@ import {
   resumeIssue,
   resumeOrchestrator,
   resumeRateLimitedRuns,
+  setDaemonBackend,
   setDaemonMaxConcurrency,
   startStatusServer,
 } from './status.js';
@@ -53,6 +55,7 @@ import {
 interface CliOptions {
   workflow?: string;
   statusPort: string;
+  backend?: string;
 }
 
 const program = new Command();
@@ -70,6 +73,10 @@ program
     '--status-port <port>',
     'local status server port',
     String(DEFAULT_STATUS_PORT),
+  )
+  .option(
+    '--backend <kind>',
+    'agent backend override for this run (codex or cursor)',
   );
 
 program
@@ -325,6 +332,54 @@ concurrency
     console.log(formatConcurrencyStatus(result.concurrency));
   });
 
+const backend = program
+  .command('backend')
+  .description('View or change the running daemon agent backend.');
+
+backend
+  .command('get', { isDefault: true })
+  .description('Show effective daemon agent backend.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const status = await fetchDaemonStatus(port);
+    if (!status) {
+      console.log(`Symphony is not running on 127.0.0.1:${port}.`);
+      return;
+    }
+    console.log(formatBackendStatus(status.backend));
+  });
+
+backend
+  .command('set')
+  .description('Set a persisted agent backend override for the running daemon.')
+  .argument('<kind>', 'codex or cursor')
+  .action(async (kind: string) => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonBackend(port, parseAgentBackendKind(kind));
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support backend controls.`,
+      );
+      return;
+    }
+    console.log(formatBackendStatus(result.backend));
+  });
+
+backend
+  .command('clear')
+  .description('Clear the persisted agent backend override.')
+  .action(async () => {
+    const port = readStatusPort(program.opts<CliOptions>());
+    const result = await setDaemonBackend(port, null);
+    if (!result) {
+      console.log(
+        `Symphony is not running on 127.0.0.1:${port}, or this runner does not support backend controls.`,
+      );
+      return;
+    }
+    console.log(formatBackendStatus(result.backend));
+  });
+
 program
   .command('logs')
   .description('Show the public work stream for an agent.')
@@ -514,7 +569,7 @@ async function startBackground(options: CliOptions): Promise<void> {
   mkdirSync(stateDir(), { recursive: true });
 
   const logFd = openSync(logPath(statusPort), 'a');
-  const background = backgroundCommand(workflowPath, statusPort);
+  const background = backgroundCommand(workflowPath, statusPort, options);
   const child = spawn(background.command, background.args, {
     cwd: process.cwd(),
     detached: true,
@@ -538,6 +593,7 @@ async function startBackground(options: CliOptions): Promise<void> {
 function backgroundCommand(
   workflowPath: string,
   statusPort: number,
+  options: CliOptions,
 ): { command: string; args: string[]; argv0: string } {
   const entrypoint = entrypointPath();
   const runArgs = [
@@ -547,6 +603,9 @@ function backgroundCommand(
     '--status-port',
     String(statusPort),
   ];
+  if (options.backend) {
+    runArgs.push('--backend', options.backend);
+  }
   if (entrypoint.endsWith('.ts')) {
     return {
       command: 'bun',
@@ -562,6 +621,9 @@ async function runForeground(options: CliOptions): Promise<void> {
   const workflowPath = await resolveWorkflowPath(options.workflow);
   const statusPort = readStatusPort(options);
   const orchestrator = createDefaultOrchestrator(workflowPath);
+  if (options.backend) {
+    orchestrator.setBackendOverride(parseAgentBackendKind(options.backend));
+  }
   const statusServer = await startStatusServer(
     () => orchestrator.snapshot(),
     statusPort,
@@ -586,6 +648,7 @@ async function runForeground(options: CliOptions): Promise<void> {
       resumeDispatch: () => orchestrator.resume(),
       setMaxConcurrencyOverride: (maxConcurrentAgents) =>
         orchestrator.setMaxConcurrencyOverride(maxConcurrentAgents),
+      setBackendOverride: (backend) => orchestrator.setBackendOverride(backend),
     },
   );
 
@@ -717,6 +780,21 @@ function readPositiveInteger(value: string, name: string): number {
     throw new Error(`invalid_${name}: ${value}`);
   }
   return parsed;
+}
+
+function formatBackendStatus(backend: {
+  configured: string | null;
+  effective: string | null;
+  source: string;
+  overrideActive: boolean;
+  overrideBackend: string | null;
+}): string {
+  return [
+    `configured=${backend.configured ?? 'unknown'}`,
+    `effective=${backend.effective ?? 'unknown'}`,
+    `source=${backend.source}`,
+    `override=${backend.overrideActive ? backend.overrideBackend : 'none'}`,
+  ].join(' ');
 }
 
 function formatConcurrencyStatus(concurrency: {

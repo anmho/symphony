@@ -1,6 +1,8 @@
 import http, { type Server } from 'node:http';
 import type {
+  AgentBackendKind,
   AgentWorkEvent,
+  BackendSnapshot,
   ConcurrencySnapshot,
   OrchestratorSnapshot,
 } from './types.js';
@@ -32,6 +34,7 @@ export interface StatusServerControls {
   setMaxConcurrencyOverride?: (
     maxConcurrentAgents: number | null,
   ) => ConcurrencySnapshot;
+  setBackendOverride?: (backend: AgentBackendKind | null) => BackendSnapshot;
 }
 
 export function startStatusServer(
@@ -174,6 +177,36 @@ export function startStatusServer(
     }
 
     if (
+      url.pathname === '/control/backend' &&
+      request.method === 'POST' &&
+      controls.setBackendOverride
+    ) {
+      const body = await readJsonBody(request);
+      const backend =
+        body.backend === null
+          ? null
+          : typeof body.backend === 'string'
+            ? body.backend
+            : undefined;
+      if (
+        backend === undefined ||
+        (backend !== null && backend !== 'codex' && backend !== 'cursor')
+      ) {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({ error: 'codex_or_cursor_backend_required' }),
+        );
+        return;
+      }
+      const backendSnapshot = controls.setBackendOverride(backend);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ backend: backendSnapshot, snapshot: getSnapshot() }, null, 2),
+      );
+      return;
+    }
+
+    if (
       url.pathname === '/control/pause' &&
       request.method === 'POST' &&
       controls.pauseDispatch
@@ -265,6 +298,25 @@ export async function resumeOrchestrator(
       return null;
     }
     return (await response.json()) as { paused: boolean };
+  } catch {
+    return null;
+  }
+}
+
+export async function setDaemonBackend(
+  port = DEFAULT_STATUS_PORT,
+  backend: AgentBackendKind | null,
+): Promise<{ backend: BackendSnapshot } | null> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/control/backend`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ backend }),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as { backend: BackendSnapshot };
   } catch {
     return null;
   }

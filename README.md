@@ -67,6 +67,14 @@ Example user config:
 }
 ```
 
+Optional: add `CURSOR_API_KEY` to `secrets` only when `WORKFLOW.md` sets `cursor.api_key: $CURSOR_API_KEY` (CI or explicit API-key auth). The default **cursor** backend uses `@cursor/sdk` with your local Cursor login (`agent login` / IDE session) and does not need an API key in the workflow.
+
+Shell helpers (same pattern as `neon-api-key` in `~/.zshrc`):
+
+```sh
+alias cursor-api-key='vault kv get -mount=secret -field=api_key prod/providers/cursor'
+```
+
 User config lives under `~/.config/symphony` because it is machine-local configuration. The repo `.symphony/` directory is reserved for runtime workspaces and state.
 
 Validate the workflow config:

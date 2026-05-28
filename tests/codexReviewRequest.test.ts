@@ -146,11 +146,16 @@ function makeConfig(options: { identity?: boolean } = {}): EffectiveWorkflowConf
       timeoutMs: 60000
     },
     agent: {
+      backend: "codex",
       maxConcurrentAgents: 5,
       maxTurns: 20,
       maxRetryBackoffMs: 300000,
       rateLimitProbeIntervalMs: 300000,
       maxConcurrentAgentsByState: {}
+    },
+    cursor: {
+      apiKey: null,
+      model: "composer-2.5"
     },
     codex: {
       command: "codex app-server --listen stdio://",

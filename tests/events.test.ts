@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AgentWorkEventStore, workEventFromCodexEvent } from "../src/events.js";
+import { AgentWorkEventStore, workEventFromAgentEvent } from "../src/events.js";
 
 describe("agent work events", () => {
   it("persists events as cursor-addressable JSONL and redacts secrets", async () => {
@@ -39,7 +39,7 @@ describe("agent work events", () => {
   });
 
   it("normalizes reasoning notifications without exposing hidden content", () => {
-    const normalized = workEventFromCodexEvent(
+    const normalized = workEventFromAgentEvent(
       {
         issueId: "issue-1",
         identifier: "ANM-1",
@@ -69,7 +69,7 @@ describe("agent work events", () => {
   });
 
   it("normalizes thread goal updates as public work events", () => {
-    const normalized = workEventFromCodexEvent(
+    const normalized = workEventFromAgentEvent(
       {
         issueId: "issue-1",
         identifier: "ANM-1",

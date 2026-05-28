@@ -6,6 +6,7 @@ import {
   queueSteer,
   requestChanges,
   resumeIssue,
+  setDaemonBackend,
   setDaemonMaxConcurrency,
   startStatusServer,
 } from '../src/status.js';
@@ -27,6 +28,7 @@ describe('status server', () => {
 
   it('serves work events and selected-agent controls', async () => {
     let maxConcurrencyOverride: number | null = null;
+    let backendOverride: 'codex' | 'cursor' | null = null;
     server = await startStatusServer(() => snapshot(), 0, {
       getEvents: () => [
         {
@@ -57,6 +59,17 @@ describe('status server', () => {
           overrideActive: maxConcurrentAgents !== null,
           overrideMax: maxConcurrentAgents,
           overrideUpdatedAtMs: maxConcurrentAgents === null ? null : 2000,
+        };
+      },
+      setBackendOverride: (backend) => {
+        backendOverride = backend;
+        return {
+          configured: 'codex',
+          effective: backend ?? 'codex',
+          source: backend === null ? 'workflow' : 'override',
+          overrideActive: backend !== null,
+          overrideBackend: backend,
+          overrideUpdatedAtMs: backend === null ? null : 2000,
         };
       },
     });
@@ -90,6 +103,21 @@ describe('status server', () => {
     await expect(setDaemonMaxConcurrency(port, null)).resolves.toMatchObject({
       concurrency: {
         effectiveMax: 5,
+        source: 'workflow',
+        overrideActive: false,
+      },
+    });
+    await expect(setDaemonBackend(port, 'cursor')).resolves.toMatchObject({
+      backend: {
+        effective: 'cursor',
+        source: 'override',
+        overrideActive: true,
+      },
+    });
+    expect(backendOverride).toBe('cursor');
+    await expect(setDaemonBackend(port, null)).resolves.toMatchObject({
+      backend: {
+        effective: 'codex',
         source: 'workflow',
         overrideActive: false,
       },
@@ -161,6 +189,14 @@ function snapshot(): OrchestratorSnapshot {
       source: 'workflow',
       overrideActive: false,
       overrideMax: null,
+      overrideUpdatedAtMs: null,
+    },
+    backend: {
+      configured: 'codex',
+      effective: 'codex',
+      source: 'workflow',
+      overrideActive: false,
+      overrideBackend: null,
       overrideUpdatedAtMs: null,
     },
     lastTickAtMs: null,

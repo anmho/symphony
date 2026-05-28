@@ -9,9 +9,9 @@ import {
   type OrchestratorDependencies,
 } from '../src/orchestrator.js';
 import type {
-  CodexRunInput,
-  CodexRunEvent,
-  CodexTurnResult,
+  AgentRunInput,
+  AgentRunEvent,
+  AgentTurnResult,
   EffectiveWorkflowConfig,
   NormalizedIssue,
   WorkspaceInfo,
@@ -24,7 +24,7 @@ describe('orchestrator', () => {
     );
     const deps = makeDeps({
       fetchCandidateIssues: async () => issues,
-      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
+      runAgentTurn: async () => new Promise<AgentTurnResult>(() => undefined),
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -56,7 +56,7 @@ describe('orchestrator', () => {
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => issues,
-      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
+      runAgentTurn: async () => new Promise<AgentTurnResult>(() => undefined),
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -105,7 +105,7 @@ describe('orchestrator', () => {
       makeDeps({
         loadWorkflowConfig: async () => config,
         fetchCandidateIssues: async () => issues,
-        runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
+        runAgentTurn: async () => new Promise<AgentTurnResult>(() => undefined),
       }),
     );
 
@@ -118,6 +118,46 @@ describe('orchestrator', () => {
       overrideActive: true,
     });
     expect(restarted.snapshot().running).toHaveLength(2);
+  });
+
+  it('persists agent backend override across daemon restarts', async () => {
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), 'symphony-orchestrator-backend-'),
+    );
+    const workflowPath = path.join(dir, 'WORKFLOW.md');
+    await writeFile(workflowPath, 'Prompt');
+    const config = makeConfig({
+      agent: {
+        backend: 'codex',
+      },
+    });
+    const first = new Orchestrator(
+      { workflowPath },
+      makeDeps({
+        loadWorkflowConfig: async () => config,
+        fetchCandidateIssues: async () => [],
+      }),
+    );
+
+    first.setBackendOverride('cursor');
+
+    const restarted = new Orchestrator(
+      { workflowPath },
+      makeDeps({
+        loadWorkflowConfig: async () => config,
+        fetchCandidateIssues: async () => [],
+      }),
+    );
+
+    await restarted.tick();
+
+    expect(restarted.snapshot().backend).toMatchObject({
+      configured: 'codex',
+      effective: 'cursor',
+      source: 'override',
+      overrideActive: true,
+      overrideBackend: 'cursor',
+    });
   });
 
   it('skips issues without required label and repo route', async () => {
@@ -139,7 +179,7 @@ describe('orchestrator', () => {
         makeIssue('APP-2', { labels: ['repo:symphony'] }),
         makeIssue('APP-3', { labels: ['symphony', 'repo:symphony'] }),
       ],
-      runCodexTurn: async () => new Promise<CodexTurnResult>(() => undefined),
+      runAgentTurn: async () => new Promise<AgentTurnResult>(() => undefined),
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -163,7 +203,7 @@ describe('orchestrator', () => {
         fetches += 1;
         return fetches <= 2 ? issue : { ...issue, state: 'Human Review' };
       },
-      runCodexTurn: async () => {
+      runAgentTurn: async () => {
         codexCalls += 1;
         return completedTurn(`thread-${codexCalls}`, `turn-${codexCalls}`);
       },
@@ -184,7 +224,7 @@ describe('orchestrator', () => {
     const issue = makeIssue('APP-1');
     const deps = makeDeps({
       fetchCandidateIssues: async () => [issue],
-      runCodexTurn: async () => ({
+      runAgentTurn: async () => ({
         ...completedTurn('thread', 'turn'),
         status: 'failed',
         error: 'boom',
@@ -215,7 +255,7 @@ describe('orchestrator', () => {
     const deps = makeDeps({
       now: () => now,
       fetchCandidateIssues: async () => [issue],
-      runCodexTurn: async () => {
+      runAgentTurn: async () => {
         codexCalls += 1;
         return {
           ...completedTurn('thread', 'turn'),
@@ -249,7 +289,7 @@ describe('orchestrator', () => {
       loadWorkflowConfig: async () => config,
       now: () => now,
       fetchCandidateIssues: async () => [issue],
-      runCodexTurn: async () => {
+      runAgentTurn: async () => {
         codexCalls += 1;
         return {
           ...completedTurn('thread', 'turn'),
@@ -317,7 +357,7 @@ describe('orchestrator', () => {
         fetches += 1;
         return fetches === 1 ? issue : { ...issue, state: 'Human Review' };
       },
-      runCodexTurn: async (_input, options) => {
+      runAgentTurn: async (_input, options) => {
         options.onEvent({ type: 'thread_started', threadId: 'thread-1' });
         options.onEvent({
           type: 'notification',
@@ -353,7 +393,7 @@ describe('orchestrator', () => {
     const deps = makeDeps({
       eventStore,
       fetchCandidateIssues: async () => [issue],
-      runCodexTurn: async (_input, options) => {
+      runAgentTurn: async (_input, options) => {
         options.onEvent({
           type: 'notification',
           method: 'thread/goal/updated',
@@ -372,7 +412,7 @@ describe('orchestrator', () => {
             },
           },
         });
-        return new Promise<CodexTurnResult>(() => undefined);
+        return new Promise<AgentTurnResult>(() => undefined);
       },
     });
     const orchestrator = new Orchestrator(
@@ -413,7 +453,7 @@ describe('orchestrator', () => {
       fetchCandidateIssues: async () => [issue],
       fetchIssueById: async () => issue,
       moveIssueToState: moved,
-      runCodexTurn: async (_input, options) => {
+      runAgentTurn: async (_input, options) => {
         options.onEvent({
           type: 'notification',
           method: 'thread/goal/updated',
@@ -469,9 +509,9 @@ describe('orchestrator', () => {
             '3862765+anmho-symphony[bot]@users.noreply.github.com',
         },
       }),
-      runCodexTurn: async (input) => {
+      runAgentTurn: async (input) => {
         codexEnv = input.env;
-        return new Promise<CodexTurnResult>(() => undefined);
+        return new Promise<AgentTurnResult>(() => undefined);
       },
     });
     const orchestrator = new Orchestrator(
@@ -504,7 +544,7 @@ describe('orchestrator', () => {
       fetchCandidateIssues: async () => [issue],
       fetchIssueById: async () => issue,
       moveIssueToState: moved,
-      runCodexTurn: async (_input, options) => {
+      runAgentTurn: async (_input, options) => {
         options.onEvent({
           type: 'notification',
           method: 'thread/goal/updated',
@@ -548,7 +588,7 @@ describe('orchestrator', () => {
         fetches += 1;
         return fetches === 1 ? issue : { ...issue, state: 'Human Review' };
       },
-      runCodexTurn: async (input) => {
+      runAgentTurn: async (input) => {
         prompt = input.prompt;
         return completedTurn('thread-1', 'turn-1');
       },
@@ -572,7 +612,7 @@ describe('orchestrator', () => {
     let codexCalls = 0;
     const deps = makeDeps({
       fetchCandidateIssues: async () => [runningIssue, queuedIssue],
-      runCodexTurn: async (_input, options) => {
+      runAgentTurn: async (_input, options) => {
         codexCalls += 1;
         return abortableTurn(options.signal);
       },
@@ -605,7 +645,7 @@ describe('orchestrator', () => {
       fetchCandidateIssues: async () => [issue],
       fetchIssueById: async () =>
         terminal ? { ...issue, state: 'Done' } : issue,
-      runCodexTurn: async (_input, options) => abortableTurn(options.signal),
+      runAgentTurn: async (_input, options) => abortableTurn(options.signal),
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1557,7 +1597,7 @@ describe('orchestrator', () => {
       fetchCandidateIssues: async () => [issue],
       fetchIssueById: async () =>
         handoff ? { ...issue, state: 'In Review' } : issue,
-      runCodexTurn: async (_input, options) => abortableTurn(options.signal),
+      runAgentTurn: async (_input, options) => abortableTurn(options.signal),
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1598,7 +1638,7 @@ describe('orchestrator', () => {
             };
       },
       moveIssueToState: moved,
-      runCodexTurn: async (_input, options) => abortableTurn(options.signal),
+      runAgentTurn: async (_input, options) => abortableTurn(options.signal),
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1634,14 +1674,14 @@ describe('orchestrator', () => {
       },
     });
     const moved = vi.fn(async () => undefined);
-    const runCodexTurn = vi.fn(
-      async () => new Promise<CodexTurnResult>(() => undefined),
+    const runAgentTurn = vi.fn(
+      async () => new Promise<AgentTurnResult>(() => undefined),
     );
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => [issue],
       moveIssueToState: moved,
-      runCodexTurn,
+      runAgentTurn,
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1651,7 +1691,7 @@ describe('orchestrator', () => {
     await orchestrator.tick();
 
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
-    expect(runCodexTurn).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
     expect(orchestrator.snapshot().running).toHaveLength(0);
     expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
   });
@@ -1670,8 +1710,8 @@ describe('orchestrator', () => {
     });
     const moved = vi.fn(async () => undefined);
     const comments: string[] = [];
-    const runCodexTurn = vi.fn(
-      async () => new Promise<CodexTurnResult>(() => undefined),
+    const runAgentTurn = vi.fn(
+      async () => new Promise<AgentTurnResult>(() => undefined),
     );
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
@@ -1688,7 +1728,7 @@ describe('orchestrator', () => {
       writeRunnerComment: async (_config, _issueId, body) => {
         comments.push(body);
       },
-      runCodexTurn,
+      runAgentTurn,
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1701,7 +1741,7 @@ describe('orchestrator', () => {
     expect(moved).not.toHaveBeenCalledWith(config, issue.id, 'In Review');
     expect(comments[0]).toContain('PR author does not match');
     expect(comments[0]).toContain('Expected PR author: app/anmho-symphony');
-    expect(runCodexTurn).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
 
@@ -1719,8 +1759,8 @@ describe('orchestrator', () => {
     });
     const moved = vi.fn(async () => undefined);
     const comments: string[] = [];
-    const runCodexTurn = vi.fn(
-      async () => new Promise<CodexTurnResult>(() => undefined),
+    const runAgentTurn = vi.fn(
+      async () => new Promise<AgentTurnResult>(() => undefined),
     );
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
@@ -1737,7 +1777,7 @@ describe('orchestrator', () => {
       writeRunnerComment: async (_config, _issueId, body) => {
         comments.push(body);
       },
-      runCodexTurn,
+      runAgentTurn,
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1751,7 +1791,7 @@ describe('orchestrator', () => {
     expect(comments[0]).toContain('configured reviewers were not requested');
     expect(comments[0]).toContain('Required reviewers: anmho');
     expect(comments[0]).toContain('Missing reviewers: anmho');
-    expect(runCodexTurn).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
 
@@ -1768,7 +1808,7 @@ describe('orchestrator', () => {
       },
     });
     const moved = vi.fn(async () => undefined);
-    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const runAgentTurn = vi.fn(async () => completedTurn('thread', 'turn'));
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => [issue],
@@ -1781,7 +1821,7 @@ describe('orchestrator', () => {
         reviewRequestLogins: ['anmho'],
       }),
       moveIssueToState: moved,
-      runCodexTurn,
+      runAgentTurn,
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1791,7 +1831,7 @@ describe('orchestrator', () => {
     await orchestrator.tick();
 
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
-    expect(runCodexTurn).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
     expect(orchestrator.snapshot().handoff).toEqual(['APP-1']);
   });
 
@@ -1810,8 +1850,8 @@ describe('orchestrator', () => {
     const moved = vi.fn(async () => undefined);
     const requested = vi.fn(async () => undefined);
     const removed = vi.fn(async () => undefined);
-    const runCodexTurn = vi.fn(
-      async () => new Promise<CodexTurnResult>(() => undefined),
+    const runAgentTurn = vi.fn(
+      async () => new Promise<AgentTurnResult>(() => undefined),
     );
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
@@ -1835,7 +1875,7 @@ describe('orchestrator', () => {
       moveIssueToState: moved,
       requestPullRequestReviewers: requested,
       removePullRequestReviewers: removed,
-      runCodexTurn,
+      runAgentTurn,
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1853,7 +1893,7 @@ describe('orchestrator', () => {
       '/tmp/repo',
       undefined,
     );
-    expect(runCodexTurn).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
 
@@ -1922,7 +1962,7 @@ describe('orchestrator', () => {
       },
     });
     const moved = vi.fn(async () => undefined);
-    const runCodexTurn = vi.fn(async () => completedTurn('thread', 'turn'));
+    const runAgentTurn = vi.fn(async () => completedTurn('thread', 'turn'));
     const deps = makeDeps({
       loadWorkflowConfig: async () => config,
       fetchCandidateIssues: async () => [issue],
@@ -1935,7 +1975,7 @@ describe('orchestrator', () => {
         mergedAt: '2026-05-24T01:00:00Z',
       }),
       moveIssueToState: moved,
-      runCodexTurn,
+      runAgentTurn,
     });
     const orchestrator = new Orchestrator(
       { workflowPath: '/tmp/WORKFLOW.md' },
@@ -1945,7 +1985,7 @@ describe('orchestrator', () => {
     await orchestrator.tick();
 
     expect(moved).toHaveBeenCalledWith(config, issue.id, 'Done');
-    expect(runCodexTurn).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
     expect(orchestrator.snapshot().running).toHaveLength(0);
     expect(orchestrator.snapshot().handoff).toEqual([]);
     expect(orchestrator.snapshot().completed).toEqual(['APP-1']);
@@ -1958,7 +1998,7 @@ describe('orchestrator', () => {
     const deps = makeDeps({
       now: () => now,
       fetchCandidateIssues: async () => [issue],
-      runCodexTurn: async () => {
+      runAgentTurn: async () => {
         codexCalls += 1;
         return {
           ...completedTurn('thread', 'turn'),
@@ -2022,7 +2062,7 @@ describe('orchestrator', () => {
         moved(moveConfig, issueId, state);
         currentIssue = { ...currentIssue, state };
       },
-      runCodexTurn: async (_input, options) => {
+      runAgentTurn: async (_input, options) => {
         codexCalls += 1;
         return abortableTurn(options.signal);
       },
@@ -2266,7 +2306,7 @@ class MemoryDigestStateStore implements DigestStateStore {
 
 function makeDeps(overrides: TestDeps = {}): TestDeps {
   const config = makeConfig();
-  return {
+  const deps: TestDeps = {
     loadWorkflowConfig: async () => config,
     fetchCandidateIssues: async () => [],
     fetchIssueById: async (_config, issueId) => makeIssue(issueId),
@@ -2297,11 +2337,11 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     workspacePathExists: async () => true,
     runHook: async () => undefined,
     renderIssuePrompt: async (_config, issue) => `Prompt ${issue.identifier}`,
-    runCodexTurn: async (
-      _input: CodexRunInput,
+    runAgentTurn: async (
+      _input: AgentRunInput,
       _options: {
         signal: AbortSignal;
-        onEvent: (event: CodexRunEvent) => void;
+        onEvent: (event: AgentRunEvent) => void;
       },
     ) => completedTurn('thread', 'turn'),
     resolvePrIdentity: async () => null,
@@ -2315,6 +2355,16 @@ function makeDeps(overrides: TestDeps = {}): TestDeps {
     },
     ...overrides,
   };
+
+  if (!deps.fetchIssueStatesByIds) {
+    const fetchById = deps.fetchIssueById!;
+    deps.fetchIssueStatesByIds = async (cfg, issueIds) => {
+      const results = await Promise.all(issueIds.map((id) => fetchById(cfg, id)));
+      return results.filter((issue): issue is NormalizedIssue => issue !== null);
+    };
+  }
+
+  return deps;
 }
 
 function makeConfig(
@@ -2359,11 +2409,16 @@ function makeConfig(
       timeoutMs: 60000,
     },
     agent: {
+      backend: 'codex',
       maxConcurrentAgents: 5,
       maxTurns: 20,
       maxRetryBackoffMs: 300000,
       rateLimitProbeIntervalMs: 300000,
       maxConcurrentAgentsByState: {},
+    },
+    cursor: {
+      apiKey: null,
+      model: 'composer-2.5',
     },
     codex: {
       command: 'codex app-server --listen stdio://',
@@ -2466,7 +2521,7 @@ function makeWorkspace(issue: NormalizedIssue): WorkspaceInfo {
   };
 }
 
-function abortableTurn(signal: AbortSignal): Promise<CodexTurnResult> {
+function abortableTurn(signal: AbortSignal): Promise<AgentTurnResult> {
   return new Promise((_resolve, reject) => {
     if (signal.aborted) {
       reject(new DOMException('Aborted', 'AbortError'));
@@ -2478,7 +2533,7 @@ function abortableTurn(signal: AbortSignal): Promise<CodexTurnResult> {
   });
 }
 
-function completedTurn(threadId: string, turnId: string): CodexTurnResult {
+function completedTurn(threadId: string, turnId: string): AgentTurnResult {
   return {
     status: 'completed',
     threadId,

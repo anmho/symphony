@@ -145,6 +145,29 @@ export async function fetchIssueById(config: EffectiveWorkflowConfig, issueId: s
   return data.issue ? normalizeLinearIssue(data.issue) : null;
 }
 
+export async function fetchIssueStatesByIds(
+  config: EffectiveWorkflowConfig,
+  issueIds: string[],
+): Promise<NormalizedIssue[]> {
+  if (issueIds.length === 0) {
+    return [];
+  }
+
+  const data = await linearGraphql<IssuesQueryData>(
+    config,
+    `
+      query SymphonyIssueStates($ids: [ID!]!) {
+        issues(filter: { id: { in: $ids } }) {
+          nodes { ${ISSUE_FIELDS} }
+        }
+      }
+    `,
+    { ids: issueIds },
+  );
+
+  return (data.issues?.nodes ?? []).map(normalizeLinearIssue).filter(Boolean);
+}
+
 export async function fetchTerminalIssues(config: EffectiveWorkflowConfig): Promise<NormalizedIssue[]> {
   const { filter, variableDefinitions, variables } = issueScopeFilter(config, config.tracker.terminalStates, {
     includeRequiredLabels: true

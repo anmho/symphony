@@ -1,10 +1,10 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { runCodexTurn } from "./codexRpc.js";
-import { workEventFromCodexEvent } from "./events.js";
+import { runAgentTurn } from "./backends/codexBackend.js";
+import { workEventFromAgentEvent } from "./events.js";
 import type {
-  CodexRunInput,
+  AgentRunInput,
   EffectiveWorkflowConfig,
   NormalizedIssue
 } from "./types.js";
@@ -44,13 +44,13 @@ export async function runCodexAppServerSmoke(
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
     try {
-      const result = await runCodexTurn(makeSmokeInput(options.command ?? DEFAULT_CODEX_APP_SERVER_COMMAND, workspacePath), {
+      const result = await runAgentTurn(makeSmokeInput(options.command ?? DEFAULT_CODEX_APP_SERVER_COMMAND, workspacePath), {
         signal: abortController.signal,
         onEvent: (event) => {
           if (event.type !== "notification") {
             return;
           }
-          const normalized = workEventFromCodexEvent(smokeEventContext(workspacePath), event);
+          const normalized = workEventFromAgentEvent(smokeEventContext(workspacePath), event);
           if (normalized.type === "command") {
             commandEventCount += 1;
           }
@@ -150,7 +150,7 @@ async function removeTempWorkspace(workspacePath: string): Promise<void> {
   await rm(workspacePath, { recursive: true, force: true });
 }
 
-function makeSmokeInput(command: string, workspacePath: string): CodexRunInput {
+function makeSmokeInput(command: string, workspacePath: string): AgentRunInput {
   const issue = makeSmokeIssue();
   return {
     config: makeSmokeConfig(command, workspacePath),
@@ -220,11 +220,16 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       timeoutMs: 60000
     },
     agent: {
+      backend: "codex",
       maxConcurrentAgents: 1,
       maxTurns: 1,
       maxRetryBackoffMs: 300000,
       rateLimitProbeIntervalMs: 300000,
       maxConcurrentAgentsByState: {}
+    },
+    cursor: {
+      apiKey: null,
+      model: "composer-2.5"
     },
     codex: {
       command,

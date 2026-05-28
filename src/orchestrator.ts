@@ -11,6 +11,7 @@ import {
   fetchCandidateIssues,
   fetchHandoffIssues,
   fetchIssueById,
+  fetchIssueStatesByIds,
   fetchMergeEligibleIssues,
   fetchRelevantIssues,
   fetchTerminalIssues,
@@ -29,9 +30,13 @@ import {
 } from './policy.js';
 import { renderIssuePrompt } from './prompt.js';
 import { isGateParked, isRateLimitError } from './rateLimit.js';
-import { runCodexTurn } from './codexRpc.js';
+import {
+  assertAgentBackendReady,
+  parseAgentBackendKind,
+  runAgentTurnForConfig,
+} from './agentBackends.js';
 import { resolvePrIdentity, type ResolvedPrIdentity } from './prIdentity.js';
-import { AgentWorkEventStore, workEventFromCodexEvent } from './events.js';
+import { AgentWorkEventStore, workEventFromAgentEvent } from './events.js';
 import { summarizeCurrentWork } from './eventDisplay.js';
 import {
   fetchPullRequestMetadata,
@@ -59,9 +64,11 @@ import {
   type DigestStateStore,
 } from './digest.js';
 import type {
-  CodexRunEvent,
-  CodexRunInput,
-  CodexTurnResult,
+  AgentBackendKind,
+  AgentRunEvent,
+  AgentRunInput,
+  AgentTurnResult,
+  BackendSnapshot,
   CodexUsageTotals,
   EffectiveWorkflowConfig,
   AgentWorkEvent,
@@ -89,6 +96,10 @@ export interface OrchestratorDependencies {
     config: EffectiveWorkflowConfig,
     issueId: string,
   ) => Promise<NormalizedIssue | null>;
+  fetchIssueStatesByIds: (
+    config: EffectiveWorkflowConfig,
+    issueIds: string[],
+  ) => Promise<NormalizedIssue[]>;
   fetchTerminalIssues: (
     config: EffectiveWorkflowConfig,
   ) => Promise<NormalizedIssue[]>;
@@ -164,10 +175,10 @@ export interface OrchestratorDependencies {
     issue: NormalizedIssue,
     attempt: number | null,
   ) => Promise<string>;
-  runCodexTurn: (
-    input: CodexRunInput,
-    options: { signal: AbortSignal; onEvent: (event: CodexRunEvent) => void },
-  ) => Promise<CodexTurnResult>;
+  runAgentTurn: (
+    input: AgentRunInput,
+    options: { signal: AbortSignal; onEvent: (event: AgentRunEvent) => void },
+  ) => Promise<AgentTurnResult>;
   resolvePrIdentity: (
     config: Pick<EffectiveWorkflowConfig, 'github'>,
   ) => Promise<ResolvedPrIdentity | null>;
@@ -324,6 +335,8 @@ export class Orchestrator {
   private tickInFlight: Promise<void> | null = null;
   private maxConcurrencyOverride: number | null = null;
   private maxConcurrencyOverrideUpdatedAtMs: number | null = null;
+  private backendOverride: AgentBackendKind | null = null;
+  private backendOverrideUpdatedAtMs: number | null = null;
 
   private readonly running = new Map<string, RunningEntry>();
   private readonly claimed = new Set<string>();
@@ -358,6 +371,7 @@ export class Orchestrator {
       fetchMergeEligibleIssues,
       fetchRelevantIssues,
       fetchIssueById,
+      fetchIssueStatesByIds,
       fetchTerminalIssues,
       writeRunnerComment,
       moveIssueToState,
@@ -374,7 +388,8 @@ export class Orchestrator {
       workspacePathExists,
       runHook,
       renderIssuePrompt,
-      runCodexTurn,
+      runAgentTurn: (input, options) =>
+        runAgentTurnForConfig(input.config, this.backendOverride, input, options),
       resolvePrIdentity,
       now,
       sleep,
@@ -389,6 +404,7 @@ export class Orchestrator {
     this.eventStore = this.deps.eventStore;
     this.digestStateStore = this.deps.digestStateStore;
     this.loadMaxConcurrencyOverride();
+    this.loadBackendOverride();
   }
 
   async start(): Promise<void> {
@@ -444,6 +460,7 @@ export class Orchestrator {
       codexTotals: { ...this.codexTotals },
       codexRateLimit: { ...this.codexRateLimit },
       concurrency: this.concurrencySnapshot(this.lastKnownGoodConfig),
+      backend: this.backendSnapshot(this.lastKnownGoodConfig),
       lastTickAtMs: this.lastTickAtMs,
       lastConfigError: this.lastConfigError,
       paused: this.operatorPaused,
@@ -473,6 +490,24 @@ export class Orchestrator {
     );
     void this.tick();
     return this.concurrencySnapshot(this.lastKnownGoodConfig);
+  }
+
+  setBackendOverride(backend: AgentBackendKind | null): BackendSnapshot {
+    if (backend !== null) {
+      parseAgentBackendKind(backend);
+    }
+    this.backendOverride = backend;
+    this.backendOverrideUpdatedAtMs = backend === null ? null : this.deps.now();
+    this.persistBackendOverride();
+    this.deps.logger.info(
+      {
+        backend,
+        source: backend === null ? 'workflow' : 'override',
+      },
+      'updated agent backend override',
+    );
+    void this.tick();
+    return this.backendSnapshot(this.lastKnownGoodConfig);
   }
 
   pause(): { paused: boolean } {
@@ -644,7 +679,7 @@ export class Orchestrator {
     ).filter((issue) => isIssueEligible(issue, config));
 
     for (const issue of candidates) {
-      if (this.running.size >= this.effectiveMaxConcurrentAgents(config)) {
+      if (!this.canDispatchIssue(issue, config)) {
         break;
       }
       if (this.claimed.has(issue.id)) {
@@ -921,16 +956,38 @@ export class Orchestrator {
   private async reconcileRunning(
     config: EffectiveWorkflowConfig,
   ): Promise<void> {
+    const stallTimeoutMs = config.codex.stallTimeoutMs;
+    if (stallTimeoutMs > 0) {
+      const now = this.deps.now();
+      for (const entry of this.running.values()) {
+        const lastActivity =
+          entry.session.lastCodexTimestamp ?? entry.session.startedAtMs;
+        if (now - lastActivity > stallTimeoutMs) {
+          entry.cancelReason = 'stalled';
+          entry.abortController.abort();
+        }
+      }
+    }
+
+    const runningIds = [...this.running.keys()];
+    if (runningIds.length === 0) {
+      return;
+    }
+
+    const refreshed = await this.deps
+      .fetchIssueStatesByIds(config, runningIds)
+      .catch((error: unknown) => {
+        this.deps.logger.warn({ error }, 'failed to batch reconcile running issues');
+        return null;
+      });
+    if (!refreshed) {
+      return;
+    }
+
+    const latestById = new Map(refreshed.map((issue) => [issue.id, issue]));
+
     for (const entry of this.running.values()) {
-      const latestIssue = await this.deps
-        .fetchIssueById(config, entry.issue.id)
-        .catch((error: unknown) => {
-          this.deps.logger.warn(
-            { error, issue: entry.issue.identifier },
-            'failed to reconcile running issue',
-          );
-          return null;
-        });
+      const latestIssue = latestById.get(entry.issue.id) ?? null;
 
       if (latestIssue && isTerminalState(latestIssue.state, config)) {
         this.completed.set(
@@ -993,6 +1050,10 @@ export class Orchestrator {
       if (await this.syncPrLinkedIssueToHandoff(config, issue)) {
         this.retryAttempts.delete(attempt.issueId);
         this.claimed.delete(attempt.issueId);
+        continue;
+      }
+
+      if (!this.canDispatchIssue(issue, config)) {
         continue;
       }
 
@@ -1089,6 +1150,43 @@ export class Orchestrator {
     return this.maxConcurrencyOverride ?? config.agent.maxConcurrentAgents;
   }
 
+  private normalizedState(state: string): string {
+    return state.trim().toLowerCase();
+  }
+
+  private countRunningForState(state: string): number {
+    const key = this.normalizedState(state);
+    return [...this.running.values()].filter(
+      (entry) => this.normalizedState(entry.issue.state) === key,
+    ).length;
+  }
+
+  private effectiveMaxForState(
+    state: string,
+    config: EffectiveWorkflowConfig,
+  ): number {
+    const global = this.effectiveMaxConcurrentAgents(config);
+    const perState =
+      config.agent.maxConcurrentAgentsByState[this.normalizedState(state)];
+    return perState ?? global;
+  }
+
+  private canDispatchIssue(
+    issue: NormalizedIssue,
+    config: EffectiveWorkflowConfig,
+  ): boolean {
+    if (this.running.size >= this.effectiveMaxConcurrentAgents(config)) {
+      return false;
+    }
+    if (
+      this.countRunningForState(issue.state) >=
+      this.effectiveMaxForState(issue.state, config)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   private concurrencySnapshot(
     config: EffectiveWorkflowConfig | null,
   ): ConcurrencySnapshot {
@@ -1161,6 +1259,80 @@ export class Orchestrator {
     );
   }
 
+  private backendSnapshot(
+    config: EffectiveWorkflowConfig | null,
+  ): BackendSnapshot {
+    const configured = config?.agent.backend ?? null;
+    const effective =
+      this.backendOverride ?? configured ?? null;
+    const overrideActive = this.backendOverride !== null;
+    return {
+      configured,
+      effective,
+      source: overrideActive
+        ? 'override'
+        : configured === null
+          ? 'unknown'
+          : 'workflow',
+      overrideActive,
+      overrideBackend: this.backendOverride,
+      overrideUpdatedAtMs: this.backendOverrideUpdatedAtMs,
+    };
+  }
+
+  private backendOverridePath(): string {
+    return path.join(
+      path.dirname(path.resolve(this.workflowPath)),
+      '.symphony',
+      'state',
+      'backend.json',
+    );
+  }
+
+  private loadBackendOverride(): void {
+    const overridePath = this.backendOverridePath();
+    if (!existsSync(this.workflowPath) || !existsSync(overridePath)) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(overridePath, 'utf8')) as {
+        backend?: unknown;
+        updatedAtMs?: unknown;
+      };
+      if (
+        parsed.backend === 'codex' ||
+        parsed.backend === 'cursor'
+      ) {
+        this.backendOverride = parsed.backend;
+        this.backendOverrideUpdatedAtMs =
+          typeof parsed.updatedAtMs === 'number' ? parsed.updatedAtMs : null;
+      }
+    } catch {
+      this.backendOverride = null;
+      this.backendOverrideUpdatedAtMs = null;
+    }
+  }
+
+  private persistBackendOverride(): void {
+    const overridePath = this.backendOverridePath();
+    if (this.backendOverride === null) {
+      rmSync(overridePath, { force: true });
+      return;
+    }
+    mkdirSync(path.dirname(overridePath), { recursive: true });
+    writeFileSync(
+      overridePath,
+      `${JSON.stringify(
+        {
+          backend: this.backendOverride,
+          updatedAtMs: this.backendOverrideUpdatedAtMs,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
+
   private async runIssue(
     initialConfig: EffectiveWorkflowConfig,
     initialIssue: NormalizedIssue,
@@ -1170,6 +1342,11 @@ export class Orchestrator {
     let config = initialConfig;
     let issue = initialIssue;
     let threadId: string | null = null;
+
+    assertAgentBackendReady(
+      config,
+      this.backendOverride ?? config.agent.backend,
+    );
 
     for (let turnIndex = 0; turnIndex < config.agent.maxTurns; turnIndex += 1) {
       if (entry.abortController.signal.aborted) {
@@ -1262,7 +1439,7 @@ export class Orchestrator {
         ? `${basePrompt}\n\n## Operator Guidance\n\n${queuedSteer.text}`
         : basePrompt;
       const prIdentity = await this.deps.resolvePrIdentity(config);
-      const codexInput: CodexRunInput = {
+      const agentInput: AgentRunInput = {
         config,
         issue,
         workspacePath: workspace.path,
@@ -1270,11 +1447,11 @@ export class Orchestrator {
         threadId,
       };
       if (prIdentity) {
-        codexInput.env = prIdentity.env;
+        agentInput.env = prIdentity.env;
       }
-      const result = await this.deps.runCodexTurn(codexInput, {
+      const result = await this.deps.runAgentTurn(agentInput, {
         signal: entry.abortController.signal,
-        onEvent: (event) => this.recordCodexEvent(entry, event),
+        onEvent: (event) => this.recordAgentEvent(entry, event),
       });
 
       threadId = result.threadId;
@@ -2246,7 +2423,7 @@ export class Orchestrator {
     }
   }
 
-  private recordCodexEvent(entry: RunningEntry, event: CodexRunEvent): void {
+  private recordAgentEvent(entry: RunningEntry, event: AgentRunEvent): void {
     const timestampMs = this.deps.now();
     entry.session.lastCodexEvent = event.type;
     entry.session.lastCodexTimestamp = timestampMs;
@@ -2277,7 +2454,7 @@ export class Orchestrator {
         entry.session.goalUpdatedAtMs = timestampMs;
       }
     }
-    const normalized = workEventFromCodexEvent(
+    const normalized = workEventFromAgentEvent(
       {
         issueId: entry.issue.id,
         identifier: entry.issue.identifier,

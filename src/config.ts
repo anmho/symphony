@@ -76,11 +76,18 @@ const RawWorkflowConfigSchema = z
       .optional(),
     agent: z
       .object({
+        backend: z.enum(["codex", "cursor"]).optional(),
         max_concurrent_agents: z.number().int().positive().optional(),
         max_turns: z.number().int().positive().optional(),
         max_retry_backoff_ms: z.number().int().positive().optional(),
         rate_limit_probe_interval_ms: z.number().int().positive().optional(),
         max_concurrent_agents_by_state: z.record(z.string(), z.number().int().positive()).optional()
+      })
+      .optional(),
+    cursor: z
+      .object({
+        api_key: z.string().optional(),
+        model: z.string().optional()
       })
       .optional(),
     codex: z
@@ -235,6 +242,7 @@ export function resolveWorkflowConfig(
   const agent = raw.agent ?? {};
   const hooks = raw.hooks ?? {};
   const codex = raw.codex ?? {};
+  const cursor = raw.cursor ?? {};
   const github = raw.github ?? {};
   const pullRequest = raw.pull_request ?? {};
   const digest = raw.digest ?? {};
@@ -292,6 +300,7 @@ export function resolveWorkflowConfig(
       timeoutMs: hooks.timeout_ms ?? 60000
     },
     agent: {
+      backend: agent.backend ?? "codex",
       maxConcurrentAgents: agent.max_concurrent_agents ?? 5,
       maxTurns: agent.max_turns ?? 20,
       maxRetryBackoffMs: agent.max_retry_backoff_ms ?? 300000,
@@ -307,6 +316,12 @@ export function resolveWorkflowConfig(
       readTimeoutMs: codex.read_timeout_ms ?? 5000,
       stallTimeoutMs: codex.stall_timeout_ms ?? 300000,
       model: codex.model ?? null
+    },
+    cursor: {
+      apiKey: cursor.api_key
+        ? normalizeOptionalString(resolveEnvValue(cursor.api_key, userConfig))
+        : null,
+      model: cursor.model ?? "composer-latest"
     },
     github: {
       prIdentity: github.pr_identity
