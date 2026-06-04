@@ -88,6 +88,53 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 1)
     }
 
+    func testHandoffWithoutPullRequestIsNotLabeledPRReview() throws {
+        let json = """
+        {
+          "startedAtMs": 1000,
+          "running": [],
+          "retryAttempts": [],
+          "handoff": ["ANM-1"],
+          "handoffDetails": [
+            {
+              "identifier": "ANM-1",
+              "title": "Needs human follow-up",
+              "repoKey": "symphony",
+              "state": "In Review",
+              "reviewKind": "pr_review",
+              "prUrl": null
+            }
+          ],
+          "completed": [],
+          "completedDetails": [],
+          "codexRateLimit": { "resumeAfterMs": null, "reason": null },
+          "backend": {
+            "configured": "codex",
+            "effective": "codex",
+            "source": "workflow",
+            "overrideActive": false,
+            "overrideBackend": null,
+            "overrideUpdatedAtMs": null,
+            "configuredModel": null,
+            "effectiveModel": null,
+            "modelSource": "workflow",
+            "modelOverrideActive": false,
+            "modelOverride": null,
+            "modelOverrideUpdatedAtMs": null
+          },
+          "lastConfigError": null,
+          "paused": false,
+          "pausedAtMs": null
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: json)
+        let row = try XCTUnwrap(snapshot.rows(for: .review).first)
+        XCTAssertEqual(row.status, "review")
+        XCTAssertNil(row.prUrl)
+        XCTAssertTrue(row.detail.contains("In Review · review"))
+    }
+
     func testGitHubRepositoryURLUsesRepoKey() {
         XCTAssertEqual(
             githubRepositoryURL(for: ".github", ownerSlug: "anmho")?.absoluteString,
