@@ -251,7 +251,7 @@ export interface IssueSummary {
   title: string | null;
   repoKey: string | null;
   state: string | null;
-  reviewKind: 'pr_review' | 'blocked' | 'completed';
+  reviewKind: 'pr_review' | 'action_required' | 'blocked' | 'completed';
   prUrl: string | null;
 }
 

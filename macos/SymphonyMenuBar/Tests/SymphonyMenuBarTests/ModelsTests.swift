@@ -88,7 +88,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.agentInventory(nowMs: 20_000).completed, 1)
     }
 
-    func testHandoffWithoutPullRequestIsNotLabeledPRReview() throws {
+    func testHandoffWithoutPullRequestIsLabeledActionRequired() throws {
         let json = """
         {
           "startedAtMs": 1000,
@@ -101,7 +101,7 @@ final class ModelsTests: XCTestCase {
               "title": "Needs human follow-up",
               "repoKey": "symphony",
               "state": "In Review",
-              "reviewKind": "pr_review",
+              "reviewKind": "action_required",
               "prUrl": null
             }
           ],
@@ -130,9 +130,9 @@ final class ModelsTests: XCTestCase {
 
         let snapshot = try JSONDecoder().decode(OrchestratorSnapshot.self, from: json)
         let row = try XCTUnwrap(snapshot.rows(for: .review).first)
-        XCTAssertEqual(row.status, "review")
+        XCTAssertEqual(row.status, "action required")
         XCTAssertNil(row.prUrl)
-        XCTAssertTrue(row.detail.contains("In Review · review"))
+        XCTAssertTrue(row.detail.contains("In Review · action required"))
     }
 
     func testGitHubRepositoryURLUsesRepoKey() {

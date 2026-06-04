@@ -801,7 +801,7 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
       issueKey: issueId,
       age: '-',
       turn: '-',
-      event: detail?.reviewKind === 'blocked' ? 'blocked' : 'pr-review',
+      event: reviewEventLabel(detail?.reviewKind),
       updated: '-',
       workspace: '-',
       detail: [
@@ -816,6 +816,16 @@ function watchRows(snapshot: OrchestratorSnapshot, nowMs: number): WatchRow[] {
   );
 
   return [...running, ...retries, ...handoff, ...completed];
+}
+
+function reviewEventLabel(reviewKind: string | null | undefined): string {
+  if (reviewKind === 'blocked') {
+    return 'blocked';
+  }
+  if (reviewKind === 'action_required') {
+    return 'action-required';
+  }
+  return 'pr-review';
 }
 
 function renderTable(

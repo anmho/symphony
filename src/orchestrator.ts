@@ -215,25 +215,30 @@ function issueSummary(
   config: EffectiveWorkflowConfig,
   issue: NormalizedIssue,
 ): IssueSummary {
+  const prUrl = githubPullRequestUrlFromIssue(issue);
   return {
     identifier: issue.identifier,
     title: issue.title,
     repoKey: repoKeyFromIssue(config, issue),
     state: issue.state,
-    reviewKind: reviewKindFromIssue(config, issue),
-    prUrl: githubPullRequestUrlFromIssue(issue),
+    reviewKind: reviewKindFromIssue(config, issue, prUrl),
+    prUrl,
   };
 }
 
 function reviewKindFromIssue(
   config: EffectiveWorkflowConfig,
   issue: NormalizedIssue,
+  prUrl: string | null,
 ): IssueSummary['reviewKind'] {
   if (isTerminalState(issue.state, config)) {
     return 'completed';
   }
   if (issue.state.toLowerCase().includes('block')) {
     return 'blocked';
+  }
+  if (!prUrl) {
+    return 'action_required';
   }
   return 'pr_review';
 }
@@ -1604,7 +1609,10 @@ export class Orchestrator {
         });
         this.handoff.set(
           latestIssue.identifier,
-          issueSummary(config, latestIssue),
+          issueSummary(config, {
+            ...latestIssue,
+            state: config.tracker.handoffState!,
+          }),
         );
         this.rework.delete(latestIssue.identifier);
         this.reworkIssues.delete(issue.id);

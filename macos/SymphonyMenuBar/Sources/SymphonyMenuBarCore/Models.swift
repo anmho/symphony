@@ -284,6 +284,7 @@ public extension OrchestratorSnapshot {
     private func statusLabel(for reviewKind: String?, fallback: String) -> String {
         switch reviewKind {
         case "pr_review": return "PR review"
+        case "action_required": return "action required"
         case "blocked": return "blocked"
         case "completed": return "completed"
         default: return fallback
@@ -292,7 +293,7 @@ public extension OrchestratorSnapshot {
 
     private func handoffStatusLabel(for detail: IssueSummary?) -> String {
         if detail?.reviewKind == "pr_review", detail?.prUrl == nil {
-            return "review"
+            return "action required"
         }
         return statusLabel(for: detail?.reviewKind, fallback: "review")
     }

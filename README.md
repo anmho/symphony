@@ -278,6 +278,8 @@ Most runtime state is intentionally in-memory to match the OpenAI Symphony spec.
 
 `symphony status`, `symphony watch`, and `symphony logs` expose the runner's observability surface: active issue runs, retry queue, Codex thread and turn IDs, app-server PIDs, event cursors, per-issue work-log paths, rate-limit parking, and config reload errors. Daemon process logs remain available under `~/.symphony/symphony-<port>.log`.
 
+The status surface uses implementation-defined review categories for issues in the configured handoff state. `pr_review` means Symphony found a linked GitHub pull request and is waiting for review or merge readiness. `action_required` means the issue reached handoff without a linked PR, usually because the agent stopped on a human-only blocker, missing secret, unavailable tool, or other condition that needs operator attention. These labels are observability-only and do not replace the tracker state machine.
+
 Rate-limit handling is intentionally different from ordinary failure retry. Symphony parks new launches until Codex's reported reset time, but also probes parked runs every `agent.rate_limit_probe_interval_ms` with per-issue jitter so work can resume if access returns earlier than the reported reset. The default probe interval is 15 seconds.
 
 The committed ANM workflow stores issue worktrees under `.symphony/workspaces/<repo-key>/<issue-id>`. Per-issue public work streams are stored as JSONL under `.symphony/events/`, and persisted operator controls are stored under `.symphony/state/`. The `.symphony/` directory is ignored and used for local runtime state, not as the canonical workflow config.
