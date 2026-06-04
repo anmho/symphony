@@ -17,6 +17,7 @@ interface LinearIssueNode {
   createdAt?: string | null;
   updatedAt?: string | null;
   state?: { name?: string | null } | null;
+  team?: { id?: string | null } | null;
   labels?: { nodes?: Array<{ name?: string | null }> } | null;
   comments?: { nodes?: Array<{ body?: string | null }> } | null;
   attachments?: {
@@ -69,6 +70,7 @@ const ISSUE_FIELDS = `
   createdAt
   updatedAt
   state { name }
+  team { id }
   labels { nodes { name } }
   comments(first: 25) { nodes { body } }
   attachments(first: 25) { nodes { url title metadata } }
@@ -267,42 +269,15 @@ export async function writeRunnerComment(
 export async function moveIssueToState(
   config: EffectiveWorkflowConfig,
   issueId: string,
-  stateName: string
+  stateName: string,
+  knownTeamId?: string | null
 ): Promise<void> {
-  const issueData = await linearGraphql<{
-    issue?: { team?: { id?: string | null } | null } | null;
-  }>(
-    config,
-    `
-      query SymphonyIssueTeam($id: String!) {
-        issue(id: $id) {
-          team { id }
-        }
-      }
-    `,
-    { id: issueId }
-  );
-  const teamId = issueData.issue?.team?.id;
+  const teamId = knownTeamId ?? (await fetchIssueTeamId(config, issueId));
   if (!teamId) {
     throw new Error(`linear_issue_team_not_found: ${issueId}`);
   }
 
-  const statesData = await linearGraphql<{
-    workflowStates?: { nodes?: Array<{ id?: string; name?: string | null }> };
-  }>(
-    config,
-    `
-      query SymphonyWorkflowStates($teamId: ID!) {
-        workflowStates(filter: { team: { id: { eq: $teamId } } }, first: 100) {
-          nodes { id name }
-        }
-      }
-    `,
-    { teamId }
-  );
-  const stateId = statesData.workflowStates?.nodes?.find(
-    (state) => state.name?.toLowerCase() === stateName.toLowerCase()
-  )?.id;
+  const stateId = await workflowStateId(config, teamId, stateName);
   if (!stateId) {
     throw new Error(`linear_state_not_found: ${stateName}`);
   }
@@ -323,6 +298,63 @@ export async function moveIssueToState(
   if (!updateData.issueUpdate?.success) {
     throw new Error(`linear_issue_state_update_failed: ${issueId}`);
   }
+}
+
+export function clearLinearWorkflowStateCacheForTests(): void {
+  workflowStateIdCache.clear();
+}
+
+const workflowStateIdCache = new Map<string, Map<string, string>>();
+
+async function fetchIssueTeamId(
+  config: EffectiveWorkflowConfig,
+  issueId: string
+): Promise<string | null> {
+  const issueData = await linearGraphql<{
+    issue?: { team?: { id?: string | null } | null } | null;
+  }>(
+    config,
+    `
+      query SymphonyIssueTeam($id: String!) {
+        issue(id: $id) {
+          team { id }
+        }
+      }
+    `,
+    { id: issueId }
+  );
+  return issueData.issue?.team?.id ?? null;
+}
+
+async function workflowStateId(
+  config: EffectiveWorkflowConfig,
+  teamId: string,
+  stateName: string
+): Promise<string | null> {
+  const cacheKey = `${config.tracker.endpoint}:${teamId}`;
+  let statesByName = workflowStateIdCache.get(cacheKey);
+  if (!statesByName) {
+    const statesData = await linearGraphql<{
+      workflowStates?: { nodes?: Array<{ id?: string; name?: string | null }> };
+    }>(
+      config,
+      `
+        query SymphonyWorkflowStates($teamId: ID!) {
+          workflowStates(filter: { team: { id: { eq: $teamId } } }, first: 100) {
+            nodes { id name }
+          }
+        }
+      `,
+      { teamId }
+    );
+    statesByName = new Map(
+      (statesData.workflowStates?.nodes ?? [])
+        .filter((state): state is { id: string; name: string } => Boolean(state.id && state.name))
+        .map((state) => [state.name.toLowerCase(), state.id])
+    );
+    workflowStateIdCache.set(cacheKey, statesByName);
+  }
+  return statesByName.get(stateName.toLowerCase()) ?? null;
 }
 
 export async function fetchTeamByKey(
@@ -665,6 +697,7 @@ function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {
         createdAt: issue.createdAt ?? null,
         updatedAt: issue.updatedAt ?? null
       })),
+    teamId: node.team?.id ?? null,
     createdAt: node.createdAt ?? null,
     updatedAt: node.updatedAt ?? null
   };

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearLinearWorkflowStateCacheForTests,
   fetchCandidateIssues,
   fetchHandoffIssues,
   fetchIssueLabelNames,
@@ -12,6 +13,7 @@ import type { EffectiveWorkflowConfig } from "../src/types.js";
 describe("linear client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    clearLinearWorkflowStateCacheForTests();
   });
 
   it("builds team-only issue queries without unused project variables", async () => {
@@ -221,6 +223,41 @@ describe("linear client", () => {
     await moveIssueToState(makeConfig({ projectSlug: null, teamKey: "ANM" }), "issue-1", "Human Review");
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("reuses workflow state IDs and skips team lookup when team ID is already known", async () => {
+    const queryNames: string[] = [];
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
+      if (body.query.includes("query SymphonyIssueTeam")) {
+        queryNames.push("team");
+        return response({ issue: { team: { id: "team-1" } } });
+      }
+      if (body.query.includes("query SymphonyWorkflowStates")) {
+        queryNames.push("states");
+        expect(body.variables).toEqual({ teamId: "team-1" });
+        return response({
+          workflowStates: {
+            nodes: [
+              { id: "state-1", name: "Todo" },
+              { id: "state-2", name: "Human Review" }
+            ]
+          }
+        });
+      }
+      if (body.query.includes("mutation SymphonyIssueMoveState")) {
+        queryNames.push("move");
+        return response({ issueUpdate: { success: true } });
+      }
+      throw new Error(`unexpected query: ${body.query}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const config = makeConfig({ projectSlug: null, teamKey: "ANM" });
+
+    await moveIssueToState(config, "issue-1", "Human Review", "team-1");
+    await moveIssueToState(config, "issue-2", "Human Review", "team-1");
+
+    expect(queryNames).toEqual(["states", "move", "move"]);
   });
 });
 

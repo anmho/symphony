@@ -122,6 +122,7 @@ export interface OrchestratorDependencies {
     config: EffectiveWorkflowConfig,
     issueId: string,
     stateName: string,
+    teamId?: string | null,
   ) => Promise<void>;
   fetchPullRequestStatus: (url: string) => Promise<PullRequestStatus | null>;
   fetchPullRequestMetadata: (
@@ -310,6 +311,11 @@ function formatUnresolvedReviewFeedback(
   ].join('\n');
 }
 
+function isLinearQuotaError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /linear_graphql_error:.*quota exceeded/i.test(message);
+}
+
 export interface OrchestratorOptions {
   workflowPath: string;
   pollOnce?: boolean;
@@ -364,6 +370,14 @@ export class Orchestrator {
     reason: null as string | null,
     updatedAtMs: null as number | null,
   };
+  private linearQuota = {
+    resumeAfterMs: null as number | null,
+    reason: null as string | null,
+    updatedAtMs: null as number | null,
+  };
+  private readonly linearQuotaFailedCriticalMoves = new Set<string>();
+  private readonly lastLinearNotice = new Map<string, number>();
+  private readonly processedLinearMutationIssueIds = new Set<string>();
 
   constructor(
     options: OrchestratorOptions,
@@ -636,8 +650,18 @@ export class Orchestrator {
       throw new Error('no_active_state_configured');
     }
 
-    await this.deps.writeRunnerComment(
+    const moved = await this.moveIssueToStateWithQuotaGate(
       config,
+      issue,
+      targetState,
+      'human_request_changes',
+    );
+    if (!moved) {
+      throw new Error('linear_quota_cooldown_active');
+    }
+    await this.writeRunnerCommentBestEffort(
+      config,
+      issue,
       issue.id,
       [
         'Changes requested by human reviewer.',
@@ -646,8 +670,8 @@ export class Orchestrator {
         '',
         `Symphony moved this issue back to ${targetState} for agent rework.`,
       ].join('\n'),
+      { reason: 'human_request_changes' },
     );
-    await this.deps.moveIssueToState(config, issue.id, targetState);
     this.reworkIssues.add(issue.id);
     this.rework.set(
       issue.identifier,
@@ -683,6 +707,7 @@ export class Orchestrator {
   private async runTick(): Promise<void> {
     const config = await this.reloadConfig(false);
     this.lastTickAtMs = this.deps.now();
+    this.processedLinearMutationIssueIds.clear();
     const terminalIssues = await this.refreshCompletedFromLinear(config);
     await this.refreshHandoffFromLinear(config);
     await this.refreshMergeEligibleFromLinear(config);
@@ -872,6 +897,7 @@ export class Orchestrator {
     this.handoff.clear();
     for (const issue of handoffIssues) {
       try {
+        this.processedLinearMutationIssueIds.add(issue.id);
         this.clearStaleCompletedIssue(issue);
         if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
           continue;
@@ -906,6 +932,7 @@ export class Orchestrator {
     const mergeIssues = await this.deps.fetchMergeEligibleIssues(config);
     for (const issue of mergeIssues) {
       try {
+        this.processedLinearMutationIssueIds.add(issue.id);
         this.clearStaleCompletedIssue(issue);
         if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
           continue;
@@ -940,6 +967,10 @@ export class Orchestrator {
     const issues = await this.deps.fetchRelevantIssues(config);
     for (const issue of issues) {
       try {
+        if (this.processedLinearMutationIssueIds.has(issue.id)) {
+          continue;
+        }
+        this.processedLinearMutationIssueIds.add(issue.id);
         if (isTerminalState(issue.state, config)) {
           continue;
         }
@@ -1500,12 +1531,14 @@ export class Orchestrator {
       }
 
       await this.deps.runHook(config, 'beforeRun', issue, workspace);
-      await this.deps.writeRunnerComment(
+      await this.writeRunnerCommentBestEffort(
         config,
+        issue,
         issue.id,
         turnIndex === 0
           ? `Symphony started work in ${workspace.path} on ${workspace.branchName}.`
           : `Symphony continuing work, turn ${turnIndex + 1}.`,
+        { reason: turnIndex === 0 ? 'agent_started' : 'agent_continued' },
       );
 
       const queuedSteer = this.eventStore.consumeSteer(issue.identifier);
@@ -1565,10 +1598,12 @@ export class Orchestrator {
           reason: result.error ?? 'codex_rate_limited',
           updatedAtMs: this.deps.now(),
         };
-        await this.deps.writeRunnerComment(
+        await this.writeRunnerCommentBestEffort(
           config,
+          issue,
           issue.id,
           `Symphony parked Codex work until ${new Date(resumeAfterMs).toISOString()} because Codex reported a rate limit.`,
+          { reason: 'codex_rate_limited' },
         );
         this.scheduleRateLimitProbe(
           config,
@@ -1621,11 +1656,22 @@ export class Orchestrator {
           this.releaseIssue(issue.id);
           return;
         }
-        await this.deps.moveIssueToState(
+        const moved = await this.moveIssueToStateWithQuotaGate(
           config,
-          issue.id,
+          latestIssue,
           config.tracker.handoffState!,
+          'agent_handoff',
         );
+        if (!moved) {
+          this.scheduleRetry(
+            config,
+            latestIssue,
+            1,
+            'linear_quota_handoff',
+            this.linearQuota.resumeAfterMs ?? this.deps.now() + config.linear.quotaCooldownMs,
+          );
+          return;
+        }
         this.appendRunnerEvent(entry, 'issue moved to handoff state', {
           state: config.tracker.handoffState,
           reason: `codex_goal_${entry.session.goalStatus ?? 'done'}`,
@@ -1729,7 +1775,15 @@ export class Orchestrator {
       return false;
     }
 
-    await this.deps.moveIssueToState(config, issue.id, handoffState);
+    const moved = await this.moveIssueToStateWithQuotaGate(
+      config,
+      issue,
+      handoffState,
+      'pr_linked_handoff',
+    );
+    if (!moved) {
+      return false;
+    }
     const handedOffIssue = { ...issue, state: handoffState };
     this.handoff.set(issue.identifier, issueSummary(config, handedOffIssue));
     this.rework.delete(issue.identifier);
@@ -1795,7 +1849,15 @@ export class Orchestrator {
       return false;
     }
 
-    await this.deps.moveIssueToState(config, issue.id, mergeState);
+    const moved = await this.moveIssueToStateWithQuotaGate(
+      config,
+      issue,
+      mergeState,
+      'approved_pr_merge_eligible',
+    );
+    if (!moved) {
+      return false;
+    }
     await this.writeRunnerCommentBestEffort(
       config,
       issue,
@@ -1805,6 +1867,7 @@ export class Orchestrator {
         '',
         `Moved this issue to ${mergeState} for merge automation.`,
       ].join('\n'),
+      { reason: 'approved_pr_observed', prUrl: readiness.url },
     );
     const mergeIssue = { ...issue, state: mergeState };
     this.handoff.set(issue.identifier, issueSummary(config, mergeIssue));
@@ -2037,8 +2100,18 @@ export class Orchestrator {
       );
       return;
     }
-    await this.deps.moveIssueToState(config, issue.id, targetState);
-    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body);
+    const moved = await this.moveIssueToStateWithQuotaGate(
+      config,
+      issue,
+      targetState,
+      'merge_back_to_active',
+    );
+    if (!moved) {
+      return;
+    }
+    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body, {
+      reason: 'action_required',
+    });
     this.reworkIssues.add(issue.id);
     this.handoff.delete(issue.identifier);
     this.completed.delete(issue.identifier);
@@ -2056,8 +2129,18 @@ export class Orchestrator {
       await this.moveMergeIssueBackToActive(config, issue, body);
       return;
     }
-    await this.deps.moveIssueToState(config, issue.id, handoffState);
-    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body);
+    const moved = await this.moveIssueToStateWithQuotaGate(
+      config,
+      issue,
+      handoffState,
+      'merge_back_to_handoff',
+    );
+    if (!moved) {
+      return;
+    }
+    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body, {
+      reason: 'pr_review',
+    });
     const handoffIssue = { ...issue, state: handoffState };
     this.handoff.set(issue.identifier, issueSummary(config, handoffIssue));
     this.rework.delete(issue.identifier);
@@ -2070,15 +2153,152 @@ export class Orchestrator {
     issue: NormalizedIssue,
     issueId: string,
     body: string,
+    options: { reason?: string; prUrl?: string | null } = {},
   ): Promise<void> {
+    const reason = options.reason ?? body.split('\n')[0] ?? 'runner_comment';
+    const noticeKey = this.linearNoticeKey(issueId, reason, options.prUrl);
+    if (this.isLinearQuotaCooldownActive() && !config.linear.optionalWritesDuringQuota) {
+      this.deps.logger.warn(
+        {
+          issue: issue.identifier,
+          reason,
+          resumeAfterMs: this.linearQuota.resumeAfterMs,
+        },
+        'skipped optional Linear comment during quota cooldown',
+      );
+      return;
+    }
+    if (!this.shouldWriteLinearNotice(config, noticeKey)) {
+      return;
+    }
     try {
       await this.deps.writeRunnerComment(config, issueId, body);
+      this.lastLinearNotice.set(noticeKey, this.deps.now());
     } catch (error) {
+      this.noteLinearQuota(config, error, 'comment', issue);
       this.deps.logger.warn(
         { error, issue: issue.identifier },
         'failed to write runner comment',
       );
     }
+  }
+
+  private async moveIssueToStateWithQuotaGate(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    stateName: string,
+    reason: string,
+  ): Promise<boolean> {
+    const moveKey = `${issue.id}:${stateName}:${reason}`;
+    if (
+      this.isLinearQuotaCooldownActive() &&
+      this.linearQuotaFailedCriticalMoves.has(moveKey)
+    ) {
+      this.deps.logger.warn(
+        {
+          issue: issue.identifier,
+          state: stateName,
+          reason,
+          resumeAfterMs: this.linearQuota.resumeAfterMs,
+        },
+        'skipped repeated Linear state move during quota cooldown',
+      );
+      return false;
+    }
+
+    try {
+      if (issue.teamId) {
+        await this.deps.moveIssueToState(
+          config,
+          issue.id,
+          stateName,
+          issue.teamId,
+        );
+      } else {
+        await this.deps.moveIssueToState(config, issue.id, stateName);
+      }
+      this.linearQuotaFailedCriticalMoves.delete(moveKey);
+      return true;
+    } catch (error) {
+      if (!isLinearQuotaError(error)) {
+        throw error;
+      }
+      this.noteLinearQuota(config, error, 'state_move', issue);
+      this.linearQuotaFailedCriticalMoves.add(moveKey);
+      this.deps.logger.warn(
+        {
+          error,
+          issue: issue.identifier,
+          state: stateName,
+          reason,
+          resumeAfterMs: this.linearQuota.resumeAfterMs,
+        },
+        'Linear quota blocked state move',
+      );
+      return false;
+    }
+  }
+
+  private noteLinearQuota(
+    config: EffectiveWorkflowConfig,
+    error: unknown,
+    operation: string,
+    issue?: NormalizedIssue,
+  ): void {
+    if (!isLinearQuotaError(error)) {
+      return;
+    }
+    const now = this.deps.now();
+    this.linearQuota = {
+      resumeAfterMs: now + config.linear.quotaCooldownMs,
+      reason: 'quota exceeded',
+      updatedAtMs: now,
+    };
+    this.deps.logger.warn(
+      {
+        error,
+        issue: issue?.identifier ?? null,
+        operation,
+        resumeAfterMs: this.linearQuota.resumeAfterMs,
+      },
+      'Linear quota cooldown active',
+    );
+  }
+
+  private isLinearQuotaCooldownActive(): boolean {
+    const resumeAfterMs = this.linearQuota.resumeAfterMs;
+    if (resumeAfterMs === null) {
+      return false;
+    }
+    if (this.deps.now() < resumeAfterMs) {
+      return true;
+    }
+    this.linearQuota = {
+      resumeAfterMs: null,
+      reason: null,
+      updatedAtMs: null,
+    };
+    this.linearQuotaFailedCriticalMoves.clear();
+    return false;
+  }
+
+  private shouldWriteLinearNotice(
+    config: EffectiveWorkflowConfig,
+    noticeKey: string,
+  ): boolean {
+    const lastNoticeMs = this.lastLinearNotice.get(noticeKey);
+    return (
+      lastNoticeMs === undefined ||
+      this.deps.now() - lastNoticeMs >= config.linear.noticeDebounceMs
+    );
+  }
+
+  private linearNoticeKey(
+    issueId: string,
+    reason: string,
+    prUrl: string | null | undefined,
+  ): string {
+    return [issueId, reason, prUrl ?? ''].join(':');
   }
 
   private async ensurePrIdentityHandoffGate(
@@ -2288,7 +2508,9 @@ export class Orchestrator {
     if (issue.comments.some((comment) => comment.includes(marker))) {
       return;
     }
-    await this.deps.writeRunnerComment(config, issue.id, body);
+    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body, {
+      reason: marker,
+    });
   }
 
   private async syncMergedPrLinkedIssueToTerminal(
@@ -2324,7 +2546,15 @@ export class Orchestrator {
       return false;
     }
 
-    await this.deps.moveIssueToState(config, issue.id, terminalState);
+    const moved = await this.moveIssueToStateWithQuotaGate(
+      config,
+      issue,
+      terminalState,
+      'merged_pr_terminal',
+    );
+    if (!moved) {
+      return false;
+    }
     await this.writeRunnerCommentBestEffort(
       config,
       issue,
@@ -2334,6 +2564,7 @@ export class Orchestrator {
         '',
         `Moved this issue to ${terminalState}.`,
       ].join('\n'),
+      { reason: 'merged_pr_terminal', prUrl: prStatus.url },
     );
 
     const completedIssue = { ...issue, state: terminalState };
@@ -2412,13 +2643,22 @@ export class Orchestrator {
 
     const commentBody = formatUnresolvedReviewFeedback(feedback, targetState);
     if (!inActive) {
-      await this.deps.moveIssueToState(config, issue.id, targetState);
+      const moved = await this.moveIssueToStateWithQuotaGate(
+        config,
+        issue,
+        targetState,
+        'review_feedback_rework',
+      );
+      if (!moved) {
+        return false;
+      }
     }
     await this.writeRunnerCommentBestEffort(
       config,
       issue,
       issue.id,
       commentBody,
+      { reason: 'review_feedback_rework', prUrl },
     );
     this.reworkIssues.add(issue.id);
     this.rework.set(

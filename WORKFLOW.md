@@ -19,7 +19,12 @@ tracker:
     - Duplicate
 
 polling:
-  interval_ms: 30000
+  interval_ms: 60000
+
+linear:
+  quota_cooldown_ms: 300000
+  notice_debounce_ms: 21600000
+  optional_writes_during_quota: false
 
 digest:
   enabled: false
