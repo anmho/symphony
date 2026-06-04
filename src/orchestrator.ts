@@ -15,6 +15,7 @@ import {
   fetchMergeEligibleIssues,
   fetchRelevantIssues,
   fetchTerminalIssues,
+  LinearRateLimitError,
   moveIssueToState,
   writeRunnerComment,
 } from './linear.js';
@@ -312,8 +313,22 @@ function formatUnresolvedReviewFeedback(
 }
 
 function isLinearQuotaError(error: unknown): boolean {
+  if (error instanceof LinearRateLimitError) {
+    return true;
+  }
   const message = error instanceof Error ? error.message : String(error);
   return /linear_graphql_error:.*quota exceeded/i.test(message);
+}
+
+function linearQuotaResumeAfterMs(
+  error: unknown,
+  now: number,
+  fallbackCooldownMs: number,
+): number {
+  if (error instanceof LinearRateLimitError && error.rateLimit.resetAtMs) {
+    return Math.max(error.rateLimit.resetAtMs, now);
+  }
+  return now + fallbackCooldownMs;
 }
 
 export interface OrchestratorOptions {
@@ -2249,8 +2264,13 @@ export class Orchestrator {
       return;
     }
     const now = this.deps.now();
+    const resumeAfterMs = linearQuotaResumeAfterMs(
+      error,
+      now,
+      config.linear.quotaCooldownMs,
+    );
     this.linearQuota = {
-      resumeAfterMs: now + config.linear.quotaCooldownMs,
+      resumeAfterMs,
       reason: 'quota exceeded',
       updatedAtMs: now,
     };
@@ -2259,6 +2279,8 @@ export class Orchestrator {
         error,
         issue: issue?.identifier ?? null,
         operation,
+        rateLimit:
+          error instanceof LinearRateLimitError ? error.rateLimit : null,
         resumeAfterMs: this.linearQuota.resumeAfterMs,
       },
       'Linear quota cooldown active',

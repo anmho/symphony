@@ -1,9 +1,42 @@
 import type { EffectiveWorkflowConfig, JsonObject, NormalizedIssue } from "./types.js";
 import { symphonyIssueTemplateData, SYMPHONY_ISSUE_TEMPLATE_NAME } from "./ticket-template.js";
 
+interface GraphQLErrorPayload {
+  message: string;
+  extensions?: {
+    code?: string;
+    [key: string]: unknown;
+  };
+}
+
 interface GraphQLResponse<T> {
   data?: T;
-  errors?: Array<{ message: string }>;
+  errors?: GraphQLErrorPayload[];
+}
+
+export interface LinearRateLimitInfo {
+  requestLimit: number | null;
+  requestRemaining: number | null;
+  requestResetAtMs: number | null;
+  endpointLimit: number | null;
+  endpointRemaining: number | null;
+  endpointResetAtMs: number | null;
+  endpointName: string | null;
+  complexity: number | null;
+  complexityLimit: number | null;
+  complexityRemaining: number | null;
+  complexityResetAtMs: number | null;
+  resetAtMs: number | null;
+}
+
+export class LinearRateLimitError extends Error {
+  readonly rateLimit: LinearRateLimitInfo;
+
+  constructor(message: string, rateLimit: LinearRateLimitInfo) {
+    super(message);
+    this.name = "LinearRateLimitError";
+    this.rateLimit = rateLimit;
+  }
 }
 
 interface LinearIssueNode {
@@ -642,11 +675,21 @@ async function linearGraphql<T>(
     body: JSON.stringify({ query, variables })
   });
 
-  if (!response.ok) {
-    throw new Error(`linear_http_error: ${response.status} ${await response.text()}`);
+  const rateLimit = linearRateLimitInfo(response.headers);
+  const body = await response.text();
+  const payload = parseGraphqlPayload<T>(body);
+
+  if (isLinearRateLimited(response, payload)) {
+    throw new LinearRateLimitError(
+      `linear_graphql_error: ${graphqlErrorMessage(payload) || "rate limited"}`,
+      rateLimit
+    );
   }
 
-  const payload = (await response.json()) as GraphQLResponse<T>;
+  if (!response.ok) {
+    throw new Error(`linear_http_error: ${response.status} ${body}`);
+  }
+
   if (payload.errors?.length) {
     throw new Error(`linear_graphql_error: ${payload.errors.map((error) => error.message).join("; ")}`);
   }
@@ -655,6 +698,67 @@ async function linearGraphql<T>(
   }
 
   return payload.data;
+}
+
+function parseGraphqlPayload<T>(body: string): GraphQLResponse<T> {
+  if (!body) {
+    return {};
+  }
+  try {
+    return JSON.parse(body) as GraphQLResponse<T>;
+  } catch {
+    return {};
+  }
+}
+
+function isLinearRateLimited(response: Response, payload: GraphQLResponse<unknown>): boolean {
+  if (response.status === 429) {
+    return true;
+  }
+  return (payload.errors ?? []).some((error) => {
+    const code = error.extensions?.code;
+    return (
+      code === "RATELIMITED" ||
+      /rate.?limit|quota exceeded/i.test(error.message)
+    );
+  });
+}
+
+function graphqlErrorMessage(payload: GraphQLResponse<unknown>): string {
+  return (payload.errors ?? []).map((error) => error.message).join("; ");
+}
+
+function linearRateLimitInfo(headers: Headers): LinearRateLimitInfo {
+  const requestResetAtMs = headerNumber(headers, "X-RateLimit-Requests-Reset");
+  const endpointResetAtMs = headerNumber(headers, "X-RateLimit-Endpoint-Requests-Reset");
+  const complexityResetAtMs = headerNumber(headers, "X-RateLimit-Complexity-Reset");
+  const resetAtMs = [requestResetAtMs, endpointResetAtMs, complexityResetAtMs]
+    .filter((value): value is number => value !== null)
+    .reduce<number | null>((max, value) => (max === null ? value : Math.max(max, value)), null);
+
+  return {
+    requestLimit: headerNumber(headers, "X-RateLimit-Requests-Limit"),
+    requestRemaining: headerNumber(headers, "X-RateLimit-Requests-Remaining"),
+    requestResetAtMs,
+    endpointLimit: headerNumber(headers, "X-RateLimit-Endpoint-Requests-Limit"),
+    endpointRemaining: headerNumber(headers, "X-RateLimit-Endpoint-Requests-Remaining"),
+    endpointResetAtMs,
+    endpointName: headers.get("X-RateLimit-Endpoint-Name"),
+    complexity: headerNumber(headers, "X-Complexity"),
+    complexityLimit: headerNumber(headers, "X-RateLimit-Complexity-Limit"),
+    complexityRemaining: headerNumber(headers, "X-RateLimit-Complexity-Remaining"),
+    complexityResetAtMs,
+    resetAtMs,
+  };
+}
+
+function headerNumber(headers: Headers, name: string): number | null {
+  const raw = headers.get(name);
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizeLinearIssue(node: LinearIssueNode): NormalizedIssue {

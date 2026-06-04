@@ -6,6 +6,7 @@ import {
   fetchIssueLabelNames,
   fetchRelevantIssues,
   fetchTerminalIssues,
+  LinearRateLimitError,
   moveIssueToState,
 } from "../src/linear.js";
 import type { EffectiveWorkflowConfig } from "../src/types.js";
@@ -259,6 +260,61 @@ describe("linear client", () => {
 
     expect(queryNames).toEqual(["states", "move", "move"]);
   });
+
+  it("throws LinearRateLimitError with reset headers for Linear RATELIMITED responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response(
+          {
+            errors: [
+              {
+                message: "Rate limit exceeded",
+                extensions: { code: "RATELIMITED" }
+              }
+            ]
+          },
+          {
+            ok: false,
+            status: 400,
+            headers: {
+              "X-RateLimit-Requests-Limit": "2500",
+              "X-RateLimit-Requests-Remaining": "0",
+              "X-RateLimit-Requests-Reset": "1780563710750",
+              "X-RateLimit-Endpoint-Requests-Limit": "100",
+              "X-RateLimit-Endpoint-Requests-Remaining": "0",
+              "X-RateLimit-Endpoint-Requests-Reset": "1780563711750",
+              "X-RateLimit-Endpoint-Name": "commentCreate",
+              "X-Complexity": "12",
+              "X-RateLimit-Complexity-Limit": "3000000",
+              "X-RateLimit-Complexity-Remaining": "42",
+              "X-RateLimit-Complexity-Reset": "1780563712750"
+            }
+          }
+        )
+      )
+    );
+
+    await expect(
+      moveIssueToState(makeConfig({ projectSlug: null, teamKey: "ANM" }), "issue-1", "Human Review")
+    ).rejects.toMatchObject({
+      name: "LinearRateLimitError",
+      rateLimit: {
+        requestLimit: 2500,
+        requestRemaining: 0,
+        requestResetAtMs: 1780563710750,
+        endpointLimit: 100,
+        endpointRemaining: 0,
+        endpointResetAtMs: 1780563711750,
+        endpointName: "commentCreate",
+        complexity: 12,
+        complexityLimit: 3000000,
+        complexityRemaining: 42,
+        complexityResetAtMs: 1780563712750,
+        resetAtMs: 1780563712750
+      }
+    } satisfies Partial<LinearRateLimitError>);
+  });
 });
 
 function makeConfig(tracker: {
@@ -283,9 +339,19 @@ function makeConfig(tracker: {
   } as unknown as EffectiveWorkflowConfig;
 }
 
-function response(data: unknown): Response {
+function response(
+  data: unknown,
+  options: {
+    ok?: boolean;
+    status?: number;
+    headers?: Record<string, string>;
+  } = {}
+): Response {
   return {
-    ok: true,
+    ok: options.ok ?? true,
+    status: options.status ?? 200,
+    headers: new Headers(options.headers ?? {}),
+    text: async () => JSON.stringify(options.ok === false ? data : { data }),
     json: async () => ({ data })
   } as Response;
 }
