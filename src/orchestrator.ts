@@ -871,23 +871,31 @@ export class Orchestrator {
     const handoffIssues = await this.deps.fetchHandoffIssues(config);
     this.handoff.clear();
     for (const issue of handoffIssues) {
-      this.clearStaleCompletedIssue(issue);
-      if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
-        continue;
+      try {
+        this.clearStaleCompletedIssue(issue);
+        if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
+          continue;
+        }
+        if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
+          continue;
+        }
+        if (await this.syncConflictedPrLinkedIssueToActive(config, issue)) {
+          continue;
+        }
+        if (await this.syncApprovedPrLinkedIssueToMergeEligible(config, issue)) {
+          continue;
+        }
+        this.handoff.set(issue.identifier, issueSummary(config, issue));
+        this.rework.delete(issue.identifier);
+        this.retryAttempts.delete(issue.id);
+        this.claimed.delete(issue.id);
+      } catch (error) {
+        this.deps.logger.warn(
+          { error, issue: issue.identifier },
+          'failed to refresh handoff issue',
+        );
+        this.handoff.set(issue.identifier, issueSummary(config, issue));
       }
-      if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
-        continue;
-      }
-      if (await this.syncConflictedPrLinkedIssueToActive(config, issue)) {
-        continue;
-      }
-      if (await this.syncApprovedPrLinkedIssueToMergeEligible(config, issue)) {
-        continue;
-      }
-      this.handoff.set(issue.identifier, issueSummary(config, issue));
-      this.rework.delete(issue.identifier);
-      this.retryAttempts.delete(issue.id);
-      this.claimed.delete(issue.id);
     }
     return handoffIssues;
   }
@@ -897,23 +905,31 @@ export class Orchestrator {
   ): Promise<NormalizedIssue[]> {
     const mergeIssues = await this.deps.fetchMergeEligibleIssues(config);
     for (const issue of mergeIssues) {
-      this.clearStaleCompletedIssue(issue);
-      if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
-        continue;
+      try {
+        this.clearStaleCompletedIssue(issue);
+        if (await this.syncMergedPrLinkedIssueToTerminal(config, issue)) {
+          continue;
+        }
+        if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
+          continue;
+        }
+        if (await this.syncConflictedPrLinkedIssueToActive(config, issue)) {
+          continue;
+        }
+        if (await this.mergeApprovedPrLinkedIssue(config, issue)) {
+          continue;
+        }
+        this.handoff.set(issue.identifier, issueSummary(config, issue));
+        this.rework.delete(issue.identifier);
+        this.retryAttempts.delete(issue.id);
+        this.claimed.delete(issue.id);
+      } catch (error) {
+        this.deps.logger.warn(
+          { error, issue: issue.identifier },
+          'failed to refresh merge-eligible issue',
+        );
+        this.handoff.set(issue.identifier, issueSummary(config, issue));
       }
-      if (await this.syncReviewFeedbackLinkedIssueToActive(config, issue)) {
-        continue;
-      }
-      if (await this.syncConflictedPrLinkedIssueToActive(config, issue)) {
-        continue;
-      }
-      if (await this.mergeApprovedPrLinkedIssue(config, issue)) {
-        continue;
-      }
-      this.handoff.set(issue.identifier, issueSummary(config, issue));
-      this.rework.delete(issue.identifier);
-      this.retryAttempts.delete(issue.id);
-      this.claimed.delete(issue.id);
     }
     return mergeIssues;
   }
@@ -923,33 +939,40 @@ export class Orchestrator {
   ): Promise<void> {
     const issues = await this.deps.fetchRelevantIssues(config);
     for (const issue of issues) {
-      if (isTerminalState(issue.state, config)) {
-        continue;
-      }
-      const prUrl = githubPullRequestUrlFromIssue(issue);
-      if (!prUrl) {
-        continue;
-      }
-      if (!(await this.isManagedPr(config, issue, prUrl))) {
-        continue;
-      }
-      if (isMergeState(issue.state, config)) {
-        await this.syncMergedPrLinkedIssueToTerminal(config, issue);
-        await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
-        await this.syncConflictedPrLinkedIssueToActive(config, issue);
-        await this.mergeApprovedPrLinkedIssue(config, issue);
-        continue;
-      }
-      if (isHandoffState(issue.state, config)) {
-        await this.syncMergedPrLinkedIssueToTerminal(config, issue);
-        await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
-        await this.syncConflictedPrLinkedIssueToActive(config, issue);
-        await this.syncApprovedPrLinkedIssueToMergeEligible(config, issue);
-        continue;
-      }
-      if (isActiveState(issue.state, config)) {
-        await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
-        await this.syncPrLinkedIssueToHandoff(config, issue);
+      try {
+        if (isTerminalState(issue.state, config)) {
+          continue;
+        }
+        const prUrl = githubPullRequestUrlFromIssue(issue);
+        if (!prUrl) {
+          continue;
+        }
+        if (!(await this.isManagedPr(config, issue, prUrl))) {
+          continue;
+        }
+        if (isMergeState(issue.state, config)) {
+          await this.syncMergedPrLinkedIssueToTerminal(config, issue);
+          await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
+          await this.syncConflictedPrLinkedIssueToActive(config, issue);
+          await this.mergeApprovedPrLinkedIssue(config, issue);
+          continue;
+        }
+        if (isHandoffState(issue.state, config)) {
+          await this.syncMergedPrLinkedIssueToTerminal(config, issue);
+          await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
+          await this.syncConflictedPrLinkedIssueToActive(config, issue);
+          await this.syncApprovedPrLinkedIssueToMergeEligible(config, issue);
+          continue;
+        }
+        if (isActiveState(issue.state, config)) {
+          await this.syncReviewFeedbackLinkedIssueToActive(config, issue);
+          await this.syncPrLinkedIssueToHandoff(config, issue);
+        }
+      } catch (error) {
+        this.deps.logger.warn(
+          { error, issue: issue.identifier },
+          'failed to refresh PR-linked issue',
+        );
       }
     }
   }
@@ -1773,8 +1796,9 @@ export class Orchestrator {
     }
 
     await this.deps.moveIssueToState(config, issue.id, mergeState);
-    await this.deps.writeRunnerComment(
+    await this.writeRunnerCommentBestEffort(
       config,
+      issue,
       issue.id,
       [
         `Symphony observed approved GitHub PR: ${readiness.url}.`,
@@ -1988,8 +2012,9 @@ export class Orchestrator {
       return true;
     }
 
-    await this.deps.writeRunnerComment(
+    await this.writeRunnerCommentBestEffort(
       config,
+      issue,
       issue.id,
       `Symphony merged approved GitHub PR: ${readiness.url}.`,
     );
@@ -2012,8 +2037,8 @@ export class Orchestrator {
       );
       return;
     }
-    await this.deps.writeRunnerComment(config, issue.id, body);
     await this.deps.moveIssueToState(config, issue.id, targetState);
+    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body);
     this.reworkIssues.add(issue.id);
     this.handoff.delete(issue.identifier);
     this.completed.delete(issue.identifier);
@@ -2031,13 +2056,29 @@ export class Orchestrator {
       await this.moveMergeIssueBackToActive(config, issue, body);
       return;
     }
-    await this.deps.writeRunnerComment(config, issue.id, body);
     await this.deps.moveIssueToState(config, issue.id, handoffState);
+    await this.writeRunnerCommentBestEffort(config, issue, issue.id, body);
     const handoffIssue = { ...issue, state: handoffState };
     this.handoff.set(issue.identifier, issueSummary(config, handoffIssue));
     this.rework.delete(issue.identifier);
     this.retryAttempts.delete(issue.id);
     this.claimed.delete(issue.id);
+  }
+
+  private async writeRunnerCommentBestEffort(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    issueId: string,
+    body: string,
+  ): Promise<void> {
+    try {
+      await this.deps.writeRunnerComment(config, issueId, body);
+    } catch (error) {
+      this.deps.logger.warn(
+        { error, issue: issue.identifier },
+        'failed to write runner comment',
+      );
+    }
   }
 
   private async ensurePrIdentityHandoffGate(
@@ -2284,8 +2325,9 @@ export class Orchestrator {
     }
 
     await this.deps.moveIssueToState(config, issue.id, terminalState);
-    await this.deps.writeRunnerComment(
+    await this.writeRunnerCommentBestEffort(
       config,
+      issue,
       issue.id,
       [
         `Symphony observed merged GitHub PR: ${prStatus.url}.`,
@@ -2368,14 +2410,16 @@ export class Orchestrator {
       return false;
     }
 
-    await this.deps.writeRunnerComment(
-      config,
-      issue.id,
-      formatUnresolvedReviewFeedback(feedback, targetState),
-    );
+    const commentBody = formatUnresolvedReviewFeedback(feedback, targetState);
     if (!inActive) {
       await this.deps.moveIssueToState(config, issue.id, targetState);
     }
+    await this.writeRunnerCommentBestEffort(
+      config,
+      issue,
+      issue.id,
+      commentBody,
+    );
     this.reworkIssues.add(issue.id);
     this.rework.set(
       issue.identifier,
