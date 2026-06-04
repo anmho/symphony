@@ -70,6 +70,8 @@ struct AgentRowView: View {
         if row.kind == .review {
             if canOpenPullRequest {
                 onOpenPullRequest()
+            } else {
+                openIssue()
             }
             return
         }

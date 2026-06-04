@@ -43,7 +43,9 @@ public enum SymphonyCLI {
         
         let currentPath = env["PATH"] ?? ""
         let home = NSHomeDirectory()
-        env["PATH"] = "\(home)/.bun/bin:/opt/homebrew/bin:/usr/local/bin:\(currentPath)"
+        env["PATH"] = environmentWithLocalBinPaths(
+            base: ["HOME": home, "PATH": currentPath]
+        )["PATH"]
         return env
     }()
 
@@ -106,5 +108,21 @@ public enum SymphonyCLI {
         guard let pipe else { return "" }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    static func environmentWithLocalBinPaths(
+        base: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = base
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        let additions = [
+            "\(home)/.bun/bin",
+            "\(home)/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin"
+        ]
+        let existingPath = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment["PATH"] = (additions + [existingPath]).joined(separator: ":")
+        return environment
     }
 }

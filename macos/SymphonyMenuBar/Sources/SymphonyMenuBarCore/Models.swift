@@ -194,7 +194,7 @@ public extension OrchestratorSnapshot {
                 id: "handoff-\(issueId)",
                 identifier: issueId,
                 title: detail?.title,
-                status: statusLabel(for: detail?.reviewKind, fallback: "review"),
+                status: handoffStatusLabel(for: detail),
                 detail: handoffDetail(detail),
                 kind: .review,
                 repoKey: detail?.repoKey,
@@ -284,15 +284,23 @@ public extension OrchestratorSnapshot {
     private func statusLabel(for reviewKind: String?, fallback: String) -> String {
         switch reviewKind {
         case "pr_review": return "PR review"
+        case "action_required": return "action required"
         case "blocked": return "blocked"
         case "completed": return "completed"
         default: return fallback
         }
     }
 
+    private func handoffStatusLabel(for detail: IssueSummary?) -> String {
+        if detail?.reviewKind == "pr_review", detail?.prUrl == nil {
+            return "action required"
+        }
+        return statusLabel(for: detail?.reviewKind, fallback: "review")
+    }
+
     private func handoffDetail(_ detail: IssueSummary?) -> String {
         let state = detail?.state ?? "In Review"
-        let label = statusLabel(for: detail?.reviewKind, fallback: "review")
+        let label = handoffStatusLabel(for: detail)
         var parts = ["\(state) · \(label)"]
         if let repoKey = detail?.repoKey {
             parts.append(repoKey)

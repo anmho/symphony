@@ -126,19 +126,20 @@ export class AgentWorkEventStore {
   private readIssueEvents(issue: string): AgentWorkEvent[] {
     const buffered = this.buffers.get(issue);
     const filePath = this.logPathForIssue(issue);
-    if (!existsSync(filePath)) {
-      return buffered ? [...buffered] : [];
-    }
-    return parseJsonl(readFileSync(filePath, "utf8"));
+    const persisted = existsSync(filePath)
+      ? parseJsonl(readFileSync(filePath, "utf8"))
+      : [];
+    return mergeEvents(persisted, buffered ?? []);
   }
 
   private readAllEvents(): AgentWorkEvent[] {
-    if (!existsSync(this.eventDir)) {
-      return [];
-    }
-    return readdirSync(this.eventDir)
-      .filter((file) => file.endsWith(".jsonl"))
-      .flatMap((file) => parseJsonl(readFileSync(path.join(this.eventDir, file), "utf8")));
+    const persisted = existsSync(this.eventDir)
+      ? readdirSync(this.eventDir)
+          .filter((file) => file.endsWith(".jsonl"))
+          .flatMap((file) => parseJsonl(readFileSync(path.join(this.eventDir, file), "utf8")))
+      : [];
+    const buffered = [...this.buffers.values()].flat();
+    return mergeEvents(persisted, buffered);
   }
 
   private loadExistingCursors(): void {
@@ -339,6 +340,16 @@ function parseJsonl(value: string): AgentWorkEvent[] {
         return [];
       }
     });
+}
+
+function mergeEvents(...groups: AgentWorkEvent[][]): AgentWorkEvent[] {
+  const byCursor = new Map<number, AgentWorkEvent>();
+  for (const group of groups) {
+    for (const event of group) {
+      byCursor.set(event.cursor, event);
+    }
+  }
+  return [...byCursor.values()].sort((left, right) => left.cursor - right.cursor);
 }
 
 function sanitizeFilename(value: string): string {

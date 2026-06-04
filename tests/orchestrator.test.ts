@@ -776,6 +776,87 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().completed).toEqual([]);
   });
 
+  it('marks handoff issues without pull requests as action required', async () => {
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [
+        makeIssue('ANM-284', {
+          id: 'issue-284',
+          title: 'Blocked before PR handoff',
+          state: 'In Review',
+          labels: ['symphony'],
+          comments: ['Blocked by missing credentials.'],
+        }),
+      ],
+      fetchCandidateIssues: async () => [],
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot().handoffDetails).toEqual([
+      {
+        identifier: 'ANM-284',
+        title: 'Blocked before PR handoff',
+        repoKey: null,
+        state: 'In Review',
+        reviewKind: 'action_required',
+        prUrl: null,
+      },
+    ]);
+  });
+
+  it('moves blocked Codex goals to handoff as action required', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'Human Review',
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchIssueById: async () => issue,
+      runAgentTurn: async (_input, options) => {
+        options.onEvent({
+          type: 'notification',
+          method: 'thread/goal/updated',
+          params: {
+            goal: {
+              objective: 'Complete Linear issue APP-1',
+              status: 'blocked',
+            },
+          },
+        });
+        return completedTurn('thread-1', 'turn-1');
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(orchestrator.snapshot().handoffDetails).toMatchObject([
+      {
+        identifier: 'APP-1',
+        state: 'Human Review',
+        reviewKind: 'action_required',
+        prUrl: null,
+      },
+    ]);
+  });
+
   it('reprocesses handoff issues that were previously cached completed', async () => {
     const config = makeConfig({
       tracker: {
