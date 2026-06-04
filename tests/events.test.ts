@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,64 @@ describe("agent work events", () => {
         message: "hello"
       }
     });
+  });
+
+  it("uses buffered issue events to fill gaps in persisted logs", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-events-buffer-"));
+    const store = new AgentWorkEventStore(path.join(dir, "WORKFLOW.md"), () => 1000);
+
+    store.append({
+      issueId: "issue-1",
+      identifier: "ANM-1",
+      repoKey: "symphony",
+      workspacePath: "/tmp/workspaces/ANM-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      type: "runner",
+      summary: "first"
+    });
+    store.append({
+      issueId: "issue-1",
+      identifier: "ANM-1",
+      repoKey: "symphony",
+      workspacePath: "/tmp/workspaces/ANM-1",
+      threadId: "thread-1",
+      turnId: "turn-2",
+      type: "runner",
+      summary: "second"
+    });
+
+    const logPath = store.logPathForIssue("ANM-1");
+    const firstLine = readFileSync(logPath, "utf8").split("\n")[0];
+    writeFileSync(logPath, `${firstLine}\n`);
+
+    expect(store.query({ issue: "ANM-1", cursor: 0, limit: 10 }).map((event) => event.summary)).toEqual([
+      "first",
+      "second"
+    ]);
+  });
+
+  it("preserves persisted history beyond the in-memory issue buffer", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-events-history-"));
+    const store = new AgentWorkEventStore(path.join(dir, "WORKFLOW.md"), () => 1000);
+
+    for (let index = 1; index <= 505; index += 1) {
+      store.append({
+        issueId: "issue-1",
+        identifier: "ANM-1",
+        repoKey: "symphony",
+        workspacePath: "/tmp/workspaces/ANM-1",
+        threadId: "thread-1",
+        turnId: `turn-${index}`,
+        type: "runner",
+        summary: `event ${index}`
+      });
+    }
+
+    const events = store.query({ issue: "ANM-1", cursor: 0, limit: 1000 });
+    expect(events).toHaveLength(505);
+    expect(events[0]?.summary).toBe("event 1");
+    expect(events.at(-1)?.summary).toBe("event 505");
   });
 
   it("normalizes reasoning notifications without exposing hidden content", () => {
