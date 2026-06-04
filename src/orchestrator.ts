@@ -21,6 +21,7 @@ import {
 import { logger as defaultLogger } from './logger.js';
 import {
   continuationPrompt,
+  branchNameForIssue,
   isActiveState,
   isIssueEligible,
   isTerminalState,
@@ -238,10 +239,19 @@ function reviewKindFromIssue(
   if (issue.state.toLowerCase().includes('block')) {
     return 'blocked';
   }
-  if (!prUrl) {
+  if (!prUrl || hasActionRequiredHandoffComment(issue)) {
     return 'action_required';
   }
   return 'pr_review';
+}
+
+function hasActionRequiredHandoffComment(issue: NormalizedIssue): boolean {
+  return issue.comments.some((comment) =>
+    [
+      'Symphony could not start this issue because its branch is already checked out in another worktree.',
+      'Symphony blocked PR handoff because',
+    ].some((marker) => comment.includes(marker)),
+  );
 }
 
 function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
@@ -256,6 +266,29 @@ function githubPullRequestUrlFromIssue(issue: NormalizedIssue): string | null {
     }
   }
   return null;
+}
+
+function externalWorktreeConflictPath(
+  error: string,
+  config: EffectiveWorkflowConfig,
+): string | null {
+  if (!error.startsWith('git_worktree_add_failed:')) {
+    return null;
+  }
+  const match = error.match(/is already used by worktree at '([^']+)'/);
+  const worktreePath = match?.[1];
+  if (!worktreePath) {
+    return null;
+  }
+  const workspaceRoot = path.resolve(config.workspace.root);
+  const resolvedWorktreePath = path.resolve(worktreePath);
+  if (
+    resolvedWorktreePath === workspaceRoot ||
+    resolvedWorktreePath.startsWith(`${workspaceRoot}${path.sep}`)
+  ) {
+    return null;
+  }
+  return worktreePath;
 }
 
 function repoKeyFromIssue(
@@ -1217,6 +1250,9 @@ export class Orchestrator {
           'issue run failed',
         );
         this.appendRunnerEvent(entry, message, null, 'error');
+        if (await this.handleSelfUnrecoverableRunFailure(config, issue, message)) {
+          return;
+        }
         this.scheduleRetry(config, issue, attempt + 1, message);
       })
       .finally(() => {
@@ -1726,6 +1762,62 @@ export class Orchestrator {
     this.claimed.add(issue.id);
   }
 
+  private async handleSelfUnrecoverableRunFailure(
+    config: EffectiveWorkflowConfig,
+    issue: NormalizedIssue,
+    error: string,
+  ): Promise<boolean> {
+    const worktreePath = externalWorktreeConflictPath(error, config);
+    if (!worktreePath) {
+      return false;
+    }
+    const handoffState = config.tracker.handoffState;
+    if (!handoffState || isActiveState(handoffState, config)) {
+      return false;
+    }
+
+    const moved = await this.moveIssueToStateWithQuotaGate(
+      config,
+      issue,
+      handoffState,
+      'external_worktree_blocker',
+    );
+    if (!moved) {
+      return false;
+    }
+
+    const blockerComment = [
+      'Symphony could not start this issue because its branch is already checked out in another worktree.',
+      '',
+      `Branch: ${branchNameForIssue(issue.identifier)}`,
+      `Existing worktree: ${worktreePath}`,
+      '',
+      'Remove or move that checkout, then move the Linear issue back to an active state for Symphony to retry.',
+    ].join('\n');
+    await this.writeRunnerCommentBestEffort(
+      config,
+      issue,
+      issue.id,
+      blockerComment,
+      { reason: 'external_worktree_blocker' },
+    );
+    const blockedIssue = {
+      ...issue,
+      state: handoffState,
+      comments: [...issue.comments, blockerComment],
+    };
+    this.handoff.set(issue.identifier, issueSummary(config, blockedIssue));
+    this.rework.delete(issue.identifier);
+    this.reworkIssues.delete(issue.id);
+    this.retryAttempts.delete(issue.id);
+    this.claimed.delete(issue.id);
+    this.deps.logger.info(
+      { issue: issue.identifier, worktreePath, state: handoffState },
+      'moved externally blocked worktree issue to handoff state',
+    );
+    return true;
+  }
+
   private shouldMoveToHandoff(
     config: EffectiveWorkflowConfig,
     entry: RunningEntry,
@@ -1957,17 +2049,11 @@ export class Orchestrator {
         this.repoPathForIssue(config, issue),
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.moveMergeIssueBackToActive(
-        config,
-        issue,
-        [
-          'Symphony could not verify PR merge readiness.',
-          `PR: ${prUrl}`,
-          `Error: ${message}`,
-        ].join('\n'),
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl },
+        'could not verify merge-eligible PR readiness; holding issue state',
       );
-      return true;
+      return false;
     }
 
     if (readiness.state === 'merged') {
@@ -2355,27 +2441,14 @@ export class Orchestrator {
         this.repoPathForIssue(config, issue),
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.writePrIdentityBlockerComment(
-        config,
-        issue,
-        [
-          'Symphony blocked PR handoff because PR metadata was unavailable for the configured github.pr_identity gate.',
-          expectedAuthor ? `Expected PR author: ${expectedAuthor}` : null,
-          requiredReviewers.length > 0
-            ? `Required reviewers: ${requiredReviewers.join(', ')}`
-            : null,
-          'Actual PR author: unavailable',
-          `PR: ${resolvedPrUrl}`,
-          `Error: ${message}`,
-        ]
-          .filter(Boolean)
-          .join('\n'),
+      this.deps.logger.warn(
+        { error, issue: issue.identifier, prUrl: resolvedPrUrl },
+        'PR identity gate metadata unavailable; holding issue state',
       );
       if (entry) {
         this.appendRunnerEvent(
           entry,
-          'PR identity gate blocked handoff',
+          'PR identity gate metadata unavailable; holding issue state',
           {
             expectedAuthor,
             requiredReviewers,
@@ -2808,7 +2881,7 @@ export class Orchestrator {
     const timestampMs = this.deps.now();
     entry.session.lastCodexEvent = event.type;
     entry.session.lastCodexTimestamp = timestampMs;
-    entry.session.lastCodexMessage = JSON.stringify(event).slice(0, 1000);
+    entry.session.lastCodexMessage = summarizeAgentEventForStatus(event);
     if (event.type === 'process_started') {
       entry.session.codexAppServerPid = event.pid;
     } else if (
@@ -3036,6 +3109,61 @@ function isPullRequestReadyToMerge(
     readiness.mergeStateStatus === 'CLEAN' &&
     readiness.mergeable === 'MERGEABLE'
   );
+}
+
+function summarizeAgentEventForStatus(event: AgentRunEvent): string {
+  if (event.type !== 'notification') {
+    return JSON.stringify(event).slice(0, 1000);
+  }
+  return JSON.stringify({
+    type: event.type,
+    method: event.method,
+    params: summarizeNotificationParams(event.params),
+  }).slice(0, 1000);
+}
+
+function summarizeNotificationParams(params: unknown): unknown {
+  if (!params || typeof params !== 'object') {
+    return summarizePrimitiveValue(params);
+  }
+  const record = params as { truncated?: unknown; bytes?: unknown };
+  if (record.truncated === true) {
+    return {
+      truncated: true,
+      bytes: typeof record.bytes === 'number' ? record.bytes : null,
+    };
+  }
+  return {
+    truncated: true,
+    shape: summarizeObjectShape(params),
+  };
+}
+
+function summarizePrimitiveValue(value: unknown): unknown {
+  if (typeof value !== 'string' || value.length <= 500) {
+    return value;
+  }
+  return { truncated: true, chars: value.length };
+}
+
+function summarizeObjectShape(value: object): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return { type: 'array', length: value.length };
+  }
+  const summary: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value).slice(0, 12)) {
+    if (typeof nested === 'string') {
+      summary[key] =
+        nested.length <= 120 ? nested : { type: 'string', chars: nested.length };
+    } else if (Array.isArray(nested)) {
+      summary[key] = { type: 'array', length: nested.length };
+    } else if (nested && typeof nested === 'object') {
+      summary[key] = { type: 'object', keys: Object.keys(nested).slice(0, 12) };
+    } else {
+      summary[key] = nested;
+    }
+  }
+  return summary;
 }
 
 function sleep(ms: number): Promise<void> {

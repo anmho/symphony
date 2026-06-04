@@ -35,6 +35,7 @@ export class AgentWorkEventStore {
   private readonly eventDir: string;
   private readonly stateDir: string;
   private readonly steeringPath: string;
+  private readonly historyByIdentifier = new Map<string, AgentWorkEvent[]>();
   private readonly buffers = new Map<string, AgentWorkEvent[]>();
   private readonly latestByIdentifier = new Map<string, number>();
   private readonly queuedSteering = new Map<string, QueuedSteer>();
@@ -67,6 +68,9 @@ export class AgentWorkEventStore {
     };
     this.nextCursor += 1;
     this.latestByIdentifier.set(event.identifier, event.cursor);
+    const history = this.historyByIdentifier.get(event.identifier) ?? [];
+    history.push(event);
+    this.historyByIdentifier.set(event.identifier, history);
 
     const buffer = this.buffers.get(event.identifier) ?? [];
     buffer.push(event);
@@ -125,19 +129,12 @@ export class AgentWorkEventStore {
 
   private readIssueEvents(issue: string): AgentWorkEvent[] {
     const buffered = this.buffers.get(issue);
-    const filePath = this.logPathForIssue(issue);
-    const persisted = existsSync(filePath)
-      ? parseJsonl(readFileSync(filePath, "utf8"))
-      : [];
+    const persisted = this.historyByIdentifier.get(issue) ?? [];
     return mergeEvents(persisted, buffered ?? []);
   }
 
   private readAllEvents(): AgentWorkEvent[] {
-    const persisted = existsSync(this.eventDir)
-      ? readdirSync(this.eventDir)
-          .filter((file) => file.endsWith(".jsonl"))
-          .flatMap((file) => parseJsonl(readFileSync(path.join(this.eventDir, file), "utf8")))
-      : [];
+    const persisted = [...this.historyByIdentifier.values()].flat();
     const buffered = [...this.buffers.values()].flat();
     return mergeEvents(persisted, buffered);
   }
@@ -151,9 +148,13 @@ export class AgentWorkEventStore {
       if (!file.endsWith(".jsonl")) {
         continue;
       }
-      for (const event of parseJsonl(readFileSync(path.join(this.eventDir, file), "utf8"))) {
+      const events = parseJsonl(readFileSync(path.join(this.eventDir, file), "utf8"));
+      for (const event of events) {
         maxCursor = Math.max(maxCursor, event.cursor);
         this.latestByIdentifier.set(event.identifier, Math.max(this.latestByIdentifier.get(event.identifier) ?? 0, event.cursor));
+        const history = this.historyByIdentifier.get(event.identifier) ?? [];
+        history.push(event);
+        this.historyByIdentifier.set(event.identifier, history);
       }
     }
     this.nextCursor = maxCursor + 1;
@@ -330,16 +331,18 @@ function redact(value: string): string {
 }
 
 function parseJsonl(value: string): AgentWorkEvent[] {
-  return value
-    .split("\n")
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as AgentWorkEvent];
-      } catch {
-        return [];
-      }
-    });
+  const events: AgentWorkEvent[] = [];
+  for (const line of value.split("\n")) {
+    if (!line) {
+      continue;
+    }
+    try {
+      events.push(JSON.parse(line) as AgentWorkEvent);
+    } catch {
+      // Ignore partial or corrupt JSONL rows; later rows remain usable.
+    }
+  }
+  return events;
 }
 
 function mergeEvents(...groups: AgentWorkEvent[][]): AgentWorkEvent[] {
