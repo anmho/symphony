@@ -1279,6 +1279,134 @@ describe('orchestrator', () => {
     ]);
   });
 
+  it('continues processing approved handoff PRs after one Linear move fails', async () => {
+    const first = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const second = makeIssue('ANM-392', {
+      id: 'issue-392',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/55'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async (_config, issueId) => {
+      if (issueId === first.id) {
+        throw new Error('linear_graphql_error: quota exceeded');
+      }
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [first, second],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async (url) => ({
+        url,
+        owner: 'anmho',
+        repo: 'symphony',
+        number: Number(url.split('/').at(-1)),
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async (url) => ({
+        url,
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      first.id,
+      'Eligible for Merging',
+    );
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      second.id,
+      'Eligible for Merging',
+    );
+    expect(deps.logger!.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ issue: first.identifier }),
+      'failed to refresh handoff issue',
+    );
+  });
+
+  it('moves approved handoff PRs even when the Linear status comment fails', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+      writeRunnerComment: async () => {
+        throw new Error('linear_graphql_error: quota exceeded');
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      issue.id,
+      'Eligible for Merging',
+    );
+    expect(deps.logger!.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ issue: issue.identifier }),
+      'failed to write runner comment',
+    );
+  });
+
   it('moves approved relevant PR-linked issues to the merge-eligible state outside the handoff query', async () => {
     const issue = makeIssue('ANM-391', {
       id: 'issue-391',
