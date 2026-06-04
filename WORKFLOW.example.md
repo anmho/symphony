@@ -45,8 +45,6 @@ cursor:
   model: auto
   turn_timeout_ms: 3600000
   read_timeout_ms: 0
-  turn_timeout_ms: 3600000
-  read_timeout_ms: 5000
   # api_key: $CURSOR_API_KEY   # optional; default auth is agent login
 
 codex:

@@ -82,12 +82,6 @@ codex:
   stall_timeout_ms: 300000
   model:
 
-cursor:
-  command: agent acp
-  model: auto
-  turn_timeout_ms: 3600000
-  read_timeout_ms: 0
-
 github:
   pr_identity:
     kind: github_app
