@@ -1344,8 +1344,12 @@ describe('orchestrator', () => {
       'Eligible for Merging',
     );
     expect(deps.logger!.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ issue: first.identifier }),
-      'failed to refresh handoff issue',
+      expect.objectContaining({
+        issue: first.identifier,
+        state: 'Eligible for Merging',
+        resumeAfterMs: 301000,
+      }),
+      'Linear quota blocked state move',
     );
   });
 
@@ -1404,6 +1408,177 @@ describe('orchestrator', () => {
     expect(deps.logger!.warn).toHaveBeenCalledWith(
       expect.objectContaining({ issue: issue.identifier }),
       'failed to write runner comment',
+    );
+  });
+
+  it('skips repeated Linear state moves during quota cooldown and retries after cooldown', async () => {
+    let now = 1000;
+    let shouldQuota = true;
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => {
+      if (shouldQuota) {
+        throw new Error('linear_graphql_error: quota exceeded');
+      }
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      now: () => now,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async (url) => ({
+        url,
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await orchestrator.tick();
+    expect(moved).toHaveBeenCalledTimes(1);
+    expect(deps.logger!.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue: issue.identifier,
+        state: 'Eligible for Merging',
+        reason: 'approved_pr_merge_eligible',
+      }),
+      'skipped repeated Linear state move during quota cooldown',
+    );
+
+    shouldQuota = false;
+    now += config.linear.quotaCooldownMs + 1;
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledTimes(2);
+  });
+
+  it('debounces duplicate Linear blocker comments across ticks', async () => {
+    const issue = makeIssue('ANM-379', {
+      id: 'issue-379',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/49'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+      },
+    });
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/49',
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 49,
+        unresolvedComments: [
+          {
+            author: 'anmho',
+            body: 'Please address this comment.',
+            path: 'src/index.ts',
+            line: 12,
+            url: 'https://github.com/anmho/symphony/pull/49#discussion_r1',
+            createdAt: '2026-05-26T08:00:00Z',
+          },
+        ],
+      }),
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await orchestrator.tick();
+
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toContain('Please address this comment.');
+  });
+
+  it('does not mutate the same PR-linked issue twice in one poll tick', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [issue],
+      fetchRelevantIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async (url) => ({
+        url,
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).toHaveBeenCalledTimes(1);
+    expect(moved).toHaveBeenCalledWith(
+      config,
+      issue.id,
+      'Eligible for Merging',
     );
   });
 
@@ -2641,6 +2816,11 @@ function makeConfig(
       mergeState: null,
     },
     polling: { intervalMs: 30000 },
+    linear: {
+      quotaCooldownMs: 300000,
+      noticeDebounceMs: 21600000,
+      optionalWritesDuringQuota: false,
+    },
     workspace: {
       root: '/tmp/workspaces',
       repoPath: '/tmp/repo',

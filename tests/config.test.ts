@@ -32,6 +32,11 @@ Hello {{ issue.identifier }}
     expect(config.codex.threadSandbox).toBe("workspace-write");
     expect(config.github.prIdentity).toBeNull();
     expect(config.pullRequest).toEqual({ backend: "github", graphiteFallback: "fail" });
+    expect(config.linear).toEqual({
+      quotaCooldownMs: 300000,
+      noticeDebounceMs: 21600000,
+      optionalWritesDuringQuota: false
+    });
     expect(config.digest).toMatchObject({
       enabled: false,
       recipient: "andyminhtuanho@gmail.com",
@@ -43,6 +48,28 @@ Hello {{ issue.identifier }}
     });
     expect(config.workspace.repoPath).toBe(path.resolve("/tmp/symphony"));
     expect(config.promptTemplate).toContain("Hello");
+  });
+
+  it("parses Linear quota protection settings", () => {
+    vi.stubEnv("LINEAR_API_KEY", "lin_test");
+    const definition = parseWorkflowMarkdown(`---
+tracker:
+  project_slug: project-one
+linear:
+  quota_cooldown_ms: 120000
+  notice_debounce_ms: 60000
+  optional_writes_during_quota: true
+---
+Prompt
+`);
+
+    const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
+
+    expect(config.linear).toEqual({
+      quotaCooldownMs: 120000,
+      noticeDebounceMs: 60000,
+      optionalWritesDuringQuota: true
+    });
   });
 
   it("parses agent.backend and cursor config", () => {

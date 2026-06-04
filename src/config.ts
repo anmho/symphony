@@ -56,6 +56,13 @@ const RawWorkflowConfigSchema = z
         interval_ms: z.number().int().positive().optional()
       })
       .optional(),
+    linear: z
+      .object({
+        quota_cooldown_ms: z.number().int().positive().optional(),
+        notice_debounce_ms: z.number().int().positive().optional(),
+        optional_writes_during_quota: z.boolean().optional()
+      })
+      .optional(),
     workspace: z
       .object({
         root: z.string().optional(),
@@ -249,6 +256,7 @@ export function resolveWorkflowConfig(
   const github = raw.github ?? {};
   const pullRequest = raw.pull_request ?? {};
   const digest = raw.digest ?? {};
+  const linear = raw.linear ?? {};
 
   const apiKey = resolveEnvValue(tracker.api_key ?? "$LINEAR_API_KEY", userConfig);
   const projectSlug = normalizeOptionalString(tracker.project_slug);
@@ -287,6 +295,11 @@ export function resolveWorkflowConfig(
     },
     polling: {
       intervalMs: raw.polling?.interval_ms ?? 30000
+    },
+    linear: {
+      quotaCooldownMs: linear.quota_cooldown_ms ?? 300000,
+      noticeDebounceMs: linear.notice_debounce_ms ?? 21600000,
+      optionalWritesDuringQuota: linear.optional_writes_during_quota ?? false
     },
     workspace: {
       root: resolvePath(workspace.root ?? "./symphony_workspaces", workflowDir, userConfig),

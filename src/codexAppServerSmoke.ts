@@ -205,6 +205,11 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       mergeState: null
     },
     polling: { intervalMs: 30000 },
+    linear: {
+      quotaCooldownMs: 300000,
+      noticeDebounceMs: 21600000,
+      optionalWritesDuringQuota: false
+    },
     workspace: {
       root: workspacePath,
       repoPath: workspacePath,

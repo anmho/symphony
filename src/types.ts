@@ -22,6 +22,7 @@ export interface NormalizedIssue {
   attachments: string[];
   attachmentDetails?: NormalizedIssueAttachment[];
   blockedBy: BlockerRef[];
+  teamId?: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -53,6 +54,12 @@ export interface TrackerConfig {
 
 export interface PollingConfig {
   intervalMs: number;
+}
+
+export interface LinearConfig {
+  quotaCooldownMs: number;
+  noticeDebounceMs: number;
+  optionalWritesDuringQuota: boolean;
 }
 
 export interface WorkspaceConfig {
@@ -157,6 +164,7 @@ export interface EffectiveWorkflowConfig {
   promptTemplate: string;
   tracker: TrackerConfig;
   polling: PollingConfig;
+  linear: LinearConfig;
   workspace: WorkspaceConfig;
   hooks: HooksConfig;
   agent: AgentConfig;
