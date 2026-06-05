@@ -58,6 +58,7 @@ workspace:
     bluebubbles-sdk: bluebubbles-sdk
     kalshi-cli: kalshi-cli
     revenuecat-cli: revenuecat-cli
+    linear-ticket-sidepanel: linear-ticket-sidepanel
 
 hooks:
   after_create:

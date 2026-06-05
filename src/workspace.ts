@@ -38,6 +38,23 @@ export async function ensureWorkspace(
       { timeoutMs: 120000 }
     );
     if (retry.exitCode !== 0) {
+      if (await pruneStaleExpectedWorktree(info.repoPath, branchName, workspacePath, retry.stderr)) {
+        const prunedRetry = await runCommand(
+          "git",
+          ["-C", info.repoPath, "worktree", "add", workspacePath, branchName],
+          { timeoutMs: 120000 }
+        );
+        if (prunedRetry.exitCode === 0) {
+          return {
+            path: workspacePath,
+            workspaceKey,
+            branchName,
+            repoKey: info.repoKey,
+            repoPath: info.repoPath,
+            createdNow: true
+          };
+        }
+      }
       throw new Error(`git_worktree_add_failed: ${retry.stderr || retry.stdout}`);
     }
   } else if (addResult.exitCode !== 0) {
@@ -102,4 +119,47 @@ async function exists(candidate: string): Promise<boolean> {
   return stat(candidate)
     .then(() => true)
     .catch(() => false);
+}
+
+async function pruneStaleExpectedWorktree(
+  repoPath: string,
+  branchName: string,
+  workspacePath: string,
+  stderr: string
+): Promise<boolean> {
+  const usedPath = worktreePathFromAlreadyUsedError(stderr);
+  if (!usedPath) {
+    return false;
+  }
+  if (path.resolve(usedPath) !== path.resolve(workspacePath)) {
+    return false;
+  }
+  if (await exists(workspacePath)) {
+    return false;
+  }
+  await runCommand("git", ["-C", repoPath, "worktree", "prune"], { timeoutMs: 120000 });
+  const list = await runCommand("git", ["-C", repoPath, "worktree", "list", "--porcelain"], {
+    timeoutMs: 120000
+  });
+  if (list.exitCode !== 0) {
+    return false;
+  }
+  return !list.stdout
+    .split(/\n(?=worktree )/)
+    .some((entry) => {
+      const lines = entry.split(/\r?\n/);
+      return (
+        lines.some((line) => line === `worktree ${workspacePath}`) &&
+        lines.some((line) => line === `branch refs/heads/${branchName}`)
+      );
+    });
+}
+
+function worktreePathFromAlreadyUsedError(stderr: string): string | null {
+  const alreadyUsed = stderr.match(/is already used by worktree at '([^']+)'/);
+  if (alreadyUsed?.[1]) {
+    return alreadyUsed[1];
+  }
+  const missingRegistered = stderr.match(/fatal: '([^']+)' is a missing but already registered worktree/);
+  return missingRegistered?.[1] ?? null;
 }
