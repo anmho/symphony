@@ -64,6 +64,7 @@ function minimalConfig(backend: 'codex' | 'cursor'): EffectiveWorkflowConfig {
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null,
+      reasoningEffort: null,
     },
     cursor: {
       command: 'agent acp',

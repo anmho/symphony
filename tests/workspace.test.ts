@@ -1,5 +1,9 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { workspaceInfoForIssue } from "../src/workspace.js";
+import { runCommand } from "../src/process.js";
+import { ensureWorkspace, workspaceInfoForIssue } from "../src/workspace.js";
 import type { EffectiveWorkflowConfig, NormalizedIssue } from "../src/types.js";
 
 describe("workspace routing", () => {
@@ -25,6 +29,47 @@ describe("workspace routing", () => {
       repoPath: "/Users/test/repos/symphony",
       createdNow: false
     });
+  });
+
+  it("prunes stale expected worktree registrations and recreates the workspace", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "symphony-workspace-"));
+    const repoPath = path.join(root, "repo");
+    const workspaceRoot = path.join(root, "workspaces");
+    const issue = makeIssue({ labels: ["symphony"] });
+    const config = {
+      workspace: {
+        root: workspaceRoot,
+        repoPath,
+        repoRoutes: {},
+        baseBranch: "main"
+      },
+      tracker: {
+        repoLabelPrefix: "repo:"
+      }
+    } as unknown as EffectiveWorkflowConfig;
+
+    await runCommand("git", ["init", "--initial-branch=main", repoPath]);
+    await writeFile(path.join(repoPath, "README.md"), "test\n");
+    await runCommand("git", ["-C", repoPath, "add", "README.md"]);
+    await runCommand("git", [
+      "-C",
+      repoPath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-m",
+      "initial"
+    ]);
+
+    const first = await ensureWorkspace(config, issue);
+    await rm(first.path, { recursive: true, force: true });
+
+    const recreated = await ensureWorkspace(config, issue);
+
+    expect(recreated.path).toBe(first.path);
+    expect(recreated.createdNow).toBe(true);
   });
 });
 

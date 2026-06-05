@@ -29,6 +29,8 @@ Hello {{ issue.identifier }}
     expect(config.tracker.teamKey).toBeNull();
     expect(config.agent.maxConcurrentAgents).toBe(5);
     expect(config.codex.command).toBe("codex app-server --listen stdio://");
+    expect(config.codex.model).toBe("gpt-5.5");
+    expect(config.codex.reasoningEffort).toBe("low");
     expect(config.codex.threadSandbox).toBe("workspace-write");
     expect(config.github.prIdentity).toBeNull();
     expect(config.pullRequest).toEqual({ backend: "github", graphiteFallback: "fail" });
@@ -156,6 +158,8 @@ Prompt
     const config = resolveWorkflowConfig("/tmp/symphony/WORKFLOW.md", definition);
 
     expect(config.agent.backend).toBe("codex");
+    expect(config.codex.model).toBe("gpt-5.5");
+    expect(config.codex.reasoningEffort).toBe("low");
     expect(config.cursor.apiKey).toBeNull();
     expect(config.cursor.model).toBeNull();
     expect(config.cursor.command).toBe("agent acp");

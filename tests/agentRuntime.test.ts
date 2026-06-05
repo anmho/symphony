@@ -67,6 +67,7 @@ function minimalConfig(): EffectiveWorkflowConfig {
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: 'gpt-5',
+      reasoningEffort: null,
     },
     github: { prIdentity: null },
     pullRequest: { backend: 'github', graphiteFallback: 'fail' },

@@ -56,6 +56,49 @@ describe("codex app-server RPC", () => {
     expect(result.status).toBe("completed");
     expect(result.turnId).toBe("turn-1");
   });
+
+  it("uses stall timeout instead of read timeout while waiting for turn events", async () => {
+    const { command, workspacePath } = await createFakeAppServer({ completionDelayMs: 50 });
+    const issue = makeIssue("ANM-126", "Allow quiet agent turns");
+
+    const result = await runAgentTurn(
+      makeInput({
+        command,
+        issue,
+        threadId: null,
+        workspacePath,
+        codexOverrides: { readTimeoutMs: 5, stallTimeoutMs: 500 }
+      })
+    );
+
+    expect(result.status).toBe("completed");
+  });
+
+  it("compacts oversized non-critical notifications before recording them", async () => {
+    const { command, workspacePath } = await createFakeAppServer({
+      largeNotificationBytes: 300_000,
+      largeNotificationMethod: "item/customHuge"
+    });
+    const issue = makeIssue("ANM-127", "Keep status responsive");
+    const events: Array<{ method?: string; params?: unknown }> = [];
+
+    const result = await runAgentTurn(
+      makeInput({ command, issue, threadId: null, workspacePath }),
+      {
+        onEvent: (event) => {
+          if (event.type === "notification") {
+            events.push({ method: event.method, params: event.params });
+          }
+        }
+      }
+    );
+
+    expect(result.status).toBe("completed");
+    expect(events).toContainEqual({
+      method: "item/customHuge",
+      params: { truncated: true, bytes: expect.any(Number) }
+    });
+  });
 });
 
 interface RecordedRequest {
@@ -64,7 +107,7 @@ interface RecordedRequest {
 }
 
 async function createFakeAppServer(
-  options: { completedTurnId?: string } = {}
+  options: { completedTurnId?: string; completionDelayMs?: number; largeNotificationBytes?: number; largeNotificationMethod?: string } = {}
 ): Promise<{ command: string; requestLogPath: string; workspacePath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "symphony-fake-app-server-"));
   const serverPath = path.join(dir, "server.mjs");
@@ -83,8 +126,11 @@ async function readRequests(requestLogPath: string): Promise<RecordedRequest[]> 
   return JSON.parse(await readFile(requestLogPath, "utf8")) as RecordedRequest[];
 }
 
-function fakeAppServerSource(options: { completedTurnId?: string }): string {
+function fakeAppServerSource(options: { completedTurnId?: string; completionDelayMs?: number; largeNotificationBytes?: number; largeNotificationMethod?: string }): string {
   const completedTurnId = JSON.stringify(options.completedTurnId ?? "turn-1");
+  const completionDelayMs = options.completionDelayMs ?? 5;
+  const largeNotificationBytes = options.largeNotificationBytes ?? 0;
+  const largeNotificationMethod = JSON.stringify(options.largeNotificationMethod ?? "turn/diff/updated");
   return `
 import { writeFileSync } from "node:fs";
 import readline from "node:readline";
@@ -141,11 +187,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "turn/start") {
     send({ jsonrpc: "2.0", id: message.id, result: { turn: { id: "turn-1", status: "running" } } });
+    if (${largeNotificationBytes} > 0) {
+      send({
+        jsonrpc: "2.0",
+        method: ${largeNotificationMethod},
+        params: { diff: "x".repeat(${largeNotificationBytes}) }
+      });
+    }
     setTimeout(() => send({
       jsonrpc: "2.0",
       method: "turn/completed",
       params: { threadId: message.params.threadId, turn: { id: ${completedTurnId}, status: "completed" } }
-    }), 5);
+    }), ${completionDelayMs});
     return;
   }
 
@@ -154,9 +207,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 }
 
-function makeInput(input: { command: string; issue: NormalizedIssue; threadId: string | null; workspacePath: string }): AgentRunInput {
+function makeInput(input: {
+  command: string;
+  issue: NormalizedIssue;
+  threadId: string | null;
+  workspacePath: string;
+  codexOverrides?: Partial<EffectiveWorkflowConfig["codex"]>;
+}): AgentRunInput {
   return {
-    config: makeConfig(input.command),
+    config: makeConfig(input.command, input.codexOverrides),
     issue: input.issue,
     workspacePath: input.workspacePath,
     prompt: "Do the work",
@@ -164,7 +223,7 @@ function makeInput(input: { command: string; issue: NormalizedIssue; threadId: s
   };
 }
 
-function makeConfig(command: string): EffectiveWorkflowConfig {
+function makeConfig(command: string, codexOverrides: Partial<EffectiveWorkflowConfig["codex"]> = {}): EffectiveWorkflowConfig {
   return {
     workflowPath: "/tmp/WORKFLOW.md",
     workflowDir: "/tmp",
@@ -225,7 +284,9 @@ function makeConfig(command: string): EffectiveWorkflowConfig {
       turnTimeoutMs: 3600000,
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
-      model: null
+      model: null,
+      reasoningEffort: null,
+      ...codexOverrides
     },
     github: {
       prIdentity: null

@@ -286,6 +286,48 @@ describe('orchestrator', () => {
     ]);
   });
 
+  it('moves external worktree branch conflicts to action-required handoff instead of retrying', async () => {
+    const issue = makeIssue('APP-1');
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      prepareWorkspace: async () => {
+        throw new Error(
+          "git_worktree_add_failed: fatal: 'symphony/APP-1' is already used by worktree at '/Users/andrewho/repos/projects/create-svc'\n",
+        );
+      },
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(comments[0]).toContain('already checked out in another worktree');
+    expect(comments[0]).toContain('/Users/andrewho/repos/projects/create-svc');
+    expect(orchestrator.snapshot().retryAttempts).toEqual([]);
+    expect(orchestrator.snapshot().handoffDetails).toMatchObject([
+      {
+        identifier: 'APP-1',
+        reviewKind: 'action_required',
+      },
+    ]);
+  });
+
   it('pauses new Codex launches while rate limited', async () => {
     const issue = makeIssue('APP-1');
     let now = 1000;
@@ -810,6 +852,47 @@ describe('orchestrator', () => {
         state: 'In Review',
         reviewKind: 'action_required',
         prUrl: null,
+      },
+    ]);
+  });
+
+  it('marks PR-linked handoff issues with Symphony blocker comments as action required', async () => {
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchHandoffIssues: async () => [
+        makeIssue('ANM-348', {
+          id: 'issue-348',
+          title: 'Blocked by external worktree',
+          state: 'In Review',
+          labels: ['symphony'],
+          comments: [
+            'GitHub PR opened: https://github.com/anmho/create-svc/pull/77',
+            'Symphony could not start this issue because its branch is already checked out in another worktree.',
+          ],
+        }),
+      ],
+      fetchCandidateIssues: async () => [],
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(orchestrator.snapshot().handoffDetails).toEqual([
+      {
+        identifier: 'ANM-348',
+        title: 'Blocked by external worktree',
+        repoKey: null,
+        state: 'In Review',
+        reviewKind: 'action_required',
+        prUrl: 'https://github.com/anmho/create-svc/pull/77',
       },
     ]);
   });
@@ -2006,6 +2089,46 @@ describe('orchestrator', () => {
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
 
+  it('holds merge-eligible PRs when readiness metadata is temporarily unavailable', async () => {
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'Eligible for Merging',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        activeStates: ['Todo', 'In Progress'],
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchMergeEligibleIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestMergeReadiness: async () => {
+        throw new Error('gh_timeout');
+      },
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+
+    expect(moved).not.toHaveBeenCalledWith(config, issue.id, 'In Progress');
+    expect(comments).toEqual([]);
+    expect(orchestrator.snapshot().handoff).toEqual(['ANM-391']);
+  });
+
   it('moves externally handed-off running issues into the handoff snapshot', async () => {
     const issue = makeIssue('APP-1');
     const config = makeConfig({
@@ -2163,6 +2286,51 @@ describe('orchestrator', () => {
     expect(moved).not.toHaveBeenCalledWith(config, issue.id, 'In Review');
     expect(comments[0]).toContain('PR author does not match');
     expect(comments[0]).toContain('Expected PR author: app/anmho-symphony');
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
+    expect(orchestrator.snapshot().handoff).toEqual([]);
+  });
+
+  it('holds PR-linked handoff when PR identity metadata is temporarily unavailable', async () => {
+    const issue = makeIssue('APP-1', {
+      attachments: ['GitHub PR https://github.com/anmho/symphony/pull/41'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+      },
+      github: {
+        prIdentity: githubAppPrIdentity(),
+      },
+    });
+    const moved = vi.fn(async () => undefined);
+    const comments: string[] = [];
+    const runAgentTurn = vi.fn(
+      async () => new Promise<AgentTurnResult>(() => undefined),
+    );
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      fetchCandidateIssues: async () => [issue],
+      fetchPullRequestMetadata: async () => {
+        throw new Error('gh_timeout');
+      },
+      moveIssueToState: moved,
+      writeRunnerComment: async (_config, _issueId, body) => {
+        comments.push(body);
+      },
+      runAgentTurn,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    await flushPromises();
+
+    expect(moved).not.toHaveBeenCalledWith(config, issue.id, 'In Review');
+    expect(
+      comments.some((comment) => comment.includes('metadata was unavailable')),
+    ).toBe(false);
     expect(runAgentTurn).toHaveBeenCalledTimes(1);
     expect(orchestrator.snapshot().handoff).toEqual([]);
   });
@@ -2859,6 +3027,7 @@ function makeConfig(
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null,
+      reasoningEffort: null,
     },
     github: {
       prIdentity: null,

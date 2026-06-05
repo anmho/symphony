@@ -29,6 +29,13 @@ interface PendingRequest {
   method: string;
 }
 
+const MAX_FULL_JSON_NOTIFICATION_BYTES = 256 * 1024;
+const CRITICAL_NOTIFICATION_METHODS = new Set([
+  'account/rateLimits/updated',
+  'error',
+  'turn/completed',
+]);
+
 export async function runAgentTurn(
   input: AgentRunInput,
   options: AgentRunOptions = {},
@@ -51,7 +58,7 @@ export async function runAgentTurn(
       threadId,
       turn.turnId,
       input.config.codex.turnTimeoutMs,
-      input.config.codex.readTimeoutMs,
+      input.config.codex.stallTimeoutMs,
     );
 
     return {
@@ -98,6 +105,7 @@ class CodexJsonRpcClient {
       this.stderrTail = `${this.stderrTail}${chunk.toString('utf8')}`.slice(-4000);
       this.onEvent?.({ type: 'stderr', bytes: chunk.length });
     });
+    child.stdin.on('error', (error: Error) => this.handleStdinError(error));
     options.signal?.addEventListener('abort', () => {
       void this.close();
     });
@@ -125,6 +133,7 @@ class CodexJsonRpcClient {
       cwd,
       env: env ?? process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
     });
     return new CodexJsonRpcClient(child, options);
   }
@@ -196,6 +205,7 @@ class CodexJsonRpcClient {
       input: [{ type: 'text', text: input.prompt, text_elements: [] }],
       approvalPolicy: input.config.codex.approvalPolicy,
       sandboxPolicy: input.config.codex.turnSandboxPolicy,
+      effort: input.config.codex.reasoningEffort,
       model: input.config.codex.model,
     })) as { turn?: { id?: string; status?: string } };
 
@@ -294,10 +304,23 @@ class CodexJsonRpcClient {
     if (this.closed) {
       return;
     }
-    this.child.kill('SIGTERM');
+    this.killProcessGroup('SIGTERM');
     await delay(250);
     if (!this.closed) {
-      this.child.kill('SIGKILL');
+      this.killProcessGroup('SIGKILL');
+    }
+  }
+
+  private killProcessGroup(signal: NodeJS.Signals): void {
+    const pid = this.child.pid;
+    if (!pid) {
+      this.child.kill(signal);
+      return;
+    }
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      this.child.kill(signal);
     }
   }
 
@@ -317,7 +340,7 @@ class CodexJsonRpcClient {
     const promise = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, method });
     });
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    this.safeWrite(`${JSON.stringify(message)}\n`);
     return promise;
   }
 
@@ -335,17 +358,28 @@ class CodexJsonRpcClient {
         continue;
       }
 
-      this.handleMessage(
-        JSON.parse(line) as JsonRpcResponse | JsonRpcNotification | JsonRpcRequest,
-      );
+      this.handleMessage(this.parseMessageLine(line));
     }
+  }
+
+  private parseMessageLine(
+    line: string,
+  ): JsonRpcResponse | JsonRpcNotification | JsonRpcRequest {
+    const byteLength = Buffer.byteLength(line, 'utf8');
+    if (byteLength > MAX_FULL_JSON_NOTIFICATION_BYTES) {
+      const compact = compactLargeNotificationLine(line, byteLength);
+      if (compact) {
+        return compact;
+      }
+    }
+    return JSON.parse(line) as JsonRpcResponse | JsonRpcNotification | JsonRpcRequest;
   }
 
   private handleMessage(
     message: JsonRpcResponse | JsonRpcNotification | JsonRpcRequest,
   ): void {
     if ('id' in message && 'method' in message) {
-      this.child.stdin.write(
+      this.safeWrite(
         `${JSON.stringify({
           jsonrpc: '2.0',
           id: message.id,
@@ -381,6 +415,55 @@ class CodexJsonRpcClient {
     });
     this.notifications.push(message);
   }
+
+  private safeWrite(payload: string): boolean {
+    if (this.closed || this.child.stdin.destroyed) {
+      return false;
+    }
+    try {
+      return this.child.stdin.write(payload);
+    } catch (error) {
+      this.handleStdinError(error instanceof Error ? error : new Error(String(error)));
+      return false;
+    }
+  }
+
+  private handleStdinError(error: Error): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    for (const [id, pending] of this.pending) {
+      this.pending.delete(id);
+      pending.reject(new Error(`codex_app_server_stdin_error: ${pending.method}: ${error.message}`));
+    }
+    this.killProcessGroup('SIGTERM');
+  }
+}
+
+function compactLargeNotificationLine(
+  line: string,
+  byteLength: number,
+): JsonRpcNotification | null {
+  if (/"id"\s*:/.test(line)) {
+    return null;
+  }
+  const method = jsonStringProperty(line, 'method');
+  if (!method || CRITICAL_NOTIFICATION_METHODS.has(method)) {
+    return null;
+  }
+  return {
+    method,
+    params: {
+      truncated: true,
+      bytes: byteLength,
+    },
+  };
+}
+
+function jsonStringProperty(line: string, property: string): string | null {
+  const match = line.match(new RegExp(`"${property}"\\s*:\\s*"([^"]+)"`));
+  return match?.[1] ?? null;
 }
 
 function extractRateLimitUntil(notification: JsonRpcNotification): number | null {

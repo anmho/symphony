@@ -58,6 +58,7 @@ workspace:
     bluebubbles-sdk: bluebubbles-sdk
     kalshi-cli: kalshi-cli
     revenuecat-cli: revenuecat-cli
+    linear-ticket-sidepanel: linear-ticket-sidepanel
 
 hooks:
   after_create:
@@ -80,7 +81,8 @@ codex:
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 300000
-  model:
+  model: gpt-5.5
+  reasoning_effort: low
 
 github:
   pr_identity:

@@ -106,6 +106,7 @@ export interface CodexConfig {
   readTimeoutMs: number;
   stallTimeoutMs: number;
   model: string | null;
+  reasoningEffort: string | null;
 }
 
 export type PullRequestBackend = 'github' | 'graphite';

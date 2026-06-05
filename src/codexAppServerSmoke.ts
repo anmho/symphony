@@ -247,7 +247,8 @@ function makeSmokeConfig(command: string, workspacePath: string): EffectiveWorkf
       turnTimeoutMs: 120000,
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
-      model: null
+      model: null,
+      reasoningEffort: null
     },
     github: {
       prIdentity: null
