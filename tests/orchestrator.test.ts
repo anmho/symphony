@@ -3027,6 +3027,7 @@ function makeConfig(
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null,
+      reasoningEffort: null,
     },
     github: {
       prIdentity: null,

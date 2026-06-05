@@ -12,6 +12,8 @@ const DEFAULT_DIGEST_RECIPIENT = "andyminhtuanho@gmail.com";
 const DEFAULT_DIGEST_SENDER = "Symphony <agent@anmho.com>";
 const DEFAULT_DIGEST_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_RESEND_ENDPOINT = "https://api.resend.com/emails";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_REASONING_EFFORT = "low";
 
 export interface SymphonyUserConfig {
   workflow: string | null;
@@ -109,7 +111,8 @@ const RawWorkflowConfigSchema = z
         turn_timeout_ms: z.number().int().positive().optional(),
         read_timeout_ms: z.number().int().nonnegative().optional(),
         stall_timeout_ms: z.number().int().optional(),
-        model: z.string().nullable().optional()
+        model: z.string().nullable().optional(),
+        reasoning_effort: z.string().nullable().optional()
       })
       .optional(),
     github: z
@@ -331,7 +334,8 @@ export function resolveWorkflowConfig(
       turnTimeoutMs: codex.turn_timeout_ms ?? 3600000,
       readTimeoutMs: codex.read_timeout_ms ?? 5000,
       stallTimeoutMs: codex.stall_timeout_ms ?? 300000,
-      model: codex.model ?? null
+      model: codex.model ?? DEFAULT_CODEX_MODEL,
+      reasoningEffort: codex.reasoning_effort ?? DEFAULT_CODEX_REASONING_EFFORT
     },
     cursor: {
       command: cursor.command ?? "agent acp",

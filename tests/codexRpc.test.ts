@@ -285,6 +285,7 @@ function makeConfig(command: string, codexOverrides: Partial<EffectiveWorkflowCo
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
       model: null,
+      reasoningEffort: null,
       ...codexOverrides
     },
     github: {

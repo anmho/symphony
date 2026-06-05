@@ -205,6 +205,7 @@ class CodexJsonRpcClient {
       input: [{ type: 'text', text: input.prompt, text_elements: [] }],
       approvalPolicy: input.config.codex.approvalPolicy,
       sandboxPolicy: input.config.codex.turnSandboxPolicy,
+      effort: input.config.codex.reasoningEffort,
       model: input.config.codex.model,
     })) as { turn?: { id?: string; status?: string } };
 

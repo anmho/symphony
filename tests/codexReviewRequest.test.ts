@@ -173,7 +173,8 @@ function makeConfig(options: { identity?: boolean } = {}): EffectiveWorkflowConf
       turnTimeoutMs: 3600000,
       readTimeoutMs: 5000,
       stallTimeoutMs: 300000,
-      model: null
+      model: null,
+      reasoningEffort: null
     },
     github: {
       prIdentity: options.identity
