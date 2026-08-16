@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AgentWorkEventStore } from '../src/events.js';
 import type { DigestState, DigestStateStore } from '../src/digest.js';
+import { LinearRateLimitError } from '../src/linear.js';
 import {
   Orchestrator,
   type OrchestratorDependencies,
@@ -1560,6 +1561,88 @@ describe('orchestrator', () => {
     await orchestrator.tick();
 
     expect(moved).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses Linear rate-limit reset headers for quota cooldown', async () => {
+    let now = 1000;
+    const resetAtMs = 125000;
+    const issue = makeIssue('ANM-391', {
+      id: 'issue-391',
+      state: 'In Review',
+      labels: ['symphony', 'repo:symphony'],
+      comments: ['GitHub PR opened: https://github.com/anmho/symphony/pull/54'],
+    });
+    const config = makeConfig({
+      tracker: {
+        handoffState: 'In Review',
+        mergeState: 'Eligible for Merging',
+      },
+    });
+    const moved = vi.fn(async () => {
+      throw new LinearRateLimitError('linear_graphql_error: Rate limit exceeded', {
+        requestLimit: 2500,
+        requestRemaining: 0,
+        requestResetAtMs: resetAtMs,
+        endpointLimit: null,
+        endpointRemaining: null,
+        endpointResetAtMs: null,
+        endpointName: null,
+        complexity: null,
+        complexityLimit: null,
+        complexityRemaining: null,
+        complexityResetAtMs: null,
+        resetAtMs,
+      });
+    });
+    const deps = makeDeps({
+      loadWorkflowConfig: async () => config,
+      now: () => now,
+      fetchHandoffIssues: async () => [issue],
+      fetchCandidateIssues: async () => [],
+      fetchPullRequestReviewFeedback: async (url) => ({
+        url,
+        owner: 'anmho',
+        repo: 'symphony',
+        number: 54,
+        unresolvedComments: [],
+      }),
+      fetchPullRequestMergeReadiness: async () => ({
+        url: 'https://github.com/anmho/symphony/pull/54',
+        state: 'open',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        latestReviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        mergeable: 'MERGEABLE',
+        headRefOid: 'sha',
+      }),
+      moveIssueToState: moved,
+    });
+    const orchestrator = new Orchestrator(
+      { workflowPath: '/tmp/WORKFLOW.md' },
+      deps,
+    );
+
+    await orchestrator.tick();
+    now = resetAtMs - 1;
+    await orchestrator.tick();
+    expect(moved).toHaveBeenCalledTimes(1);
+
+    now = resetAtMs;
+    await orchestrator.tick();
+    expect(moved).toHaveBeenCalledTimes(2);
+    expect(deps.logger!.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'state_move',
+        rateLimit: expect.objectContaining({
+          requestLimit: 2500,
+          requestRemaining: 0,
+          resetAtMs,
+        }),
+        resumeAfterMs: resetAtMs,
+      }),
+      'Linear quota cooldown active',
+    );
   });
 
   it('debounces duplicate Linear blocker comments across ticks', async () => {
